@@ -249,6 +249,49 @@ func TestListDiscussions(t *testing.T) {
 	}
 }
 
+func TestNeedsRebase(t *testing.T) {
+	cases := []struct {
+		name string
+		mr   MRDetail
+		want bool
+	}{
+		{"clean", MRDetail{}, false},
+		{"diverged", MRDetail{DivergedCommits: 2}, true},
+		{"conflicts", MRDetail{HasConflicts: true}, true},
+		{"status only", MRDetail{DetailedMergeStatus: "need_rebase"}, true},
+		{"mergeable status", MRDetail{DetailedMergeStatus: "mergeable"}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.mr.NeedsRebase(); got != tc.want {
+				t.Errorf("NeedsRebase() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetMergeRequestPopulatesRebaseStatus(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/merge_requests/11", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("include_diverged_commits_count"); got != "true" {
+			t.Errorf("include_diverged_commits_count = %q, want true", got)
+		}
+		writeJSON(t, w, map[string]any{
+			"iid": 11, "project_id": 7, "title": "T", "state": "opened",
+			"source_branch": "f", "target_branch": "main", "sha": "abc",
+			"diverged_commits_count": 4, "detailed_merge_status": "need_rebase",
+		})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	detail, err := c.GetMergeRequest(context.Background(), "group/app", 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.DivergedCommits != 4 || detail.DetailedMergeStatus != "need_rebase" || !detail.NeedsRebase() {
+		t.Errorf("rebase status not populated: %+v", detail)
+	}
+}
+
 func TestErrorsCarryContext(t *testing.T) {
 	mux := http.NewServeMux() // 404 for everything
 	c := newTestClient(t, []string{"group/app"}, nil, mux)
