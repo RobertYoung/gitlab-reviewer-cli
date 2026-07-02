@@ -141,7 +141,8 @@ type Result struct {
 	// FilePath is the settings file that was read, "" if none existed.
 	FilePath string
 
-	k *koanf.Koanf
+	k      *koanf.Koanf
+	lookup func(string) (string, bool)
 }
 
 // Load builds the effective configuration: defaults → file → env → flags.
@@ -182,11 +183,27 @@ func Load(opts Options) (*Result, error) {
 		}
 	}
 
-	res := &Result{FilePath: filePath, k: k}
+	res := &Result{FilePath: filePath, k: k, lookup: lookup}
 	if err := k.Unmarshal("", &res.Config); err != nil {
 		return nil, fmt.Errorf("parsing configuration: %w", err)
 	}
+	resolveInstanceTokens(&res.Config, lookup)
 	return res, nil
+}
+
+// resolveInstanceTokens fills each instance's Token from the environment
+// variable named by its token_env. An explicit token wins; a variable that
+// is unset or empty leaves Token empty, which WithInstance reports if that
+// instance is selected.
+func resolveInstanceTokens(cfg *Config, lookup func(string) (string, bool)) {
+	for i, inst := range cfg.GitLab.Instances {
+		if inst.Token != "" || inst.TokenEnv == "" {
+			continue
+		}
+		if val, ok := lookup(inst.TokenEnv); ok && val != "" {
+			cfg.GitLab.Instances[i].Token = val
+		}
+	}
 }
 
 func envLayer(lookup func(string) (string, bool)) map[string]any {
@@ -278,6 +295,7 @@ func (r *Result) ForProject(projectPath string) (Config, error) {
 	if err := merged.Unmarshal("", &cfg); err != nil {
 		return r.Config, fmt.Errorf("parsing overrides for %s: %w", projectPath, err)
 	}
+	resolveInstanceTokens(&cfg, r.lookup)
 	return cfg, nil
 }
 
