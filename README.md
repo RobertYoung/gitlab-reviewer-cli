@@ -116,6 +116,7 @@ redacted) and `gitlab-reviewer config validate` to check it.
 | `review.max_diff_kb` | `GITLAB_REVIEWER_REVIEW_MAX_DIFF_KB` | `--max-diff-kb` | `256` |
 | `review.exclude` | `GITLAB_REVIEWER_REVIEW_EXCLUDE` (comma-separated globs) | `--exclude` (repeatable) | lockfiles, `vendor/**`, generated/minified files |
 | `review.bare` | `GITLAB_REVIEWER_REVIEW_BARE` | `--bare` | `false` |
+| `review.use_agents` | `GITLAB_REVIEWER_REVIEW_USE_AGENTS` | `--use-agents` | `false` |
 | `review.env` | — (file only, map) | `--review-env KEY=VALUE` (repeatable) | `{}` |
 
 `review.instructions` (and/or the contents of `review.instructions_file`)
@@ -124,6 +125,25 @@ are appended to the built-in review prompt — use them for team conventions
 `review.bare` runs claude with `--bare` for fully deterministic runs (no
 user hooks or CLAUDE.md), but `--bare` skips OAuth/keychain auth — leave it
 off if you authenticate with a Claude subscription rather than an API key.
+
+`review.use_agents` lets the reviewer delegate to your Claude Code
+subagents — the project's `.claude/agents/*.md` (which the [local
+overlay](#local-convention-files-uncommitted-claudemd-claude) carries into
+the review worktree even when uncommitted) plus your user-level agents. Use
+it when you keep standard agents for specific tools and frameworks
+(Terraform, Ansible, your CI conventions) and want reviews to lean on their
+expertise. The review stays read-only either way: mutating and network
+tools are denied as session-wide permission rules that subagents inherit.
+Agents multiply token usage, so pairing this with `review.max_budget_usd`
+is a good idea. Per-project enablement works like any other override:
+
+```yaml
+projects:
+  mygroup/infra:
+    review:
+      use_agents: true
+      max_budget_usd: 5
+```
 
 ### Bedrock
 

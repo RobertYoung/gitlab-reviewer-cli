@@ -34,18 +34,22 @@ type GitLab struct {
 }
 
 type Review struct {
-	Provider         string            `koanf:"provider"` // anthropic | bedrock
-	Model            string            `koanf:"model"`
-	ClaudePath       string            `koanf:"claude_path"`
-	Timeout          time.Duration     `koanf:"timeout"`
-	MaxBudgetUSD     float64           `koanf:"max_budget_usd"`
-	Categories       []string          `koanf:"categories"`
-	Instructions     string            `koanf:"instructions"`
-	InstructionsFile string            `koanf:"instructions_file"`
-	MaxDiffKB        int               `koanf:"max_diff_kb"`
-	Exclude          []string          `koanf:"exclude"`
-	Bare             bool              `koanf:"bare"`
-	Env              map[string]string `koanf:"env"`
+	Provider         string        `koanf:"provider"` // anthropic | bedrock
+	Model            string        `koanf:"model"`
+	ClaudePath       string        `koanf:"claude_path"`
+	Timeout          time.Duration `koanf:"timeout"`
+	MaxBudgetUSD     float64       `koanf:"max_budget_usd"`
+	Categories       []string      `koanf:"categories"`
+	Instructions     string        `koanf:"instructions"`
+	InstructionsFile string        `koanf:"instructions_file"`
+	MaxDiffKB        int           `koanf:"max_diff_kb"`
+	Exclude          []string      `koanf:"exclude"`
+	Bare             bool          `koanf:"bare"`
+	// UseAgents lets the reviewer delegate to Claude Code subagents
+	// (project .claude/agents plus user-level ones). Write/exec tools
+	// stay denied for the whole session, subagents included.
+	UseAgents bool              `koanf:"use_agents"`
+	Env       map[string]string `koanf:"env"`
 }
 
 type Bedrock struct {

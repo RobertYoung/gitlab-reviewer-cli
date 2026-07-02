@@ -272,3 +272,49 @@ func TestReviewTimeout(t *testing.T) {
 func bedrockCfg(region, profile string) config.Bedrock {
 	return config.Bedrock{Region: region, Profile: profile}
 }
+
+func TestBuildArgsToolPolicy(t *testing.T) {
+	req := review.Request{MaxBudgetUSD: 2.5}
+
+	find := func(args []string, flag string) string {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+
+	t.Run("default is read-only without agents", func(t *testing.T) {
+		args := (&Backend{Model: "m"}).buildArgs(req)
+		if got := find(args, "--tools"); got != "Read,Grep,Glob" {
+			t.Errorf("tools = %q", got)
+		}
+		disallowed := find(args, "--disallowedTools")
+		for _, want := range []string{"Bash", "Edit", "Write", "Task"} {
+			if !strings.Contains(disallowed, want) {
+				t.Errorf("disallowed missing %s: %q", want, disallowed)
+			}
+		}
+		if got := find(args, "--max-budget-usd"); got != "2.5" {
+			t.Errorf("budget = %q", got)
+		}
+	})
+
+	t.Run("use_agents grants Task but stays read-only", func(t *testing.T) {
+		args := (&Backend{UseAgents: true}).buildArgs(req)
+		if got := find(args, "--tools"); got != "Read,Grep,Glob,Task" {
+			t.Errorf("tools = %q", got)
+		}
+		disallowed := find(args, "--disallowedTools")
+		if strings.Contains(disallowed, "Task") {
+			t.Errorf("Task must not be denied when agents are enabled: %q", disallowed)
+		}
+		// mutating/exec tools stay denied so subagents are read-only too
+		for _, want := range []string{"Bash", "Edit", "Write", "WebFetch"} {
+			if !strings.Contains(disallowed, want) {
+				t.Errorf("disallowed missing %s: %q", want, disallowed)
+			}
+		}
+	})
+}

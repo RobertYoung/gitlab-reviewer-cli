@@ -35,8 +35,11 @@ type Backend struct {
 	Provider   string // anthropic | bedrock
 	Model      string
 	Bare       bool
-	Bedrock    config.Bedrock
-	ExtraEnv   map[string]string
+	// UseAgents grants the Task tool so the reviewer can delegate to
+	// Claude Code subagents; write/exec tools stay denied throughout.
+	UseAgents bool
+	Bedrock   config.Bedrock
+	ExtraEnv  map[string]string
 	// DumpDir receives raw stream transcripts for debugging; empty disables.
 	DumpDir string
 	// LookupEnv defaults to os.LookupEnv; injectable for tests.
@@ -50,6 +53,7 @@ func New(cfg config.Config, dumpDir string) *Backend {
 		Provider:   cfg.Review.Provider,
 		Model:      cfg.Review.Model,
 		Bare:       cfg.Review.Bare,
+		UseAgents:  cfg.Review.UseAgents,
 		Bedrock:    cfg.Bedrock,
 		ExtraEnv:   cfg.Review.Env,
 		DumpDir:    dumpDir,
@@ -94,28 +98,7 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 		defer cancel()
 	}
 
-	args := []string{
-		"-p",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--json-schema", review.OutputSchema,
-		"--tools", "Read,Grep,Glob",
-		"--permission-mode", "dontAsk",
-		"--disallowedTools", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Agent",
-		"--strict-mcp-config",
-		"--append-system-prompt", review.SystemPrompt,
-	}
-	if b.Model != "" {
-		args = append(args, "--model", b.Model)
-	}
-	if req.MaxBudgetUSD > 0 {
-		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.MaxBudgetUSD, 'f', -1, 64))
-	}
-	if b.Bare {
-		args = append(args, "--bare")
-	}
-
-	cmd := exec.CommandContext(ctx, b.ClaudePath, args...) //nolint:gosec // running the user-configured claude binary is the point
+	cmd := exec.CommandContext(ctx, b.ClaudePath, b.buildArgs(req)...) //nolint:gosec // running the user-configured claude binary is the point
 	cmd.Dir = req.RepoPath
 	cmd.Env = b.subprocessEnv()
 	cmd.Stdin = strings.NewReader(review.BuildUserPrompt(req))
@@ -169,6 +152,39 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%d file(s) were not sent to the reviewer (excluded or over the diff budget)", len(req.Truncated)))
 	}
 	return res, nil
+}
+
+// buildArgs assembles the headless invocation. The review session is
+// always read-only: mutating and network tools are denied as permission
+// rules, which cascade into subagents when UseAgents grants the Task tool.
+func (b *Backend) buildArgs(req review.Request) []string {
+	tools := "Read,Grep,Glob"
+	disallowed := "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Agent"
+	if b.UseAgents {
+		tools = "Read,Grep,Glob,Task"
+		disallowed = "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
+	}
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--json-schema", review.OutputSchema,
+		"--tools", tools,
+		"--permission-mode", "dontAsk",
+		"--disallowedTools", disallowed,
+		"--strict-mcp-config",
+		"--append-system-prompt", review.SystemPrompt,
+	}
+	if b.Model != "" {
+		args = append(args, "--model", b.Model)
+	}
+	if req.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.MaxBudgetUSD, 'f', -1, 64))
+	}
+	if b.Bare {
+		args = append(args, "--bare")
+	}
+	return args
 }
 
 // parseFinal extracts findings from the result event, degrading gracefully:
@@ -277,14 +293,16 @@ func (b *Backend) consumeStream(r io.Reader, onEvent func(review.Event)) (*strea
 // toolTarget pulls the most useful argument out of a tool call for display.
 func toolTarget(input json.RawMessage) string {
 	var args struct {
-		FilePath string `json:"file_path"`
-		Path     string `json:"path"`
-		Pattern  string `json:"pattern"`
+		FilePath     string `json:"file_path"`
+		Path         string `json:"path"`
+		Pattern      string `json:"pattern"`
+		SubagentType string `json:"subagent_type"`
+		Description  string `json:"description"`
 	}
 	if err := json.Unmarshal(input, &args); err != nil {
 		return ""
 	}
-	return firstNonEmpty(args.FilePath, args.Pattern, args.Path)
+	return firstNonEmpty(args.FilePath, args.Pattern, args.Path, args.SubagentType, args.Description)
 }
 
 // subprocessEnv builds a minimal environment: shell basics, proxy settings,

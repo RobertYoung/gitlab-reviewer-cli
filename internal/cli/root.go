@@ -137,6 +137,7 @@ func addSettingFlags(root *cobra.Command) {
 	f.Int("max-diff-kb", 0, "diff budget sent to Claude, in KiB")
 	f.StringArray("exclude", nil, "glob of files to exclude from review, repeatable")
 	f.Bool("bare", false, "run claude with --bare (skips user hooks/CLAUDE.md; breaks OAuth auth)")
+	f.Bool("use-agents", false, "let the reviewer delegate to Claude Code subagents (.claude/agents)")
 	f.StringArray("review-env", nil, "extra KEY=VALUE env for the claude subprocess, repeatable")
 
 	f.String("aws-region", "", "AWS region for Bedrock")
