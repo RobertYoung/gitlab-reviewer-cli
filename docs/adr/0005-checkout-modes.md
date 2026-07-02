@@ -31,6 +31,17 @@ an inline git credential helper that reads it from an environment variable
 scoped to the git subprocess — the token never lands in `.git/config`,
 remotes, or process arguments — or SSH using the user's own agent and keys.
 
+**Local convention overlay.** Teams sometimes keep Claude convention files
+(`CLAUDE.md`, `.claude/` agents and skills) locally via `.git/info/exclude`
+before committing them, which a clean worktree would hide from the
+reviewer. In `path`/`root` modes, untracked files in the source clone
+matching `checkout.local_overlay` globs are copied into the worktree after
+creation. Guardrails: the default globs cover only the files Claude Code
+itself reads (so an excluded `.env` is never swept in), paths tracked at
+the MR head are never overridden (the review must see committed state),
+symlinks are skipped, and writes are containment-checked against the
+worktree root.
+
 ## Consequences
 
 - Mode-independent review code: everything downstream sees "a path at the
