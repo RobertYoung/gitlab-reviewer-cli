@@ -76,7 +76,7 @@ type LineRef struct {
 // Finding is one suggested review comment.
 type Finding struct {
 	ID         string
-	File       string // new path, repo-relative
+	File       string // new path, repo-relative; empty on MR-level manual comments
 	OldFile    string // as reported by the model for renames; advisory only
 	Line       LineRef
 	Severity   Severity
@@ -85,6 +85,10 @@ type Finding struct {
 	Body       string // markdown, user-editable
 	Suggestion string // optional replacement for the flagged line
 	State      FindingState
+	// Manual marks a comment written by the reviewer in the TUI rather than
+	// produced by the model: it publishes verbatim, without the body
+	// template or the attribution footer.
+	Manual bool
 }
 
 // Request is everything a backend needs to run one review.

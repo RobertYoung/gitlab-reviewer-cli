@@ -159,6 +159,16 @@ func (s *publish) publishOne(ctx context.Context, f review.Finding) (review.Find
 		return s.deps.Svc.CreateNote(ctx, project, s.detail.IID, body)
 	}
 
+	// A finding with no file is a deliberate MR-level comment (manual
+	// comments composed in the TUI): post it as a general note, not as a
+	// failed position resolution.
+	if f.File == "" {
+		if err := post(body, nil); err != nil {
+			return review.StatePending, err
+		}
+		return review.StatePublished, nil
+	}
+
 	pos, resolveErr := position.Resolve(f.File, f.Line.OldLine, f.Line.NewLine, s.index, s.detail.DiffRefs)
 	if resolveErr == nil {
 		if err := post(body, pos); err == nil {
@@ -226,7 +236,7 @@ func (s *publish) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.items[msg.index].State = msg.state
 		s.current = msg.index + 1
 		if msg.err != nil {
-			s.errs = append(s.errs, fmt.Sprintf("%s: %v", s.items[msg.index].Title, msg.err))
+			s.errs = append(s.errs, fmt.Sprintf("%s: %v", manualTitle(s.items[msg.index]), msg.err))
 		}
 		if s.opts.report != nil {
 			s.opts.report(s.items[msg.index].ID, msg.state)
@@ -337,16 +347,18 @@ func (s *publish) View() string {
 	default: // done
 		fmt.Fprintf(&b, "%s\n\n", headerStyle.Render("publish complete"))
 		s.renderItems(&b)
-		published, fellBack := 0, 0
+		inline, notes := 0, 0
 		for _, f := range s.items {
-			switch f.State {
-			case review.StatePublished:
-				published++
-			case review.StateFellBack:
-				fellBack++
+			switch {
+			case f.State == review.StatePublished && f.File == "":
+				notes++ // deliberate MR-level comment
+			case f.State == review.StatePublished:
+				inline++
+			case f.State == review.StateFellBack:
+				notes++
 			}
 		}
-		fmt.Fprintf(&b, "\n%d inline · %d as notes · %d failed\n", published, fellBack, len(s.errs))
+		fmt.Fprintf(&b, "\n%d inline · %d as notes · %d failed\n", inline, notes, len(s.errs))
 		if s.keptAsDrafts {
 			b.WriteString(draftStyle.Render("left as a pending review — publish it from the GitLab UI") + "\n")
 		}
@@ -363,9 +375,12 @@ func (s *publish) renderItems(b *strings.Builder) {
 		var badge string
 		switch f.State {
 		case review.StatePublished:
-			if s.mode == "draft" && s.phase != phaseDone {
+			switch {
+			case s.mode == "draft" && s.phase != phaseDone:
 				badge = draftStyle.Render("✓ drafted")
-			} else {
+			case f.File == "":
+				badge = addedStyle.Render("✓ note")
+			default:
 				badge = addedStyle.Render("✓ inline")
 			}
 		case review.StateFellBack:
@@ -375,7 +390,7 @@ func (s *publish) renderItems(b *strings.Builder) {
 		default:
 			badge = errorStyle.Render("✗ failed")
 		}
-		line := fmt.Sprintf("  %s  %s", badge, truncate(fmt.Sprintf("%s — %s", f.File, f.Title), max(s.width-32, 20)))
+		line := fmt.Sprintf("  %s  %s", badge, truncate(fmt.Sprintf("%s — %s", findingLocation(f), manualTitle(f)), max(s.width-32, 20)))
 		b.WriteString(line + "\n")
 	}
 }
