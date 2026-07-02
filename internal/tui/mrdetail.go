@@ -49,6 +49,15 @@ type mrDetail struct {
 	hunkLines []int
 	width     int
 	height    int
+
+	// rendered caches chroma-highlighted diffs per file; re-rendering on
+	// every n/p toggle would be wasteful on large files.
+	rendered map[int]renderedDiff
+}
+
+type renderedDiff struct {
+	content string
+	hunks   []int
 }
 
 func newMRDetail(deps Deps, mr gitlabx.MRSummary) *mrDetail {
@@ -106,7 +115,14 @@ func (s *mrDetail) Init() tea.Cmd {
 func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		widthChanged := msg.Width != s.width
 		s.width, s.height = msg.Width, msg.Height
+		if widthChanged {
+			s.invalidateRender()
+			if len(s.diffs) > 0 {
+				s.setFile(s.fileIdx)
+			}
+		}
 		s.layout()
 		return s, nil
 
@@ -138,6 +154,7 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.discussions = msg.discussions
+		s.invalidateRender()
 		if len(s.diffs) > 0 {
 			s.setFile(s.fileIdx) // re-render with threads anchored
 		}
@@ -195,14 +212,29 @@ func (s *mrDetail) setFile(idx int) {
 	keepOffset := idx == s.fileIdx
 	offset := s.vp.YOffset()
 	s.fileIdx = (idx + len(s.diffs)) % len(s.diffs)
-	content, hunks := renderDiff(s.diffs[s.fileIdx], s.discussions, max(s.width, 60))
-	s.hunkLines = hunks
-	s.vp.SetContent(content)
+
+	if s.rendered == nil {
+		s.rendered = map[int]renderedDiff{}
+	}
+	r, ok := s.rendered[s.fileIdx]
+	if !ok {
+		content, hunks := renderDiff(s.diffs[s.fileIdx], s.discussions, max(s.width, 60))
+		r = renderedDiff{content: content, hunks: hunks}
+		s.rendered[s.fileIdx] = r
+	}
+	s.hunkLines = r.hunks
+	s.vp.SetContent(r.content)
 	if keepOffset {
 		s.vp.SetYOffset(offset)
 	} else {
 		s.vp.GotoTop()
 	}
+}
+
+// invalidateRender drops cached renders after inputs change (new
+// discussions, resize affecting thread wrapping).
+func (s *mrDetail) invalidateRender() {
+	s.rendered = nil
 }
 
 func (s *mrDetail) jumpHunk(dir int) {

@@ -72,6 +72,15 @@ func newRoot(st *state) *cobra.Command {
 			if err != nil {
 				return st.redactor.RedactError(err)
 			}
+			// Enforce the clone-cache budget in the background; the TUI
+			// must not wait on a filesystem walk.
+			go func() {
+				if res, err := manager.EvictIfNeeded(context.Background()); err != nil {
+					slog.Warn("cache eviction failed", "error", err)
+				} else if len(res.Removed) > 0 {
+					slog.Info("evicted cached clones", "count", len(res.Removed), "freed_bytes", res.FreedBytes)
+				}
+			}()
 
 			deps := tui.Deps{
 				Cfg:      cfg,
@@ -102,7 +111,7 @@ func newRoot(st *state) *cobra.Command {
 	root.PersistentFlags().StringVar(&st.configFile, "config", "", "path to settings file (default "+config.DefaultFile()+")")
 	addSettingFlags(root)
 
-	root.AddCommand(newVersionCmd(), newConfigCmd(st))
+	root.AddCommand(newVersionCmd(), newConfigCmd(st), newCacheCmd(st))
 	return root
 }
 

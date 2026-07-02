@@ -2,7 +2,6 @@ package review
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
@@ -90,49 +89,65 @@ func BuildUserPrompt(req Request) string {
 	return b.String()
 }
 
-// BoundDiffs filters and budgets the diffs sent to the model: excluded and
-// generated files are dropped, then files are admitted smallest-first until
-// maxKB is spent. Returns the admitted diffs (original order) and the paths
-// left out.
-func BoundDiffs(diffs []gitlabx.FileDiff, exclude []string, maxKB int) (kept []gitlabx.FileDiff, truncated []string) {
+// ChunkDiffs filters the diffs sent to the model and splits them into
+// review passes: excluded and generated files are dropped entirely, and the
+// rest is packed (in original order) into chunks of at most maxKB each so
+// oversized MRs become several passes instead of a truncated one. Files
+// individually larger than the whole budget are skipped.
+func ChunkDiffs(diffs []gitlabx.FileDiff, exclude []string, maxKB int) (chunks [][]gitlabx.FileDiff, skipped []string) {
 	budget := maxKB * 1024
 
-	type cand struct {
-		idx  int
-		size int
-	}
-	var candidates []cand
-	for i, d := range diffs {
-		if d.GeneratedFile || d.TooLarge || excluded(d.NewPath, exclude) {
-			truncated = append(truncated, d.NewPath)
-			continue
-		}
-		candidates = append(candidates, cand{idx: i, size: len(d.Diff)})
-	}
-
-	// Admit smallest-first so one huge file cannot starve the rest.
-	admitted := make(map[int]bool)
-	slices.SortStableFunc(candidates, func(a, b cand) int { return a.size - b.size })
+	var current []gitlabx.FileDiff
 	spent := 0
-	for _, c := range candidates {
-		if spent+c.size > budget && spent > 0 {
-			truncated = append(truncated, diffs[c.idx].NewPath)
-			continue
+	flush := func() {
+		if len(current) > 0 {
+			chunks = append(chunks, current)
+			current = nil
+			spent = 0
 		}
-		if c.size > budget {
-			truncated = append(truncated, diffs[c.idx].NewPath)
-			continue
-		}
-		admitted[c.idx] = true
-		spent += c.size
 	}
+	for _, d := range diffs {
+		if d.GeneratedFile || d.TooLarge || excluded(d.NewPath, exclude) {
+			skipped = append(skipped, d.NewPath)
+			continue
+		}
+		size := len(d.Diff)
+		if size > budget {
+			skipped = append(skipped, d.NewPath)
+			continue
+		}
+		if spent+size > budget {
+			flush()
+		}
+		current = append(current, d)
+		spent += size
+	}
+	flush()
+	return chunks, skipped
+}
 
-	for i, d := range diffs {
-		if admitted[i] {
-			kept = append(kept, d)
+// MergeResults combines the results of a multi-pass review into one, with
+// finding IDs reassigned to stay unique.
+func MergeResults(parts []*Result) *Result {
+	merged := &Result{}
+	var summaries []string
+	for _, p := range parts {
+		if p == nil {
+			continue
 		}
+		if s := strings.TrimSpace(p.Summary); s != "" {
+			summaries = append(summaries, s)
+		}
+		merged.Findings = append(merged.Findings, p.Findings...)
+		merged.Warnings = append(merged.Warnings, p.Warnings...)
+		merged.CostUSD += p.CostUSD
+		merged.SessionID = p.SessionID
 	}
-	return kept, truncated
+	merged.Summary = strings.Join(summaries, "\n\n")
+	for i := range merged.Findings {
+		merged.Findings[i].ID = fmt.Sprintf("f%03d", i+1)
+	}
+	return merged
 }
 
 func excluded(path string, globs []string) bool {

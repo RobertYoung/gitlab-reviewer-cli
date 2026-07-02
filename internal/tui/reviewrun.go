@@ -107,7 +107,7 @@ func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Res
 		}
 	}()
 
-	req, warnings, err := buildRequest(s.cfg, s.detail, s.diffs, path)
+	reqs, warnings, err := buildRequests(s.cfg, s.detail, s.diffs, path)
 	if err != nil {
 		return nil, err
 	}
@@ -115,30 +115,56 @@ func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Res
 		emit(w)
 	}
 
-	emit(fmt.Sprintf("reviewing %d file(s) with %s…", len(req.Diffs), s.deps.Reviewer.Name()))
-	return s.deps.Reviewer.Review(ctx, req, func(e review.Event) {
-		emit(e.Text)
-	})
+	// Oversized MRs run as several passes; Claude has the whole repo on
+	// disk in every pass, only the focus diff changes.
+	results := make([]*review.Result, 0, len(reqs))
+	for i, req := range reqs {
+		if len(reqs) > 1 {
+			emit(fmt.Sprintf("review pass %d/%d (%d file(s)) with %s…", i+1, len(reqs), len(req.Diffs), s.deps.Reviewer.Name()))
+		} else {
+			emit(fmt.Sprintf("reviewing %d file(s) with %s…", len(req.Diffs), s.deps.Reviewer.Name()))
+		}
+		res, err := s.deps.Reviewer.Review(ctx, req, func(e review.Event) {
+			emit(e.Text)
+		})
+		if err != nil {
+			if len(results) > 0 {
+				// Keep what earlier passes found rather than losing it all.
+				merged := review.MergeResults(results)
+				merged.Warnings = append(merged.Warnings, fmt.Sprintf("pass %d/%d failed: %v", i+1, len(reqs), err))
+				return merged, nil
+			}
+			return nil, err
+		}
+		results = append(results, res)
+	}
+	if len(results) == 1 {
+		return results[0], nil
+	}
+	return review.MergeResults(results), nil
 }
 
-// buildRequest assembles the reviewer request from project-resolved config:
-// bounded diffs, category list, and combined custom instructions.
-func buildRequest(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, repoPath string) (review.Request, []string, error) {
+// buildRequests assembles the reviewer request(s) from project-resolved
+// config: chunked diffs, category list, and combined custom instructions.
+func buildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, repoPath string) ([]review.Request, []string, error) {
 	var warnings []string
 
-	kept, truncated := review.BoundDiffs(diffs, cfg.Review.Exclude, cfg.Review.MaxDiffKB)
-	if len(kept) == 0 {
-		return review.Request{}, nil, errors.New("nothing to review: every changed file is excluded or over the diff budget")
+	chunks, skipped := review.ChunkDiffs(diffs, cfg.Review.Exclude, cfg.Review.MaxDiffKB)
+	if len(chunks) == 0 {
+		return nil, nil, errors.New("nothing to review: every changed file is excluded or over the diff budget")
 	}
-	if len(truncated) > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d file(s) excluded from the prompt (globs/size budget)", len(truncated)))
+	if len(skipped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d file(s) excluded from the prompt (globs/size budget)", len(skipped)))
+	}
+	if len(chunks) > 1 {
+		warnings = append(warnings, fmt.Sprintf("large MR: splitting the review into %d passes", len(chunks)))
 	}
 
 	instructions := cfg.Review.Instructions
 	if cfg.Review.InstructionsFile != "" {
 		data, err := os.ReadFile(cfg.Review.InstructionsFile)
 		if err != nil {
-			return review.Request{}, nil, fmt.Errorf("reading review.instructions_file: %w", err)
+			return nil, nil, fmt.Errorf("reading review.instructions_file: %w", err)
 		}
 		if instructions != "" {
 			instructions += "\n\n"
@@ -151,17 +177,21 @@ func buildRequest(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.Fi
 		categories = append(categories, review.Category(c))
 	}
 
-	return review.Request{
-		RepoPath:     repoPath,
-		MR:           detail,
-		Diffs:        kept,
-		Truncated:    truncated,
-		Instructions: instructions,
-		Categories:   categories,
-		Model:        cfg.Review.Model,
-		Timeout:      cfg.Review.Timeout,
-		MaxBudgetUSD: cfg.Review.MaxBudgetUSD,
-	}, warnings, nil
+	reqs := make([]review.Request, 0, len(chunks))
+	for _, chunk := range chunks {
+		reqs = append(reqs, review.Request{
+			RepoPath:     repoPath,
+			MR:           detail,
+			Diffs:        chunk,
+			Truncated:    skipped,
+			Instructions: instructions,
+			Categories:   categories,
+			Model:        cfg.Review.Model,
+			Timeout:      cfg.Review.Timeout,
+			MaxBudgetUSD: cfg.Review.MaxBudgetUSD,
+		})
+	}
+	return reqs, warnings, nil
 }
 
 func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {
