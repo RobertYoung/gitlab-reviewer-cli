@@ -56,6 +56,7 @@ func (s *helpScreen) View() string {
 		{"merge request list", [][2]string{
 			{"↑/↓ j/k", "move"},
 			{"enter", "open merge request"},
+			{"o", "open in browser"},
 			{"/", "search text"},
 			{"a", "filter by author"},
 			{"t", "filter by target branch"},
@@ -71,6 +72,7 @@ func (s *helpScreen) View() string {
 			{"v", "toggle unified / side-by-side diff"},
 			{"r", "review with Claude"},
 			{"L", "browse stored review logs"},
+			{"o", "open in browser"},
 		}},
 		{"review", [][2]string{
 			{"esc", "cancel the running review"},
