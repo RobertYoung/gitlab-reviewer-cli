@@ -83,6 +83,11 @@ Inside the TUI press `?` for the full keybinding reference. The core flow:
 pick an MR (`enter`), inspect the diff, press `r` to run the review, then
 `a`/`x`/`e` to accept/reject/edit findings and `p` to publish them.
 
+Every review run's progress log is stored for later reference: press `l`
+on the findings screen (or after a failed review) to read the current
+run's log, and `L` on the MR detail screen to browse the stored logs of
+past runs for that MR.
+
 ## Configuration
 
 Every setting is available as a flag, an environment variable, and a key in
@@ -312,8 +317,10 @@ to toggle the layout for the current session regardless of the setting.
 | `log.level` | `GITLAB_REVIEWER_LOG_LEVEL` | `--log-level` | `info` |
 | `log.file` | `GITLAB_REVIEWER_LOG_FILE` | `--log-file` | `~/.local/state/gitlab-reviewer/gitlab-reviewer.log` |
 
-Raw review transcripts are kept under
-`~/.local/state/gitlab-reviewer/reviews/` for debugging.
+Raw review transcripts (`.jsonl`) and per-run progress logs (`.log`, the
+lines shown on the review screen) are kept under
+`~/.local/state/gitlab-reviewer/reviews/`; the logs are browsable in the
+TUI with `L` on an MR's detail screen.
 
 ### Per-project overrides
 

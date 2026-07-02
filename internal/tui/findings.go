@@ -34,9 +34,10 @@ type findings struct {
 	diffs  []gitlabx.FileDiff
 	cfg    config.Config
 
-	result *review.Result
-	items  []review.Finding
-	cursor int
+	result  *review.Result
+	items   []review.Finding
+	cursor  int
+	logPath string // this run's stored progress log ("" when not stored)
 
 	editing bool
 	editor  textarea.Model
@@ -45,7 +46,7 @@ type findings struct {
 	height int
 }
 
-func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result) *findings {
+func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result, logPath string) *findings {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
 	cfg := deps.cfgFor(detail.ProjectPath)
@@ -64,13 +65,14 @@ func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, r
 	}
 
 	return &findings{
-		deps:   deps,
-		detail: detail,
-		diffs:  diffs,
-		cfg:    cfg,
-		result: result,
-		items:  items,
-		editor: ta,
+		deps:    deps,
+		detail:  detail,
+		diffs:   diffs,
+		cfg:     cfg,
+		result:  result,
+		items:   items,
+		logPath: logPath,
+		editor:  ta,
 	}
 }
 
@@ -96,7 +98,11 @@ func (s *findings) Hints() string {
 	if s.editing {
 		return "ctrl+s save · esc discard edit"
 	}
-	return "↑/↓ move · a accept · x reject · A accept all · e edit · p publish accepted · esc back"
+	hints := "↑/↓ move · a accept · x reject · A accept all · e edit · p publish accepted"
+	if s.logPath != "" {
+		hints += " · l log"
+	}
+	return hints + " · esc back"
 }
 
 func (s *findings) Init() tea.Cmd {
@@ -182,6 +188,10 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			s.editing = true
 			s.editor.SetValue(s.items[s.cursor].Body)
 			return s, s.editor.Focus()
+		}
+	case "l":
+		if s.logPath != "" {
+			return s, pushScreen(newLogView(s.detail.Ref(), s.logPath))
 		}
 	case "p":
 		accepted := s.accepted()
