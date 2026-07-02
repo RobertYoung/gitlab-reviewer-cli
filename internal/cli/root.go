@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/spf13/cobra"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
@@ -49,11 +51,18 @@ func newRoot(st *state) *cobra.Command {
 			}
 			st.loaded = res
 			st.redactor.Add(res.Config.GitLab.Token)
+			for _, inst := range res.Config.GitLab.Instances {
+				st.redactor.Add(inst.Token)
+			}
 			return setupLogging(res.Config.Log, st.redactor)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := st.loaded.Config
 			if err := cfg.Validate(); err != nil {
+				return err
+			}
+			cfg, err := resolveInstance(cfg)
+			if err != nil {
 				return err
 			}
 			if err := cfg.ValidateGitLab(); err != nil {
@@ -104,6 +113,9 @@ func newRoot(st *state) *cobra.Command {
 					if err != nil {
 						return cfg
 					}
+					// Per-project overrides cover review/checkout/publish
+					// only; keep the resolved instance's gitlab settings.
+					projectCfg.GitLab = cfg.GitLab
 					return projectCfg
 				},
 			}
@@ -128,6 +140,7 @@ func addSettingFlags(root *cobra.Command) {
 
 	f.String("gitlab-base-url", "", "GitLab base URL (default https://gitlab.com)")
 	f.String("gitlab-token", "", "GitLab access token (prefer GITLAB_REVIEWER_GITLAB_TOKEN)")
+	f.String("instance", "", "named GitLab instance to use (see gitlab.instances)")
 	f.StringArray("project", nil, "project path to browse, repeatable (group/app)")
 	f.StringArray("group", nil, "group path to browse, repeatable")
 	f.Int("per-page", 0, "GitLab API page size")
@@ -169,6 +182,32 @@ func addSettingFlags(root *cobra.Command) {
 
 	f.String("log-level", "", "log level: debug|info|warn|error")
 	f.String("log-file", "", "log file path")
+}
+
+// resolveInstance narrows the configuration to one GitLab instance: the one
+// named by --instance / gitlab.default_instance, the only one configured, or
+// an interactive pick when several are. With no instances configured the
+// top-level gitlab settings are used unchanged.
+func resolveInstance(cfg config.Config) (config.Config, error) {
+	instances := cfg.GitLab.Instances
+	if len(instances) == 0 {
+		return cfg, nil
+	}
+	name := cfg.GitLab.DefaultInstance
+	if name == "" && len(instances) == 1 {
+		name = instances[0].Name
+	}
+	if name == "" {
+		if !term.IsTerminal(os.Stdin.Fd()) {
+			return cfg, fmt.Errorf("multiple GitLab instances configured (%s): pass --instance or set gitlab.default_instance",
+				strings.Join(cfg.InstanceNames(), ", "))
+		}
+		var err error
+		if name, err = tui.SelectInstance(instances); err != nil {
+			return cfg, err
+		}
+	}
+	return cfg.WithInstance(name)
 }
 
 func setupLogging(cfg config.Log, redactor *secret.Redactor) error {
