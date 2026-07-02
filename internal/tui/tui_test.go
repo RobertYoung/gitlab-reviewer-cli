@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -750,7 +751,7 @@ func TestRenderDiffWithDiscussions(t *testing.T) {
 		},
 	}
 
-	content, hunks := renderDiff(fd, discussions, 80)
+	content, hunks := renderDiff(fd, discussions, 80, false)
 	if !strings.Contains(content, "@carol") || !strings.Contains(content, "please rename this") {
 		t.Errorf("discussion not rendered:\n%s", content)
 	}
@@ -765,6 +766,61 @@ func TestRenderDiffWithDiscussions(t *testing.T) {
 	lines := strings.Split(content, "\n")
 	if !strings.Contains(lines[hunks[1]], "@@ -10,2") {
 		t.Errorf("hunk offset drifted: line %d = %q", hunks[1], lines[hunks[1]])
+	}
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+func stripANSI(s string) string { return ansiRe.ReplaceAllString(s, "") }
+
+func TestRenderSplitDiff(t *testing.T) {
+	fd := gitlabx.FileDiff{
+		OldPath: "a.go", NewPath: "a.go",
+		Diff: "@@ -1,3 +1,4 @@\n ctx\n-old\n+new\n+extra\n@@ -10,2 +11,2 @@\n more\n+tail\n",
+	}
+	discussions := []gitlabx.Discussion{{
+		ID: "d1",
+		Notes: []gitlabx.Note{{
+			Author: "carol", Body: "please rename this",
+			Position: &gitlabx.Position{NewPath: "a.go", OldPath: "a.go", NewLine: intp(2)},
+		}},
+	}}
+
+	content, hunks := renderDiff(fd, discussions, 100, true)
+	lines := strings.Split(content, "\n")
+	if len(hunks) != 2 {
+		t.Fatalf("hunks = %v", hunks)
+	}
+	if !strings.Contains(lines[hunks[1]], "@@ -10,2") {
+		t.Errorf("hunk offset drifted: line %d = %q", hunks[1], lines[hunks[1]])
+	}
+
+	rowOf := func(needle string) string {
+		t.Helper()
+		for _, l := range lines {
+			if strings.Contains(l, needle) {
+				return l
+			}
+		}
+		t.Fatalf("no rendered line contains %q:\n%s", needle, content)
+		return ""
+	}
+	// A replaced line renders as one row: removal left, addition right.
+	if row := rowOf("old"); !strings.Contains(row, "new") {
+		t.Errorf("removal not paired with addition: %q", row)
+	}
+	// A context line shows on both sides with its old and new numbers.
+	if row := rowOf("ctx"); strings.Count(row, "ctx") != 2 || !strings.Contains(row, "1") {
+		t.Errorf("context row: %q", row)
+	}
+	// The unpaired addition gets a blank left side (no old line number
+	// before the separator on its row).
+	if row := rowOf("extra"); strings.Contains(strings.Split(stripANSI(row), "│")[0], "extra") {
+		t.Errorf("unpaired addition leaked into the old side: %q", row)
+	}
+	// Discussion threads still anchor to new-side lines.
+	if !strings.Contains(content, "@carol") || !strings.Contains(content, "please rename this") {
+		t.Errorf("discussion not rendered:\n%s", content)
 	}
 }
 

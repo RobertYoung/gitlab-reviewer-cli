@@ -47,6 +47,7 @@ type mrDetail struct {
 	err       error
 	fileIdx   int
 	hunkLines []int
+	split     bool // side-by-side diff layout
 	width     int
 	height    int
 
@@ -62,11 +63,12 @@ type renderedDiff struct {
 
 func newMRDetail(deps Deps, mr gitlabx.MRSummary) *mrDetail {
 	return &mrDetail{
-		deps: deps,
-		svc:  deps.Svc,
-		mr:   mr,
-		vp:   viewport.New(),
-		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		deps:  deps,
+		svc:   deps.Svc,
+		mr:    mr,
+		vp:    viewport.New(),
+		spin:  spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		split: deps.Cfg.UI.DiffView == "split",
 	}
 }
 
@@ -75,7 +77,7 @@ func (s *mrDetail) Title() string {
 }
 
 func (s *mrDetail) Hints() string {
-	return "↑/↓ scroll · n/p file · ]/[ hunk · r review · esc back · q quit"
+	return "↑/↓ scroll · n/p file · ]/[ hunk · v layout · r review · esc back · q quit"
 }
 
 func (s *mrDetail) Init() tea.Cmd {
@@ -185,6 +187,11 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		case "p", "left":
 			s.setFile(s.fileIdx - 1)
 			return s, nil
+		case "v":
+			s.split = !s.split
+			s.invalidateRender()
+			s.setFile(s.fileIdx)
+			return s, nil
 		case "]":
 			s.jumpHunk(1)
 			return s, nil
@@ -218,7 +225,7 @@ func (s *mrDetail) setFile(idx int) {
 	}
 	r, ok := s.rendered[s.fileIdx]
 	if !ok {
-		content, hunks := renderDiff(s.diffs[s.fileIdx], s.discussions, max(s.width, 60))
+		content, hunks := renderDiff(s.diffs[s.fileIdx], s.discussions, max(s.width, 60), s.split)
 		r = renderedDiff{content: content, hunks: hunks}
 		s.rendered[s.fileIdx] = r
 	}

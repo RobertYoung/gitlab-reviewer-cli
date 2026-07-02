@@ -255,6 +255,17 @@ appended after the templated body. To also change the *tone* of the comment
 text itself, add guidance via `review.instructions`, e.g.
 `"Write comment bodies in first person, as a colleague would phrase them."`
 
+### UI
+
+| File key | Environment variable | Flag | Default |
+|---|---|---|---|
+| `ui.diff_view` | `GITLAB_REVIEWER_UI_DIFF_VIEW` | `--diff-view` | `unified` (`unified`\|`split`) |
+
+`ui.diff_view` sets the diff layout on the MR detail screen: `unified`
+(classic `+`/`-` stream) or `split` (side-by-side — old lines left, new
+lines right, with line numbers on both sides). Press `v` in the diff view
+to toggle the layout for the current session regardless of the setting.
+
 ### Logging
 
 | File key | Environment variable | Flag | Default |

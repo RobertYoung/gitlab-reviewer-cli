@@ -56,6 +56,7 @@ var envToKey = map[string]string{
 	"PUBLISH_FALLBACK_TO_NOTE":  "publish.fallback_to_note",
 	"PUBLISH_ATTRIBUTION":       "publish.attribution",
 	"PUBLISH_TEMPLATE":          "publish.template",
+	"UI_DIFF_VIEW":              "ui.diff_view",
 	"LOG_LEVEL":                 "log.level",
 	"LOG_FILE":                  "log.file",
 }
@@ -113,6 +114,7 @@ var flagToKey = map[string]string{
 	"fallback-to-note":  "publish.fallback_to_note",
 	"attribution":       "publish.attribution",
 	"publish-template":  "publish.template",
+	"diff-view":         "ui.diff_view",
 	"log-level":         "log.level",
 	"log-file":          "log.file",
 }

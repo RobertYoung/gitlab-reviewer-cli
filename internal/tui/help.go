@@ -68,6 +68,7 @@ func (s *helpScreen) View() string {
 			{"n/p", "next/previous file"},
 			{"]/[", "next/previous hunk"},
 			{"g/G", "top/bottom"},
+			{"v", "toggle unified / side-by-side diff"},
 			{"r", "review with Claude"},
 		}},
 		{"review", [][2]string{
