@@ -81,11 +81,17 @@ type App struct {
 	height int
 }
 
-// NewApp builds the root model with the MR list as the bottom screen.
+// NewApp builds the root model. With projects/groups configured the MR
+// list is the bottom screen; otherwise a selector lists the user's
+// available groups and projects to pick from.
 func NewApp(deps Deps) *App {
+	var root Screen = newMRList(deps)
+	if len(deps.Cfg.GitLab.Projects) == 0 && len(deps.Cfg.GitLab.Groups) == 0 {
+		root = newSelector(deps)
+	}
 	return &App{
 		deps:  deps,
-		stack: []Screen{newMRList(deps)},
+		stack: []Screen{root},
 	}
 }
 

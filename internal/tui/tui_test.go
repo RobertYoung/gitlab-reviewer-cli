@@ -32,6 +32,12 @@ type fakeService struct {
 	drafts          []published
 	draftsPublished bool
 	inlineErr       error
+
+	groups           []gitlabx.GroupInfo
+	projects         []gitlabx.ProjectInfo
+	lastGroupSearch  string
+	lastProjectGroup string
+	memberListed     bool
 }
 
 func (f *fakeService) ListOpenMergeRequests(_ context.Context, filter gitlabx.MRFilter, page gitlabx.Page) ([]gitlabx.MRSummary, bool, error) {
@@ -759,5 +765,124 @@ func TestRenderDiffWithDiscussions(t *testing.T) {
 	lines := strings.Split(content, "\n")
 	if !strings.Contains(lines[hunks[1]], "@@ -10,2") {
 		t.Errorf("hunk offset drifted: line %d = %q", hunks[1], lines[hunks[1]])
+	}
+}
+
+func (f *fakeService) ListGroups(_ context.Context, search string, _ gitlabx.Page) ([]gitlabx.GroupInfo, bool, error) {
+	f.lastGroupSearch = search
+	return f.groups, false, nil
+}
+
+func (f *fakeService) ListGroupProjects(_ context.Context, group string, _ string, _ gitlabx.Page) ([]gitlabx.ProjectInfo, bool, error) {
+	f.lastProjectGroup = group
+	return f.projects, false, nil
+}
+
+func (f *fakeService) ListMemberProjects(_ context.Context, _ string, _ gitlabx.Page) ([]gitlabx.ProjectInfo, bool, error) {
+	f.memberListed = true
+	return f.projects, false, nil
+}
+
+func TestSelectorFlow(t *testing.T) {
+	svc := &fakeService{
+		groups:   []gitlabx.GroupInfo{{FullPath: "platform", Name: "Platform", Description: "infra team"}},
+		projects: []gitlabx.ProjectInfo{{PathWithNamespace: "platform/api", LastActivity: time.Now()}},
+	}
+	s := newSelector(testDeps(svc))
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	for _, msg := range runCmd(screen.Init()) {
+		if _, ok := msg.(selGroupsLoadedMsg); ok {
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	// row 0 = "your projects", row 1 = the group
+	if len(s.rows) != 2 || !s.rows[0].memberProjects || s.rows[1].group != "platform" {
+		t.Fatalf("rows: %+v", s.rows)
+	}
+
+	// b on the group browses the whole group
+	s.cursor = 1
+	_, cmd := screen.Update(key("b"))
+	msgs := runCmd(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("msgs = %v", msgs)
+	}
+	list := msgs[0].(pushScreenMsg).screen.(*mrList)
+	if len(list.filter.Groups) != 1 || list.filter.Groups[0] != "platform" || !list.scoped {
+		t.Fatalf("group scope: %+v", list.filter)
+	}
+
+	// enter drills into the group's projects
+	_, cmd = screen.Update(key("enter"))
+	for _, msg := range runCmd(cmd) {
+		if _, ok := msg.(selProjectsLoadedMsg); ok {
+			screen, _ = screen.Update(msg)
+		}
+	}
+	if s.mode != selProjects || svc.lastProjectGroup != "platform" {
+		t.Fatalf("mode=%v group=%q", s.mode, svc.lastProjectGroup)
+	}
+	if len(s.rows) != 1 || s.rows[0].project != "platform/api" {
+		t.Fatalf("project rows: %+v", s.rows)
+	}
+
+	// enter on a project browses that project
+	_, cmd = screen.Update(key("enter"))
+	msgs = runCmd(cmd)
+	list = msgs[0].(pushScreenMsg).screen.(*mrList)
+	if len(list.filter.Projects) != 1 || list.filter.Projects[0] != "platform/api" {
+		t.Fatalf("project scope: %+v", list.filter)
+	}
+
+	// esc returns to the groups view
+	_, cmd = screen.Update(key("esc"))
+	for _, msg := range runCmd(cmd) {
+		if _, ok := msg.(selGroupsLoadedMsg); ok {
+			screen, _ = screen.Update(msg)
+		}
+	}
+	if s.mode != selGroups {
+		t.Fatalf("mode after esc = %v", s.mode)
+	}
+}
+
+func TestSelectorMemberProjects(t *testing.T) {
+	svc := &fakeService{projects: []gitlabx.ProjectInfo{{PathWithNamespace: "rob/dotfiles"}}}
+	s := newSelector(testDeps(svc))
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	for _, msg := range runCmd(screen.Init()) {
+		if _, ok := msg.(selGroupsLoadedMsg); ok {
+			screen, _ = screen.Update(msg)
+		}
+	}
+	// enter on "your projects"
+	_, cmd := screen.Update(key("enter"))
+	for _, msg := range runCmd(cmd) {
+		if _, ok := msg.(selProjectsLoadedMsg); ok {
+			screen, _ = screen.Update(msg)
+		}
+	}
+	if !svc.memberListed {
+		t.Fatal("member projects not requested")
+	}
+	if len(s.rows) != 1 || s.rows[0].project != "rob/dotfiles" {
+		t.Fatalf("rows: %+v", s.rows)
+	}
+}
+
+func TestAppRootScreenChoice(t *testing.T) {
+	svc := &fakeService{}
+
+	deps := testDeps(svc) // no projects/groups configured
+	if _, ok := NewApp(deps).top().(*selector); !ok {
+		t.Error("empty scope must boot into the selector")
+	}
+
+	deps.Cfg.GitLab.Projects = []string{"group/app"}
+	if _, ok := NewApp(deps).top().(*mrList); !ok {
+		t.Error("configured scope must boot into the MR list")
 	}
 }

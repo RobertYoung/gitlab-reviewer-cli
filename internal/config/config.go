@@ -188,13 +188,11 @@ func (c Config) Validate() error {
 	return fmt.Errorf("invalid configuration:\n%s", strings.Join(msgs, "\n"))
 }
 
-// ValidateGitLab checks settings required to talk to GitLab at all.
+// ValidateGitLab checks settings required to talk to GitLab at all. An
+// empty project/group scope is fine: the TUI offers in-app selection.
 func (c Config) ValidateGitLab() error {
 	if c.GitLab.Token == "" {
 		return fmt.Errorf("gitlab.token is required: set GITLAB_REVIEWER_GITLAB_TOKEN (or GITLAB_TOKEN), or add it to %s", DefaultFile())
-	}
-	if len(c.GitLab.Projects) == 0 && len(c.GitLab.Groups) == 0 {
-		return fmt.Errorf("no projects or groups configured: set gitlab.projects/gitlab.groups, --project/--group, or the matching env vars")
 	}
 	return nil
 }

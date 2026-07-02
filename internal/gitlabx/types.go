@@ -15,6 +15,27 @@ type MRFilter struct {
 	AuthorUsername string
 	TargetBranch   string
 	Search         string
+
+	// Projects/Groups override the configured scope for this query (used
+	// by in-TUI selection). Both empty = use the configured scope.
+	Projects []string
+	Groups   []string
+}
+
+// GroupInfo is a group the user can browse, for in-TUI selection.
+type GroupInfo struct {
+	ID          int64
+	FullPath    string
+	Name        string
+	Description string
+}
+
+// ProjectInfo is a project the user can browse, for in-TUI selection.
+type ProjectInfo struct {
+	ID                int64
+	PathWithNamespace string
+	Description       string
+	LastActivity      time.Time
 }
 
 // Page is an offset pagination request applied to every configured source.

@@ -35,7 +35,12 @@ func (c *Client) ListOpenMergeRequests(ctx context.Context, filter MRFilter, pag
 
 	listOpts := gitlab.ListOptions{Page: int64(page.Number), PerPage: int64(page.PerPage)}
 
-	for _, project := range c.projects {
+	projects, groups := c.projects, c.groups
+	if len(filter.Projects) > 0 || len(filter.Groups) > 0 {
+		projects, groups = filter.Projects, filter.Groups
+	}
+
+	for _, project := range projects {
 		opts := &gitlab.ListProjectMergeRequestsOptions{ListOptions: listOpts}
 		applyFilter(&opts.State, &opts.AuthorUsername, &opts.TargetBranch, &opts.Search, filter)
 		mrs, resp, err := c.gl.MergeRequests.ListProjectMergeRequests(project, opts, gitlab.WithContext(ctx))
@@ -46,7 +51,7 @@ func (c *Client) ListOpenMergeRequests(ctx context.Context, filter MRFilter, pag
 		collect(&all, seen, mrs, project)
 	}
 
-	for _, group := range c.groups {
+	for _, group := range groups {
 		opts := &gitlab.ListGroupMergeRequestsOptions{ListOptions: listOpts}
 		applyFilter(&opts.State, &opts.AuthorUsername, &opts.TargetBranch, &opts.Search, filter)
 		mrs, resp, err := c.gl.MergeRequests.ListGroupMergeRequests(group, opts, gitlab.WithContext(ctx))
@@ -123,6 +128,83 @@ func toSummary(mr *gitlab.BasicMergeRequest, projectPath string) MRSummary {
 		s.UpdatedAt = *mr.UpdatedAt
 	}
 	return s
+}
+
+func (c *Client) ListGroups(ctx context.Context, search string, page Page) ([]GroupInfo, bool, error) {
+	opts := &gitlab.ListGroupsOptions{
+		ListOptions: gitlab.ListOptions{Page: int64(page.Number), PerPage: int64(page.PerPage)},
+		OrderBy:     gitlab.Ptr("path"),
+		Sort:        gitlab.Ptr("asc"),
+	}
+	if search != "" {
+		opts.Search = gitlab.Ptr(search)
+	}
+	groups, resp, err := c.gl.Groups.ListGroups(opts, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, false, fmt.Errorf("listing groups: %w", err)
+	}
+	out := make([]GroupInfo, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, GroupInfo{
+			ID:          g.ID,
+			FullPath:    g.FullPath,
+			Name:        g.Name,
+			Description: g.Description,
+		})
+	}
+	return out, resp.NextPage > 0, nil
+}
+
+func (c *Client) ListGroupProjects(ctx context.Context, group string, search string, page Page) ([]ProjectInfo, bool, error) {
+	opts := &gitlab.ListGroupProjectsOptions{
+		ListOptions:              gitlab.ListOptions{Page: int64(page.Number), PerPage: int64(page.PerPage)},
+		IncludeSubGroups:         gitlab.Ptr(true),
+		WithMergeRequestsEnabled: gitlab.Ptr(true),
+		Archived:                 gitlab.Ptr(false),
+		OrderBy:                  gitlab.Ptr("last_activity_at"),
+	}
+	if search != "" {
+		opts.Search = gitlab.Ptr(search)
+	}
+	projects, resp, err := c.gl.Groups.ListGroupProjects(group, opts, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, false, fmt.Errorf("listing projects of group %s: %w", group, err)
+	}
+	return toProjectInfos(projects), resp.NextPage > 0, nil
+}
+
+func (c *Client) ListMemberProjects(ctx context.Context, search string, page Page) ([]ProjectInfo, bool, error) {
+	opts := &gitlab.ListProjectsOptions{
+		ListOptions:              gitlab.ListOptions{Page: int64(page.Number), PerPage: int64(page.PerPage)},
+		Membership:               gitlab.Ptr(true),
+		WithMergeRequestsEnabled: gitlab.Ptr(true),
+		Archived:                 gitlab.Ptr(false),
+		OrderBy:                  gitlab.Ptr("last_activity_at"),
+	}
+	if search != "" {
+		opts.Search = gitlab.Ptr(search)
+	}
+	projects, resp, err := c.gl.Projects.ListProjects(opts, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, false, fmt.Errorf("listing your projects: %w", err)
+	}
+	return toProjectInfos(projects), resp.NextPage > 0, nil
+}
+
+func toProjectInfos(projects []*gitlab.Project) []ProjectInfo {
+	out := make([]ProjectInfo, 0, len(projects))
+	for _, p := range projects {
+		info := ProjectInfo{
+			ID:                p.ID,
+			PathWithNamespace: p.PathWithNamespace,
+			Description:       p.Description,
+		}
+		if p.LastActivityAt != nil {
+			info.LastActivity = *p.LastActivityAt
+		}
+		out = append(out, info)
+	}
+	return out
 }
 
 func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*MRDetail, error) {

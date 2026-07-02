@@ -6,10 +6,21 @@ import "context"
 // operations (discussions, draft notes) join the interface with the review
 // publishing milestone.
 type Service interface {
-	// ListOpenMergeRequests returns one page of MRs merged across all
-	// configured projects and groups, newest-updated first, and whether
-	// any source has more pages.
+	// ListOpenMergeRequests returns one page of MRs merged across the
+	// scope (filter override or the configured projects and groups),
+	// newest-updated first, and whether any source has more pages.
 	ListOpenMergeRequests(ctx context.Context, filter MRFilter, page Page) ([]MRSummary, bool, error)
+
+	// ListGroups returns groups the user has access to, for in-TUI scope
+	// selection.
+	ListGroups(ctx context.Context, search string, page Page) ([]GroupInfo, bool, error)
+
+	// ListGroupProjects returns a group's projects (including subgroups).
+	ListGroupProjects(ctx context.Context, group string, search string, page Page) ([]ProjectInfo, bool, error)
+
+	// ListMemberProjects returns projects the user is a member of,
+	// covering personal and directly-shared projects outside any group.
+	ListMemberProjects(ctx context.Context, search string, page Page) ([]ProjectInfo, bool, error)
 
 	// GetMergeRequest fetches full MR details including diff refs.
 	// project is a full path (group/app) or numeric ID.

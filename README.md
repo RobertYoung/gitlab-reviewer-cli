@@ -16,7 +16,8 @@ reject each one before publishing them back to the MR as inline discussions
 
 1. **Browse** — the TUI lists open merge requests across the projects and
    groups you configure, with filtering by state, author, target branch, and
-   free-text search.
+   free-text search. With no scope configured it first lists your available
+   groups and projects so you can pick one inside the TUI.
 2. **Review** — Claude runs locally against a checkout of the MR branch, so
    it can explore the whole repository (read files, grep for callers), not
    just the diff. Reviews always run in a detached git worktree at the MR
@@ -57,7 +58,11 @@ go install github.com/RobertYoung/gitlab-reviewer-cli/cmd/gitlab-reviewer@latest
 ```sh
 export GITLAB_REVIEWER_GITLAB_TOKEN=glpat-...   # or GITLAB_TOKEN
 
-# One-off, all flags:
+# Zero config: with no projects/groups set, the TUI lists your available
+# groups and projects so you can pick what to browse
+gitlab-reviewer
+
+# Or scope it up front:
 gitlab-reviewer --project mygroup/myapp
 
 # Or create ~/.config/gitlab-reviewer/config.yaml:

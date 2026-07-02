@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -46,11 +47,14 @@ type mrList struct {
 	svc     gitlabx.Service
 	perPage int
 
-	table   table.Model
-	input   textinput.Model
-	mode    inputMode
-	spin    spinner.Model
-	filter  gitlabx.MRFilter
+	table  table.Model
+	input  textinput.Model
+	mode   inputMode
+	spin   spinner.Model
+	filter gitlabx.MRFilter
+	// scoped means the projects/groups came from the in-TUI selector, so
+	// esc navigates back to it.
+	scoped  bool
 	mrs     []gitlabx.MRSummary
 	page    int
 	hasMore bool
@@ -62,15 +66,23 @@ type mrList struct {
 }
 
 func newMRList(deps Deps) *mrList {
+	return newMRListScoped(deps, nil, nil)
+}
+
+// newMRListScoped browses a scope chosen in the TUI instead of the
+// configured projects/groups; esc pops back to the selector.
+func newMRListScoped(deps Deps, projects, groups []string) *mrList {
 	in := textinput.New()
 	in.Prompt = "/"
 	in.CharLimit = 100
 
+	scoped := len(projects) > 0 || len(groups) > 0
 	return &mrList{
 		deps:    deps,
 		svc:     deps.Svc,
 		perPage: deps.Cfg.GitLab.PerPage,
-		filter:  gitlabx.MRFilter{State: "opened"},
+		scoped:  scoped,
+		filter:  gitlabx.MRFilter{State: "opened", Projects: projects, Groups: groups},
 		table: table.New(
 			table.WithFocused(true),
 			table.WithColumns([]table.Column{{Title: "!IID", Width: 6}}),
@@ -81,7 +93,14 @@ func newMRList(deps Deps) *mrList {
 }
 
 func (s *mrList) Title() string {
-	t := "merge requests · " + s.filter.State
+	t := "merge requests"
+	if len(s.filter.Projects) > 0 {
+		t += " · " + strings.Join(s.filter.Projects, ",")
+	}
+	if len(s.filter.Groups) > 0 {
+		t += " · " + strings.Join(s.filter.Groups, ",")
+	}
+	t += " · " + s.filter.State
 	if s.filter.AuthorUsername != "" {
 		t += " · author:" + s.filter.AuthorUsername
 	}
@@ -235,9 +254,13 @@ func (s *mrList) updateTable(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	case "r":
 		return s, s.reload()
 	case "esc":
-		if s.filter != (gitlabx.MRFilter{State: "opened"}) {
-			s.filter = gitlabx.MRFilter{State: "opened"}
+		if s.filter.State != "opened" || s.filter.AuthorUsername != "" || s.filter.TargetBranch != "" || s.filter.Search != "" {
+			s.filter.State = "opened"
+			s.filter.AuthorUsername, s.filter.TargetBranch, s.filter.Search = "", "", ""
 			return s, s.reload()
+		}
+		if s.scoped {
+			return s, popScreen // back to the selector
 		}
 		return s, nil
 	}

@@ -46,6 +46,13 @@ func (s *helpScreen) View() string {
 			{"esc", "go back / cancel"},
 			{"ctrl+c", "quit"},
 		}},
+		{"group/project selector (no scope configured)", [][2]string{
+			{"↑/↓ j/k", "move"},
+			{"enter", "open group / browse project"},
+			{"b", "browse all MRs in the group"},
+			{"/", "search (server-side)"},
+			{"esc", "back to groups / clear search"},
+		}},
 		{"merge request list", [][2]string{
 			{"↑/↓ j/k", "move"},
 			{"enter", "open merge request"},
