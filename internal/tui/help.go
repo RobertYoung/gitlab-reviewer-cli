@@ -70,9 +70,11 @@ func (s *helpScreen) View() string {
 			{"g/G", "top/bottom"},
 			{"v", "toggle unified / side-by-side diff"},
 			{"r", "review with Claude"},
+			{"L", "browse stored review logs"},
 		}},
 		{"review", [][2]string{
 			{"esc", "cancel the running review"},
+			{"l", "view the run log after a failure"},
 		}},
 		{"findings", [][2]string{
 			{"↑/↓ j/k", "move"},
@@ -80,6 +82,7 @@ func (s *helpScreen) View() string {
 			{"A", "accept all pending"},
 			{"e", "edit comment body (ctrl+s saves)"},
 			{"p", "publish accepted findings"},
+			{"l", "view this review's run log"},
 		}},
 		{"publish", [][2]string{
 			{"m", "toggle immediate/draft mode"},

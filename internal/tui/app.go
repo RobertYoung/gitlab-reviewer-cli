@@ -11,6 +11,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
 
 // CheckoutFunc prepares a review worktree for an MR and returns its path
@@ -25,6 +26,9 @@ type Deps struct {
 	Reviewer review.Reviewer
 	Checkout CheckoutFunc
 	CfgFor   func(projectPath string) config.Config
+	// Logs stores each review run's progress log for later viewing; nil
+	// disables both storing and the log screens' content.
+	Logs *runlog.Store
 }
 
 func (d Deps) cfgFor(projectPath string) config.Config {

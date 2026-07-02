@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -13,6 +14,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
 
 type published struct {
@@ -401,6 +403,7 @@ func TestReviewRunHappyFlow(t *testing.T) {
 	rev := &fakeReviewer{result: result, events: []review.Event{{Kind: review.EventToolUse, Text: "Read a.go"}}}
 	deps := testDeps(&fakeService{template: "## What\n<!-- fill this in -->"})
 	deps.Reviewer = rev
+	deps.Logs = runlog.NewStore(t.TempDir())
 	cleanedUp := false
 	deps.Checkout = func(_ context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 		progress("cloning…")
@@ -445,6 +448,94 @@ func TestReviewRunHappyFlow(t *testing.T) {
 	}
 	if len(s.log) == 0 {
 		t.Error("no progress lines recorded")
+	}
+
+	// the run log is stored on disk with the progress lines and outcome
+	if s.logPath == "" {
+		t.Fatal("no run log path recorded")
+	}
+	data, err := os.ReadFile(s.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"review of group/app!11 — Fix", "cloning…", "Read a.go", "completed with 2 finding(s)"} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("run log missing %q:\n%s", want, data)
+		}
+	}
+	entries, err := deps.Logs.List(detail.Ref())
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("stored entries = %+v, err = %v", entries, err)
+	}
+}
+
+func TestReviewLogBrowseAndView(t *testing.T) {
+	deps := testDeps(&fakeService{})
+	deps.Logs = runlog.NewStore(t.TempDir())
+	l := deps.Logs.Start(11, "group/app!11", "Fix parser")
+	l.Append("preparing repository…")
+	l.Finish("completed with 1 finding(s)")
+
+	s := newLogList(deps, "group/app!11")
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		screen, _ = screen.Update(msg)
+	}
+	if len(s.entries) != 1 {
+		t.Fatalf("entries = %+v (err %v)", s.entries, s.err)
+	}
+	if !strings.Contains(screen.View(), "Fix parser") {
+		t.Errorf("list view missing title:\n%s", screen.View())
+	}
+
+	// enter opens the viewer on the selected log
+	_, cmd := screen.Update(key("enter"))
+	msgs := runCmd(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("msgs = %v", msgs)
+	}
+	push, ok := msgs[0].(pushScreenMsg)
+	if !ok {
+		t.Fatalf("expected pushScreenMsg, got %T", msgs[0])
+	}
+	view := push.screen.(*logView)
+	var vScreen Screen = view
+	vScreen, _ = vScreen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	for _, msg := range runCmd(vScreen.Init()) {
+		vScreen, _ = vScreen.Update(msg)
+	}
+	got := vScreen.View()
+	for _, want := range []string{"preparing repository…", "completed with 1 finding(s)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("log view missing %q:\n%s", want, got)
+		}
+	}
+
+	// esc pops back
+	_, cmd = vScreen.Update(key("esc"))
+	if msgs := runCmd(cmd); len(msgs) != 1 {
+		t.Fatalf("msgs = %v", msgs)
+	} else if _, ok := msgs[0].(popScreenMsg); !ok {
+		t.Errorf("expected popScreenMsg, got %T", msgs[0])
+	}
+}
+
+func TestReviewLogListEmpty(t *testing.T) {
+	deps := testDeps(&fakeService{})
+	deps.Logs = runlog.NewStore(t.TempDir())
+	s := newLogList(deps, "group/app!99")
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		screen, _ = screen.Update(msg)
+	}
+	if !strings.Contains(screen.View(), "no stored review logs") {
+		t.Errorf("empty state not rendered:\n%s", screen.View())
+	}
+	// enter with no entries must not push anything
+	if _, cmd := screen.Update(key("enter")); cmd != nil {
+		t.Error("enter on empty list must be a no-op")
 	}
 }
 
@@ -517,7 +608,7 @@ func TestFindingsRendersWarningsWithFindings(t *testing.T) {
 	// A review that produced findings AND carries a rebase warning: the
 	// warning must still show, not only on the empty-review screen.
 	result.Warnings = []string{"MR branch is 3 commit(s) behind main — a rebase is needed"}
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result)
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "")
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if len(s.items) == 0 {
@@ -530,7 +621,7 @@ func TestFindingsRendersWarningsWithFindings(t *testing.T) {
 
 func TestFindingsCuration(t *testing.T) {
 	detail, diffs, result := reviewFixture()
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result)
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "")
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -767,7 +858,7 @@ func TestFindingsAutoComment(t *testing.T) {
 	deps.Cfg.Publish.AutoComment = true
 	deps.Cfg.Publish.AutoMinSeverity = "major"
 
-	s := newFindings(deps, *detail, diffs, result)
+	s := newFindings(deps, *detail, diffs, result, "")
 	// major finding pre-accepted, info finding untouched
 	if s.items[0].State != review.StateAccepted {
 		t.Errorf("major finding should be pre-accepted: %v", s.items[0].State)

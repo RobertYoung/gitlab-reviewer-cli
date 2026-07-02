@@ -22,9 +22,10 @@ type (
 		text string
 	}
 	reviewDoneMsg struct {
-		iid    int64
-		result *review.Result
-		err    error
+		iid     int64
+		result  *review.Result
+		err     error
+		logPath string
 	}
 )
 
@@ -41,6 +42,7 @@ type reviewRun struct {
 	cancel  context.CancelFunc
 	spin    spinner.Model
 	log     []string
+	logPath string
 	started time.Time
 	done    bool
 	err     error
@@ -65,6 +67,9 @@ func (s *reviewRun) Title() string {
 
 func (s *reviewRun) Hints() string {
 	if s.done {
+		if s.logPath != "" {
+			return "l view log · esc back"
+		}
 		return "esc back"
 	}
 	return "esc cancel"
@@ -87,12 +92,25 @@ func (s *reviewRun) wait() tea.Cmd {
 
 // run executes the whole review off the UI goroutine, reporting through the
 // channel. It must not touch the model. The done message is sent strictly
-// last, after worktree cleanup.
+// last, after worktree cleanup. Every progress line is also appended to the
+// run log on disk so it can be read back after this screen is gone.
 func (s *reviewRun) run(ctx context.Context) {
 	iid := s.detail.IID
-	emit := func(text string) { s.ch <- reviewEventMsg{iid: iid, text: text} }
+	rl := s.deps.Logs.Start(iid, s.detail.Ref(), s.detail.Title)
+	emit := func(text string) {
+		rl.Append(text)
+		s.ch <- reviewEventMsg{iid: iid, text: text}
+	}
 	res, err := s.execute(ctx, emit)
-	s.ch <- reviewDoneMsg{iid: iid, result: res, err: err}
+	switch {
+	case errors.Is(err, context.Canceled):
+		rl.Finish("cancelled")
+	case err != nil:
+		rl.Finish("failed: " + err.Error())
+	default:
+		rl.Finish(fmt.Sprintf("completed with %d finding(s)", len(res.Findings)))
+	}
+	s.ch <- reviewDoneMsg{iid: iid, result: res, err: err, logPath: rl.Path()}
 }
 
 func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Result, error) {
@@ -255,6 +273,7 @@ func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		s.done = true
+		s.logPath = msg.logPath
 		if msg.err != nil {
 			if errors.Is(msg.err, context.Canceled) {
 				return s, popScreen
@@ -263,16 +282,23 @@ func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		// Swap this progress screen for the findings editor.
-		return s, popScreens(1, newFindings(s.deps, s.detail, s.diffs, msg.result))
+		return s, popScreens(1, newFindings(s.deps, s.detail, s.diffs, msg.result, msg.logPath))
 
 	case tea.KeyPressMsg:
-		if msg.String() == "esc" {
+		switch msg.String() {
+		case "esc":
 			if s.done {
 				return s, popScreen
 			}
 			s.log = append(s.log, "cancelling…")
 			s.cancel()
 			return s, nil
+		case "l":
+			// After a failure the screen stays up; the stored run log has
+			// the full story, including lines that scrolled away.
+			if s.done && s.logPath != "" {
+				return s, pushScreen(newLogView(s.detail.Ref(), s.logPath))
+			}
 		}
 	}
 	return s, nil
@@ -283,7 +309,11 @@ func (s *reviewRun) View() string {
 	if s.done && s.err != nil {
 		b.WriteString(errorStyle.Render("review failed") + "\n\n")
 		b.WriteString(wrap(s.err.Error(), s.width))
-		b.WriteString("\n\n" + subtleStyle.Render("esc to go back"))
+		hint := "esc to go back"
+		if s.logPath != "" {
+			hint = "l to view the run log · " + hint
+		}
+		b.WriteString("\n\n" + subtleStyle.Render(hint))
 		return b.String()
 	}
 

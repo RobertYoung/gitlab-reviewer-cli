@@ -82,7 +82,7 @@ func (s *mrDetail) Title() string {
 }
 
 func (s *mrDetail) Hints() string {
-	return "↑/↓ scroll · n/p file · ]/[ hunk · v layout · r review · esc back · q quit"
+	return "↑/↓ scroll · n/p file · ]/[ hunk · v layout · r review · L logs · esc back · q quit"
 }
 
 func (s *mrDetail) Init() tea.Cmd {
@@ -204,6 +204,8 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 				return s, nil
 			}
 			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits))
+		case "L":
+			return s, pushScreen(newLogList(s.deps, s.mr.Ref()))
 		case "n", "right":
 			s.setFile(s.fileIdx + 1)
 			return s, nil

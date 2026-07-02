@@ -16,6 +16,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/secret"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/tui"
 )
@@ -65,7 +66,9 @@ func newRoot(st *state) *cobra.Command {
 				return err
 			}
 
-			reviewer := claudecli.New(cfg, filepath.Join(config.DefaultStateDir(), "reviews"))
+			// Raw stream transcripts and run logs share one directory.
+			reviewsDir := filepath.Join(config.DefaultStateDir(), "reviews")
+			reviewer := claudecli.New(cfg, reviewsDir)
 			if err := reviewer.CheckAvailable(cmd.Context()); err != nil {
 				return err
 			}
@@ -92,6 +95,7 @@ func newRoot(st *state) *cobra.Command {
 				Cfg:      cfg,
 				Svc:      svc,
 				Reviewer: reviewer,
+				Logs:     runlog.NewStore(reviewsDir),
 				Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 					co, err := manager.Ensure(ctx, mr, progress)
 					if err != nil {
