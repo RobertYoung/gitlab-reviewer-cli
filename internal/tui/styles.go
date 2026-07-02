@@ -22,6 +22,8 @@ var (
 	removedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 	hunkStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 	fileStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+	// cursorGutterStyle marks the selected diff line in the MR detail view.
+	cursorGutterStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
 )
 
 // relTime renders a compact relative timestamp for list views.
@@ -44,10 +46,23 @@ func relTime(t time.Time) string {
 	}
 }
 
+// diffLineRef maps one rendered line back to the diff: the old- and
+// new-side line numbers it shows (0 = none). Headers, hunk markers and
+// discussion blocks carry a zero ref and cannot anchor a comment.
+type diffLineRef struct {
+	old int
+	new int
+}
+
+// commentable reports whether the rendered line is a diff code line a
+// comment can anchor to.
+func (r diffLineRef) commentable() bool { return r.old > 0 || r.new > 0 }
+
 // renderDiff renders a file diff — syntax-highlighted code with existing
 // discussion threads anchored inline, unified or side-by-side — and returns
-// the content plus the indexes (in rendered lines) where hunks start.
-func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int, split bool) (string, []int) {
+// the content, the indexes (in rendered lines) where hunks start, and a
+// per-rendered-line ref back to the diff line numbers.
+func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int, split bool) (string, []int, []diffLineRef) {
 	if split {
 		return renderSplitDiff(fd, discussions, width)
 	}
@@ -73,22 +88,30 @@ func writeDiffHeader(write func(string), fd gitlabx.FileDiff) bool {
 	return true
 }
 
-func renderUnifiedDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int) {
+func renderUnifiedDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int, []diffLineRef) {
 	var (
 		b         strings.Builder
 		hunkLines []int
+		refs      []diffLineRef
 		lineNo    int
 	)
-	write := func(s string) {
+	writeRef := func(s string, ref diffLineRef) {
 		b.WriteString(s)
 		b.WriteByte('\n')
 		// Discussion blocks span several rendered lines; hunk offsets must
-		// track what the viewport actually shows.
-		lineNo += strings.Count(s, "\n") + 1
+		// track what the viewport actually shows. Only the first rendered
+		// line of a multi-line write carries the code-line ref.
+		n := strings.Count(s, "\n") + 1
+		lineNo += n
+		refs = append(refs, ref)
+		for range n - 1 {
+			refs = append(refs, diffLineRef{})
+		}
 	}
+	write := func(s string) { writeRef(s, diffLineRef{}) }
 
 	if !writeDiffHeader(write, fd) {
-		return b.String(), hunkLines
+		return b.String(), hunkLines, refs
 	}
 
 	hl := newHighlighter(fd.NewPath)
@@ -108,11 +131,11 @@ func renderUnifiedDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, wi
 			}
 			write(hunkStyle.Render(line))
 		case strings.HasPrefix(line, "+"):
-			write(addedStyle.Render("+") + hl.line(line[1:]))
+			writeRef(addedStyle.Render("+")+hl.line(line[1:]), diffLineRef{new: newLine})
 			writeThreads(true)
 			newLine++
 		case strings.HasPrefix(line, "-"):
-			write(removedStyle.Render("-") + hl.line(line[1:]))
+			writeRef(removedStyle.Render("-")+hl.line(line[1:]), diffLineRef{old: oldLine})
 			writeThreads(false)
 			oldLine++
 		case strings.HasPrefix(line, `\`):
@@ -122,13 +145,13 @@ func renderUnifiedDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, wi
 			if len(code) > 0 {
 				code = code[1:]
 			}
-			write(" " + hl.line(code))
+			writeRef(" "+hl.line(code), diffLineRef{old: oldLine, new: newLine})
 			writeThreads(true)
 			oldLine++
 			newLine++
 		}
 	}
-	return b.String(), hunkLines
+	return b.String(), hunkLines, refs
 }
 
 // splitSide is one half of a side-by-side row; kind 0 means the side is
@@ -141,20 +164,27 @@ type splitSide struct {
 
 // renderSplitDiff renders the diff side-by-side: old lines left, new lines
 // right, removals paired with the additions that replaced them.
-func renderSplitDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int) {
+func renderSplitDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int, []diffLineRef) {
 	var (
 		b         strings.Builder
 		hunkLines []int
+		refs      []diffLineRef
 		lineNo    int
 	)
-	write := func(s string) {
+	writeRef := func(s string, ref diffLineRef) {
 		b.WriteString(s)
 		b.WriteByte('\n')
-		lineNo += strings.Count(s, "\n") + 1
+		n := strings.Count(s, "\n") + 1
+		lineNo += n
+		refs = append(refs, ref)
+		for range n - 1 {
+			refs = append(refs, diffLineRef{})
+		}
 	}
+	write := func(s string) { writeRef(s, diffLineRef{}) }
 
 	if !writeDiffHeader(write, fd) {
-		return b.String(), hunkLines
+		return b.String(), hunkLines, refs
 	}
 
 	hl := newHighlighter(fd.NewPath)
@@ -181,7 +211,14 @@ func renderSplitDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, widt
 	}
 
 	emit := func(left, right splitSide) {
-		write(column(left) + subtleStyle.Render("│") + column(right))
+		var ref diffLineRef
+		if left.kind != 0 {
+			ref.old = left.no
+		}
+		if right.kind != 0 {
+			ref.new = right.no
+		}
+		writeRef(column(left)+subtleStyle.Render("│")+column(right), ref)
 		if left.kind == '-' {
 			for _, block := range discussionBlocks(discussions, fd, left.no, 0, false, width) {
 				write(block)
@@ -240,7 +277,7 @@ func renderSplitDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, widt
 		}
 	}
 	flush()
-	return b.String(), hunkLines
+	return b.String(), hunkLines, refs
 }
 
 var discussionStyle = lipgloss.NewStyle().

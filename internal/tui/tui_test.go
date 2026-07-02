@@ -473,6 +473,172 @@ func TestMRDetailFileExplorer(t *testing.T) {
 	}
 }
 
+func TestMRDetailManualInlineComment(t *testing.T) {
+	svc := &fakeService{
+		detail: &gitlabx.MRDetail{
+			MRSummary: gitlabx.MRSummary{ProjectPath: "group/app", IID: 11},
+			DiffRefs:  gitlabx.DiffRefs{BaseSHA: "b", HeadSHA: "h", StartSHA: "s"},
+		},
+		diffs: []gitlabx.FileDiff{{OldPath: "a.go", NewPath: "a.go", Diff: "@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n"}},
+	}
+	deps := testDeps(svc)
+	deps.Cfg.Publish.Mode = "immediate"
+	s := newMRDetail(deps, gitlabx.MRSummary{ProjectPath: "group/app", IID: 11, Title: "Fix"})
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	// rendered lines: file header, hunk header, " ctx", "-old", "+new";
+	// the cursor starts on the first commentable line.
+	if s.cursor != 2 {
+		t.Fatalf("initial cursor = %d", s.cursor)
+	}
+	screen, _ = screen.Update(key("j"))
+	screen, _ = screen.Update(key("j"))
+	if s.cursor != 4 {
+		t.Fatalf("cursor after j j = %d", s.cursor)
+	}
+
+	// c opens the composer anchored to the added line (new-side line 2)
+	_, cmd := screen.Update(key("c"))
+	msgs := runCmd(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("msgs = %v", msgs)
+	}
+	comp, ok := msgs[0].(pushScreenMsg).screen.(*commentComposer)
+	if !ok {
+		t.Fatalf("expected composer, got %T", msgs[0].(pushScreenMsg).screen)
+	}
+	if comp.anchor == nil || comp.anchor.file != "a.go" ||
+		comp.anchor.line.NewLine == nil || *comp.anchor.line.NewLine != 2 || comp.anchor.line.OldLine != nil {
+		t.Fatalf("anchor: %+v", comp.anchor)
+	}
+
+	// ctrl+s saves the comment into the diff view and pops the composer
+	var cs Screen = comp
+	cs, _ = cs.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	comp.ta.SetValue("please rename")
+	_, cmd = cs.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	msgs = runCmd(cmd)
+	if len(msgs) != 1 {
+		t.Fatalf("msgs = %v", msgs)
+	}
+	if _, ok := msgs[0].(popScreenMsg); !ok {
+		t.Fatalf("expected pop, got %T", msgs[0])
+	}
+	if len(s.comments) != 1 || !s.comments[0].Manual || s.comments[0].State != review.StateAccepted {
+		t.Fatalf("comments: %+v", s.comments)
+	}
+
+	// the pending comment shows inline in the diff and in the header count
+	view := stripANSI(screen.View())
+	if !strings.Contains(view, "@you (pending)") || !strings.Contains(view, "please rename") {
+		t.Errorf("pending comment not rendered inline:\n%s", view)
+	}
+	if !strings.Contains(view, "1 pending comment(s)") {
+		t.Errorf("pending count missing from header:\n%s", view)
+	}
+
+	// P publishes through the standard publish pipeline
+	_, cmd = screen.Update(key("P"))
+	msgs = runCmd(cmd)
+	pub, ok := msgs[0].(pushScreenMsg).screen.(*publish)
+	if !ok || len(pub.items) != 1 {
+		t.Fatalf("publish push: %v", msgs)
+	}
+	if pub.opts.popCount != 1 {
+		t.Errorf("popCount = %d", pub.opts.popCount)
+	}
+	var ps Screen = pub
+	ps.Init()
+	ps, _ = ps.Update(key("enter"))
+	for range 10 {
+		msg := <-pub.ch
+		ps, _ = ps.Update(msg)
+		if _, ok := msg.(publishDoneMsg); ok {
+			break
+		}
+	}
+	if len(svc.posted) != 1 {
+		t.Fatalf("posted = %+v", svc.posted)
+	}
+	if svc.posted[0].pos == nil || svc.posted[0].pos.NewLine == nil || *svc.posted[0].pos.NewLine != 2 {
+		t.Errorf("inline position: %+v", svc.posted[0].pos)
+	}
+	// manual comments post verbatim: no template badge, no attribution
+	if svc.posted[0].body != "please rename" {
+		t.Errorf("body = %q", svc.posted[0].body)
+	}
+
+	// the publish outcome flows back into the diff view; P becomes a no-op
+	if s.comments[0].State != review.StatePublished {
+		t.Errorf("comment state = %v", s.comments[0].State)
+	}
+	if _, cmd := screen.Update(key("P")); cmd != nil {
+		t.Error("P with nothing pending must be a no-op")
+	}
+}
+
+func TestMRDetailMRLevelComment(t *testing.T) {
+	svc := &fakeService{
+		detail: &gitlabx.MRDetail{
+			MRSummary: gitlabx.MRSummary{ProjectPath: "group/app", IID: 11},
+			DiffRefs:  gitlabx.DiffRefs{BaseSHA: "b", HeadSHA: "h", StartSHA: "s"},
+		},
+		diffs: []gitlabx.FileDiff{{OldPath: "a.go", NewPath: "a.go", Diff: "@@ -1,1 +1,1 @@\n-old\n+new\n"}},
+	}
+	deps := testDeps(svc)
+	deps.Cfg.Publish.Mode = "immediate"
+	deps.Cfg.Publish.FallbackToNote = false // MR-level comments must not depend on the fallback
+	s := newMRDetail(deps, gitlabx.MRSummary{ProjectPath: "group/app", IID: 11})
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	_, cmd := screen.Update(key("C"))
+	comp := runCmd(cmd)[0].(pushScreenMsg).screen.(*commentComposer)
+	if comp.anchor != nil {
+		t.Fatalf("MR-level composer must have no anchor: %+v", comp.anchor)
+	}
+	comp.ta.SetValue("Overall this looks good, one question in a.go.")
+	comp.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if len(s.comments) != 1 || s.comments[0].File != "" {
+		t.Fatalf("comments: %+v", s.comments)
+	}
+
+	_, cmd = screen.Update(key("P"))
+	pub := runCmd(cmd)[0].(pushScreenMsg).screen.(*publish)
+	var ps Screen = pub
+	ps.Init()
+	ps, _ = ps.Update(key("enter"))
+	for range 10 {
+		msg := <-pub.ch
+		ps, _ = ps.Update(msg)
+		if _, ok := msg.(publishDoneMsg); ok {
+			break
+		}
+	}
+	if len(svc.posted) != 1 || svc.posted[0].pos != nil {
+		t.Fatalf("expected one general note, got %+v", svc.posted)
+	}
+	if svc.posted[0].body != "Overall this looks good, one question in a.go." {
+		t.Errorf("body = %q", svc.posted[0].body)
+	}
+	if s.comments[0].State != review.StatePublished {
+		t.Errorf("state = %v", s.comments[0].State)
+	}
+}
+
 func TestAppStackRouting(t *testing.T) {
 	svc := &fakeService{mrs: sampleMRs()}
 	app := NewApp(testDeps(svc))
@@ -558,7 +724,7 @@ func TestReviewRunHappyFlow(t *testing.T) {
 		return "/tmp/worktree", func(context.Context) error { cleanedUp = true; return nil }, nil
 	}
 
-	s := newReviewRun(deps, *detail, diffs, nil)
+	s := newReviewRun(deps, *detail, diffs, nil, nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 
@@ -696,7 +862,7 @@ func TestReviewRunRebaseWarning(t *testing.T) {
 		return "/tmp/worktree", func(context.Context) error { return nil }, nil
 	}
 
-	s := newReviewRun(deps, *detail, diffs, nil)
+	s := newReviewRun(deps, *detail, diffs, nil, nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	screen.Init()
@@ -733,7 +899,7 @@ func TestReviewRunCheckoutFailure(t *testing.T) {
 	deps.Checkout = func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
 		return "", nil, errors.New("clone exploded")
 	}
-	s := newReviewRun(deps, *detail, diffs, nil)
+	s := newReviewRun(deps, *detail, diffs, nil, nil, nil)
 	var screen Screen = s
 	screen.Init()
 	for range 10 {
@@ -756,7 +922,7 @@ func TestFindingsRendersWarningsWithFindings(t *testing.T) {
 	// A review that produced findings AND carries a rebase warning: the
 	// warning must still show, not only on the empty-review screen.
 	result.Warnings = []string{"MR branch is 3 commit(s) behind main — a rebase is needed"}
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "")
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if len(s.items) == 0 {
@@ -769,7 +935,7 @@ func TestFindingsRendersWarningsWithFindings(t *testing.T) {
 
 func TestFindingsCuration(t *testing.T) {
 	detail, diffs, result := reviewFixture()
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "")
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -1006,7 +1172,7 @@ func TestFindingsAutoComment(t *testing.T) {
 	deps.Cfg.Publish.AutoComment = true
 	deps.Cfg.Publish.AutoMinSeverity = "major"
 
-	s := newFindings(deps, *detail, diffs, result, "")
+	s := newFindings(deps, *detail, diffs, result, "", nil, nil)
 	// major finding pre-accepted, info finding untouched
 	if s.items[0].State != review.StateAccepted {
 		t.Errorf("major finding should be pre-accepted: %v", s.items[0].State)
@@ -1036,6 +1202,97 @@ func TestFindingsAutoComment(t *testing.T) {
 	}
 }
 
+func TestFindingsManualComment(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", nil, nil)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+
+	// c opens the composer for an MR-level comment
+	_, cmd := screen.Update(key("c"))
+	comp := runCmd(cmd)[0].(pushScreenMsg).screen.(*commentComposer)
+	comp.ta.SetValue("One general question about the approach.")
+	comp.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+
+	if len(s.items) != 3 {
+		t.Fatalf("items = %d", len(s.items))
+	}
+	added := s.items[2]
+	if !added.Manual || added.State != review.StateAccepted || added.File != "" {
+		t.Fatalf("added item: %+v", added)
+	}
+	if !strings.Contains(stripANSI(screen.View()), "manual") {
+		t.Errorf("manual badge missing:\n%s", screen.View())
+	}
+
+	// p publishes the accepted set — just the manual comment here
+	_, cmd = screen.Update(key("p"))
+	pub := runCmd(cmd)[0].(pushScreenMsg).screen.(*publish)
+	if len(pub.items) != 1 || !pub.items[0].Manual {
+		t.Fatalf("publish items: %+v", pub.items)
+	}
+}
+
+func TestFindingsForwardsManualStateToDiffView(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	manual := []review.Finding{{
+		ID: "m001", File: "a.go", Line: review.LineRef{NewLine: intp(2)},
+		Body: "typed in the diff view", Manual: true, State: review.StateAccepted,
+	}}
+	var gotID string
+	var gotState review.FindingState
+	report := func(id string, state review.FindingState) { gotID, gotState = id, state }
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", manual, report)
+
+	if len(s.items) != 3 || !s.items[2].Manual {
+		t.Fatalf("manual comment not merged: %+v", s.items)
+	}
+
+	// publish outcomes for manual comments flow back to the diff view…
+	s.setState("m001", review.StatePublished)
+	if gotID != "m001" || gotState != review.StatePublished {
+		t.Errorf("manual report: id=%q state=%v", gotID, gotState)
+	}
+	// …but the model's findings do not
+	gotID = ""
+	s.setState("f001", review.StatePublished)
+	if gotID != "" {
+		t.Errorf("model finding leaked into the manual report: %q", gotID)
+	}
+}
+
+func TestRenderDiffLineRefs(t *testing.T) {
+	fd := gitlabx.FileDiff{
+		OldPath: "a.go", NewPath: "a.go",
+		Diff: "@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n",
+	}
+
+	// unified: header, hunk, context, removal, addition
+	_, _, refs := renderDiff(fd, nil, 80, false)
+	wantU := []diffLineRef{{}, {}, {old: 1, new: 1}, {old: 2}, {new: 2}}
+	if len(refs) != len(wantU) {
+		t.Fatalf("unified refs = %+v", refs)
+	}
+	for i, want := range wantU {
+		if refs[i] != want {
+			t.Errorf("unified ref[%d] = %+v, want %+v", i, refs[i], want)
+		}
+	}
+
+	// split: header, hunk, context row, then the removal/addition pair on
+	// one row carrying both sides.
+	_, _, refs = renderDiff(fd, nil, 100, true)
+	wantS := []diffLineRef{{}, {}, {old: 1, new: 1}, {old: 2, new: 2}}
+	if len(refs) != len(wantS) {
+		t.Fatalf("split refs = %+v", refs)
+	}
+	for i, want := range wantS {
+		if refs[i] != want {
+			t.Errorf("split ref[%d] = %+v, want %+v", i, refs[i], want)
+		}
+	}
+}
+
 func TestRenderDiffWithDiscussions(t *testing.T) {
 	fd := gitlabx.FileDiff{
 		OldPath: "a.go", NewPath: "a.go",
@@ -1058,7 +1315,7 @@ func TestRenderDiffWithDiscussions(t *testing.T) {
 		},
 	}
 
-	content, hunks := renderDiff(fd, discussions, 80, false)
+	content, hunks, _ := renderDiff(fd, discussions, 80, false)
 	if !strings.Contains(content, "@carol") || !strings.Contains(content, "please rename this") {
 		t.Errorf("discussion not rendered:\n%s", content)
 	}
@@ -1093,7 +1350,7 @@ func TestRenderSplitDiff(t *testing.T) {
 		}},
 	}}
 
-	content, hunks := renderDiff(fd, discussions, 100, true)
+	content, hunks, _ := renderDiff(fd, discussions, 100, true)
 	lines := strings.Split(content, "\n")
 	if len(hunks) != 2 {
 		t.Fatalf("hunks = %v", hunks)

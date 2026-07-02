@@ -20,6 +20,10 @@ var severityStyles = map[review.Severity]lipgloss.Style{
 	review.SeverityInfo:     lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Padding(0, 1),
 }
 
+// manualStyle badges comments the reviewer wrote by hand, where model
+// findings show their severity.
+var manualStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Padding(0, 1)
+
 var stateStyles = map[review.FindingState]lipgloss.Style{
 	review.StateAccepted: lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
 	review.StateRejected: lipgloss.NewStyle().Faint(true).Strikethrough(true),
@@ -39,6 +43,10 @@ type findings struct {
 	cursor  int
 	logPath string // this run's stored progress log ("" when not stored)
 
+	// manualReport forwards publish outcomes for manual comments that were
+	// composed in the diff view, so that screen's copies stay in sync.
+	manualReport func(id string, state review.FindingState)
+
 	editing bool
 	editor  textarea.Model
 
@@ -46,7 +54,7 @@ type findings struct {
 	height int
 }
 
-func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result, logPath string) *findings {
+func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result, logPath string, manual []review.Finding, manualReport func(string, review.FindingState)) *findings {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
 	cfg := deps.cfgFor(detail.ProjectPath)
@@ -64,15 +72,20 @@ func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, r
 		}
 	}
 
+	// Manual comments composed in the diff view are curated and published
+	// alongside the review's findings; they arrive already accepted.
+	items = append(items, manual...)
+
 	return &findings{
-		deps:    deps,
-		detail:  detail,
-		diffs:   diffs,
-		cfg:     cfg,
-		result:  result,
-		items:   items,
-		logPath: logPath,
-		editor:  ta,
+		deps:         deps,
+		detail:       detail,
+		diffs:        diffs,
+		cfg:          cfg,
+		result:       result,
+		items:        items,
+		logPath:      logPath,
+		manualReport: manualReport,
+		editor:       ta,
 	}
 }
 
@@ -82,9 +95,18 @@ func (s *findings) setState(id string, state review.FindingState) {
 	for i := range s.items {
 		if s.items[i].ID == id {
 			s.items[i].State = state
+			if s.items[i].Manual && s.manualReport != nil {
+				s.manualReport(id, state)
+			}
 			return
 		}
 	}
+}
+
+// addComment appends a manual MR-level comment composed from this screen.
+func (s *findings) addComment(f review.Finding) {
+	s.items = append(s.items, f)
+	s.cursor = len(s.items) - 1
 }
 
 func (s *findings) Title() string {
@@ -98,7 +120,7 @@ func (s *findings) Hints() string {
 	if s.editing {
 		return "ctrl+s save · esc discard edit"
 	}
-	hints := "↑/↓ move · a accept · x reject · A accept all · e edit · p publish accepted"
+	hints := "↑/↓ move · a accept · x reject · A accept all · e edit · c new comment · p publish accepted"
 	if s.logPath != "" {
 		hints += " · l log"
 	}
@@ -193,6 +215,9 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		if s.logPath != "" {
 			return s, pushScreen(newLogView(s.detail.Ref(), s.logPath))
 		}
+	case "c":
+		// A manual MR-level comment, published with the accepted findings.
+		return s, pushScreen(newCommentComposer(nil, "", s.addComment))
 	case "p":
 		accepted := s.accepted()
 		if len(accepted) == 0 {
@@ -251,6 +276,9 @@ func (s *findings) View() string {
 			prefix = "> "
 		}
 		sev := severityStyles[f.Severity].Render(string(f.Severity))
+		if f.Manual {
+			sev = manualStyle.Render("manual")
+		}
 		state := f.State.String()
 		if st, ok := stateStyles[f.State]; ok && f.State != review.StatePending {
 			state = st.Render(state)
@@ -258,8 +286,8 @@ func (s *findings) View() string {
 			state = subtleStyle.Render(state)
 		}
 		line := fmt.Sprintf("%s%s %-30s %s  %s", prefix, sev,
-			truncate(fmt.Sprintf("%s:%s", f.File, lineLabel(f.Line)), 30),
-			truncate(f.Title, max(s.width-55, 15)), state)
+			truncate(findingLocation(f), 30),
+			truncate(manualTitle(f), max(s.width-55, 15)), state)
 		b.WriteString(truncate(line, s.width) + "\n")
 	}
 	b.WriteString(strings.Repeat("─", max(s.width, 1)) + "\n")
@@ -272,8 +300,13 @@ func (s *findings) View() string {
 	}
 
 	f := s.items[s.cursor]
-	fmt.Fprintf(&b, "%s %s  %s\n\n", severityStyles[f.Severity].Render(string(f.Severity)+" · "+string(f.Category)),
-		headerStyle.Render(f.Title), subtleStyle.Render(fmt.Sprintf("%s:%s", f.File, lineLabel(f.Line))))
+	if f.Manual {
+		fmt.Fprintf(&b, "%s %s  %s\n\n", manualStyle.Render("manual"),
+			headerStyle.Render("your comment"), subtleStyle.Render(findingLocation(f)))
+	} else {
+		fmt.Fprintf(&b, "%s %s  %s\n\n", severityStyles[f.Severity].Render(string(f.Severity)+" · "+string(f.Category)),
+			headerStyle.Render(f.Title), subtleStyle.Render(findingLocation(f)))
+	}
 
 	detailLines := s.detailHeight() - 3 - warningsHeight(s.result.Warnings)
 	body := wrap(f.Body, s.width-2)

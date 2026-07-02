@@ -53,6 +53,11 @@ func (f Finding) templateData() map[string]any {
 // only when anchored to a new-side line (GitLab applies suggestions to the
 // commented line).
 func (f Finding) RenderBody(tmpl *template.Template, attribution bool) string {
+	if f.Manual {
+		// A human wrote this comment: post it exactly as typed. The template
+		// and attribution footer describe model-suggested findings.
+		return strings.TrimSpace(f.Body)
+	}
 	if tmpl == nil {
 		tmpl = defaultBodyTmpl
 	}

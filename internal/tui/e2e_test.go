@@ -174,7 +174,7 @@ func TestEndToEndReviewFlow(t *testing.T) {
 	}
 
 	// --- run the review screen ---
-	run := newReviewRun(deps, *detail, diffs, nil)
+	run := newReviewRun(deps, *detail, diffs, nil, nil, nil)
 	var screen Screen = run
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	screen.Init()
@@ -200,7 +200,7 @@ func TestEndToEndReviewFlow(t *testing.T) {
 	}
 
 	// --- curate and publish through the real screens ---
-	fs := newFindings(deps, *detail, diffs, result, "")
+	fs := newFindings(deps, *detail, diffs, result, "", nil, nil)
 	screen = fs
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	_, _ = screen.Update(key("a")) // accept

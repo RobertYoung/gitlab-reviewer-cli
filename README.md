@@ -88,6 +88,14 @@ on the findings screen (or after a failed review) to read the current
 run's log, and `L` on the MR detail screen to browse the stored logs of
 past runs for that MR.
 
+You can also comment yourself, without leaving the TUI: in the diff view
+move the line cursor (`↑`/`↓`) and press `c` to comment on the selected
+line, or `C` for a general MR-level comment. Manual comments post verbatim
+(no template or attribution footer) and go through the same publish
+pipeline as generated findings — publish them directly with `P`, or press
+`r` and they ride along to be curated and published with the review's
+findings.
+
 ## Configuration
 
 Every setting is available as a flag, an environment variable, and a key in

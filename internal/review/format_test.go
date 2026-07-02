@@ -81,6 +81,29 @@ func TestRenderBodyKeepsSuggestionAndAttribution(t *testing.T) {
 	}
 }
 
+func TestRenderBodyManualIsVerbatim(t *testing.T) {
+	f := Finding{
+		File:   "internal/app/server.go",
+		Line:   LineRef{NewLine: intPtr(42)},
+		Body:   "  Could we reuse the shared client here?\n\nSee `internal/http`.  ",
+		Manual: true,
+	}
+	// Neither the body template nor the attribution footer applies to a
+	// comment the reviewer typed themselves.
+	got := f.RenderBody(nil, true)
+	want := "Could we reuse the shared client here?\n\nSee `internal/http`."
+	if got != want {
+		t.Errorf("RenderBody(manual) = %q, want %q", got, want)
+	}
+	tmpl, err := ParseBodyTemplate("**[{{.severity}}]** {{.body}}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.RenderBody(tmpl, true); got != want {
+		t.Errorf("RenderBody(manual, custom tmpl) = %q, want %q", got, want)
+	}
+}
+
 func TestRenderFallbackBodyUsesTemplate(t *testing.T) {
 	tmpl, err := ParseBodyTemplate("{{.body}}")
 	if err != nil {

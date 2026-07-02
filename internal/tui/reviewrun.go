@@ -38,6 +38,12 @@ type reviewRun struct {
 	commits []gitlabx.Commit
 	cfg     config.Config
 
+	// manual comments composed in the diff view ride along so the findings
+	// screen can publish them together with the review's findings;
+	// manualReport keeps the diff view's copies in sync by ID.
+	manual       []review.Finding
+	manualReport func(id string, state review.FindingState)
+
 	ch      chan tea.Msg
 	cancel  context.CancelFunc
 	spin    spinner.Model
@@ -50,14 +56,16 @@ type reviewRun struct {
 	height  int
 }
 
-func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit) *reviewRun {
+func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState)) *reviewRun {
 	return &reviewRun{
-		deps:    deps,
-		detail:  detail,
-		diffs:   diffs,
-		commits: commits,
-		cfg:     deps.cfgFor(detail.ProjectPath),
-		spin:    spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		deps:         deps,
+		detail:       detail,
+		diffs:        diffs,
+		commits:      commits,
+		manual:       manual,
+		manualReport: manualReport,
+		cfg:          deps.cfgFor(detail.ProjectPath),
+		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
 }
 
@@ -282,7 +290,7 @@ func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		// Swap this progress screen for the findings editor.
-		return s, popScreens(1, newFindings(s.deps, s.detail, s.diffs, msg.result, msg.logPath))
+		return s, popScreens(1, newFindings(s.deps, s.detail, s.diffs, msg.result, msg.logPath, s.manual, s.manualReport))
 
 	case tea.KeyPressMsg:
 		switch msg.String() {

@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 )
 
 type (
@@ -60,14 +61,25 @@ type mrDetail struct {
 	width     int
 	height    int
 
+	// cursor is the selected rendered line of the current file (-1 when the
+	// file has no commentable line); lineRefs maps rendered lines back to
+	// diff line numbers so manual comments can anchor.
+	cursor   int
+	lineRefs []diffLineRef
+
+	// comments are manual comments composed in this view, waiting to be
+	// published (directly with P, or alongside a review's findings via r).
+	comments []review.Finding
+
 	// rendered caches chroma-highlighted diffs per file; re-rendering on
 	// every n/p toggle would be wasteful on large files.
 	rendered map[int]renderedDiff
 }
 
 type renderedDiff struct {
-	content string
-	hunks   []int
+	lines []string
+	hunks []int
+	refs  []diffLineRef
 }
 
 func newMRDetail(deps Deps, mr gitlabx.MRSummary) *mrDetail {
@@ -90,10 +102,15 @@ func (s *mrDetail) Hints() string {
 	if s.treeFocus {
 		return "↑/↓ move · enter open · h/l fold/unfold · tab diff · e hide · esc back · q quit"
 	}
+	explorer := "e explorer"
 	if s.treeWidth() > 0 {
-		return "↑/↓ scroll · n/p file · ]/[ hunk · tab explorer · e hide · v layout · r review · L logs · o browser · esc back"
+		explorer = "tab explorer · e hide"
 	}
-	return "↑/↓ scroll · n/p file · ]/[ hunk · e explorer · v layout · r review · L logs · o browser · esc back · q quit"
+	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · r review · L logs · o browser · esc back"
+	if len(s.pendingComments()) > 0 {
+		hints = "P publish comments · " + hints
+	}
+	return hints
 }
 
 func (s *mrDetail) Init() tea.Cmd {
@@ -270,7 +287,7 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			if s.detail == nil || s.loading > 0 {
 				return s, nil
 			}
-			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits))
+			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits, s.pendingComments(), s.setCommentState))
 		case "L":
 			return s, pushScreen(newLogList(s.deps, s.mr.Ref()))
 		case "n", "right":
@@ -292,12 +309,54 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		case "[":
 			s.jumpHunk(-1)
 			return s, nil
+		case "up", "k":
+			if len(s.lineRefs) > 0 {
+				s.moveCursor(-1)
+				return s, nil
+			}
+		case "down", "j":
+			if len(s.lineRefs) > 0 {
+				s.moveCursor(1)
+				return s, nil
+			}
 		case "g":
 			s.vp.GotoTop()
+			s.snapCursor(0)
+			s.refresh()
 			return s, nil
 		case "G":
 			s.vp.GotoBottom()
+			s.snapCursor(len(s.lineRefs) - 1)
+			s.refresh()
 			return s, nil
+		case "c":
+			if s.cursor < 0 || s.cursor >= len(s.lineRefs) || !s.lineRefs[s.cursor].commentable() {
+				return s, nil
+			}
+			ref := s.lineRefs[s.cursor]
+			anchor := &commentAnchor{file: s.diffs[s.fileIdx].NewPath}
+			if ref.old > 0 {
+				old := ref.old
+				anchor.line.OldLine = &old
+			}
+			if ref.new > 0 {
+				newL := ref.new
+				anchor.line.NewLine = &newL
+			}
+			excerpt := ""
+			if r, ok := s.rendered[s.fileIdx]; ok && s.cursor < len(r.lines) {
+				excerpt = r.lines[s.cursor]
+			}
+			return s, pushScreen(newCommentComposer(anchor, excerpt, s.addComment))
+		case "C":
+			return s, pushScreen(newCommentComposer(nil, "", s.addComment))
+		case "P":
+			pending := s.pendingComments()
+			if len(pending) == 0 || s.detail == nil {
+				return s, nil
+			}
+			return s, pushScreen(newPublish(s.deps, *s.detail, s.diffs, pending,
+				publishOpts{popCount: 1, report: s.setCommentState}))
 		}
 	}
 
@@ -319,19 +378,125 @@ func (s *mrDetail) setFile(idx int) {
 	}
 	r, ok := s.rendered[s.fileIdx]
 	if !ok {
-		content, hunks := renderDiff(s.diffs[s.fileIdx], s.discussions, max(s.mainWidth(), 60), s.split)
-		r = renderedDiff{content: content, hunks: hunks}
+		// Two cells are reserved for the cursor gutter added in refresh.
+		content, hunks, refs := renderDiff(s.diffs[s.fileIdx], s.allDiscussions(s.fileIdx), max(s.mainWidth()-2, 58), s.split)
+		r = renderedDiff{lines: strings.Split(content, "\n"), hunks: hunks, refs: refs}
 		s.rendered[s.fileIdx] = r
 	}
 	s.hunkLines = r.hunks
+	s.lineRefs = r.refs
 	if s.tree != nil {
 		s.tree.reveal(s.fileIdx)
 	}
-	s.vp.SetContent(r.content)
+	if keepOffset {
+		s.snapCursor(min(s.cursor, len(s.lineRefs)-1))
+	} else {
+		s.snapCursor(0)
+	}
+	s.refresh()
 	if keepOffset {
 		s.vp.SetYOffset(offset)
 	} else {
 		s.vp.GotoTop()
+	}
+}
+
+// allDiscussions merges the MR's fetched discussions with synthetic threads
+// for manual comments on the given file, so a comment shows up in the diff
+// the moment it is written.
+func (s *mrDetail) allDiscussions(fileIdx int) []gitlabx.Discussion {
+	fd := s.diffs[fileIdx]
+	out := s.discussions
+	for _, c := range s.comments {
+		if c.File == "" || (c.File != fd.NewPath && c.File != fd.OldPath) {
+			continue
+		}
+		author := "you (pending)"
+		if c.State == review.StatePublished || c.State == review.StateFellBack {
+			author = "you"
+		}
+		out = append(out, gitlabx.Discussion{
+			ID: c.ID,
+			Notes: []gitlabx.Note{{
+				Author: author,
+				Body:   c.Body,
+				Position: &gitlabx.Position{
+					OldPath: fd.OldPath,
+					NewPath: fd.NewPath,
+					OldLine: c.Line.OldLine,
+					NewLine: c.Line.NewLine,
+				},
+			}},
+		})
+	}
+	return out
+}
+
+// refresh rebuilds the viewport content with the cursor gutter; the cached
+// render itself is untouched.
+func (s *mrDetail) refresh() {
+	r, ok := s.rendered[s.fileIdx]
+	if !ok {
+		return
+	}
+	var b strings.Builder
+	for i, line := range r.lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		if i == s.cursor {
+			b.WriteString(cursorGutterStyle.Render("▌") + " ")
+		} else {
+			b.WriteString("  ")
+		}
+		b.WriteString(line)
+	}
+	s.vp.SetContent(b.String())
+}
+
+// snapCursor puts the cursor on the nearest commentable line at or after
+// from, falling back to earlier lines, or -1 when the file has none.
+func (s *mrDetail) snapCursor(from int) {
+	from = max(from, 0)
+	for i := from; i < len(s.lineRefs); i++ {
+		if s.lineRefs[i].commentable() {
+			s.cursor = i
+			return
+		}
+	}
+	for i := min(from, len(s.lineRefs)-1); i >= 0; i-- {
+		if s.lineRefs[i].commentable() {
+			s.cursor = i
+			return
+		}
+	}
+	s.cursor = -1
+}
+
+// moveCursor advances the cursor to the next commentable line in dir,
+// scrolling the viewport to keep it visible.
+func (s *mrDetail) moveCursor(dir int) {
+	if s.cursor < 0 {
+		return
+	}
+	for i := s.cursor + dir; i >= 0 && i < len(s.lineRefs); i += dir {
+		if s.lineRefs[i].commentable() {
+			s.cursor = i
+			s.refresh()
+			s.scrollToCursor()
+			return
+		}
+	}
+}
+
+func (s *mrDetail) scrollToCursor() {
+	if s.cursor < 0 {
+		return
+	}
+	if s.cursor < s.vp.YOffset() {
+		s.vp.SetYOffset(s.cursor)
+	} else if bottom := s.vp.YOffset() + s.vp.Height() - 1; s.cursor > bottom {
+		s.vp.SetYOffset(s.cursor - s.vp.Height() + 1)
 	}
 }
 
@@ -341,26 +506,66 @@ func (s *mrDetail) invalidateRender() {
 	s.rendered = nil
 }
 
+// addComment stores a manual comment composed in this view and re-renders
+// so it shows inline immediately. Runs on the UI goroutine.
+func (s *mrDetail) addComment(f review.Finding) {
+	s.comments = append(s.comments, f)
+	s.invalidateRender()
+	s.setFile(s.fileIdx)
+}
+
+// pendingComments are the manual comments not yet posted to GitLab.
+func (s *mrDetail) pendingComments() []review.Finding {
+	var out []review.Finding
+	for _, c := range s.comments {
+		if c.State == review.StateAccepted {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// setCommentState records a publish outcome for a manual comment; reported
+// by the publish screen directly, or forwarded by the findings screen when
+// the comment was published alongside a review. Runs on the UI goroutine.
+func (s *mrDetail) setCommentState(id string, state review.FindingState) {
+	for i := range s.comments {
+		if s.comments[i].ID == id {
+			s.comments[i].State = state
+			s.invalidateRender()
+			s.setFile(s.fileIdx)
+			return
+		}
+	}
+}
+
 func (s *mrDetail) jumpHunk(dir int) {
 	if len(s.hunkLines) == 0 {
 		return
+	}
+	jump := func(line int) {
+		s.snapCursor(line)
+		s.refresh()
+		s.vp.SetYOffset(line)
 	}
 	cur := s.vp.YOffset()
 	if dir > 0 {
 		for _, l := range s.hunkLines {
 			if l > cur {
-				s.vp.SetYOffset(l)
+				jump(l)
 				return
 			}
 		}
 	} else {
 		for i := len(s.hunkLines) - 1; i >= 0; i-- {
 			if s.hunkLines[i] < cur {
-				s.vp.SetYOffset(s.hunkLines[i])
+				jump(s.hunkLines[i])
 				return
 			}
 		}
 		s.vp.GotoTop()
+		s.snapCursor(0)
+		s.refresh()
 	}
 }
 
@@ -378,7 +583,11 @@ func (s *mrDetail) header() string {
 	b.WriteByte('\n')
 	b.WriteString(subtleStyle.Render(truncate(s.mr.WebURL, max(s.width-2, 20))) + "\n")
 	if len(s.diffs) > 0 {
-		fmt.Fprintf(&b, "%s\n", subtleStyle.Render(fmt.Sprintf("file %d/%d · %s", s.fileIdx+1, len(s.diffs), truncate(s.diffs[s.fileIdx].Path(), max(s.mainWidth()-14, 20)))))
+		info := fmt.Sprintf("file %d/%d · %s", s.fileIdx+1, len(s.diffs), truncate(s.diffs[s.fileIdx].Path(), max(s.mainWidth()-14, 20)))
+		if pending := len(s.pendingComments()); pending > 0 {
+			info += fmt.Sprintf(" · %d pending comment(s)", pending)
+		}
+		fmt.Fprintf(&b, "%s\n", subtleStyle.Render(info))
 	} else if s.loading > 0 {
 		fmt.Fprintf(&b, "%s loading…\n", s.spin.View())
 	} else {
