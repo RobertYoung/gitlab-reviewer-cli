@@ -790,7 +790,7 @@ func TestReviewLogBrowseAndView(t *testing.T) {
 	l.Append("preparing repository…")
 	l.Finish("completed with 1 finding(s)")
 
-	s := newLogList(deps, "group/app!11")
+	s := newLogList(deps, "group/app!11", "https://gitlab.com/group/app/-/merge_requests/11")
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	for _, msg := range runCmd(screen.Init()) {
@@ -835,10 +835,35 @@ func TestReviewLogBrowseAndView(t *testing.T) {
 	}
 }
 
+// Every MR-related screen must open the MR in the browser with o.
+func TestOpenBrowserOnMRScreens(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	var opened []string
+	deps := testDeps(&fakeService{})
+	deps.OpenURL = func(url string) error { opened = append(opened, url); return nil }
+	deps.Logs = runlog.NewStore(t.TempDir())
+
+	screens := map[string]Screen{
+		"reviewrun": newReviewRun(deps, *detail, diffs, nil, nil, nil),
+		"findings":  newFindings(deps, *detail, diffs, result, "", nil, nil),
+		"publish":   newPublish(deps, *detail, diffs, result.Findings, publishOpts{}),
+		"loglist":   newLogList(deps, detail.Ref(), detail.WebURL),
+		"logview":   newLogView(deps, detail.Ref(), detail.WebURL, "unused.log"),
+	}
+	for name, screen := range screens {
+		opened = nil
+		_, cmd := screen.Update(key("o"))
+		runCmd(cmd)
+		if len(opened) != 1 || opened[0] != detail.WebURL {
+			t.Errorf("%s: opened = %v", name, opened)
+		}
+	}
+}
+
 func TestReviewLogListEmpty(t *testing.T) {
 	deps := testDeps(&fakeService{})
 	deps.Logs = runlog.NewStore(t.TempDir())
-	s := newLogList(deps, "group/app!99")
+	s := newLogList(deps, "group/app!99", "https://gitlab.com/group/app/-/merge_requests/99")
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	for _, msg := range runCmd(screen.Init()) {

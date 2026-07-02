@@ -89,6 +89,7 @@ func (s *helpScreen) View() string {
 		{"review", [][2]string{
 			{"esc", "cancel the running review"},
 			{"l", "view the run log after a failure"},
+			{"o", "open MR in browser"},
 		}},
 		{"findings", [][2]string{
 			{"↑/↓ j/k", "move"},
@@ -98,12 +99,20 @@ func (s *helpScreen) View() string {
 			{"c", "add your own MR-level comment"},
 			{"p", "publish accepted findings"},
 			{"l", "view this review's run log"},
+			{"o", "open MR in browser"},
 		}},
 		{"publish", [][2]string{
 			{"m", "toggle immediate/draft mode"},
 			{"enter", "start publishing"},
 			{"P", "publish draft review"},
 			{"esc", "keep as pending drafts"},
+			{"o", "open MR in browser"},
+		}},
+		{"review logs", [][2]string{
+			{"↑/↓ j/k", "move"},
+			{"enter", "open log"},
+			{"g/G", "top/bottom (viewer)"},
+			{"o", "open MR in browser"},
 		}},
 	}
 

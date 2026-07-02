@@ -103,11 +103,11 @@ func (s *publish) Title() string {
 func (s *publish) Hints() string {
 	switch s.phase {
 	case phaseConfirm:
-		return "enter publish · m toggle mode · esc back"
+		return "enter publish · m toggle mode · o browser · esc back"
 	case phaseDraftReady:
-		return "P publish review · esc keep as drafts"
+		return "P publish review · o browser · esc keep as drafts"
 	case phaseDone:
-		return "enter/esc done"
+		return "enter/esc done · o browser"
 	default:
 		return "posting…"
 	}
@@ -281,6 +281,10 @@ func (s *publish) postedCount() int {
 }
 
 func (s *publish) updateKeys(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	// The MR is one keypress away in every phase, including mid-posting.
+	if msg.String() == "o" {
+		return s, openURLCmd(s.deps, s.detail.WebURL)
+	}
 	switch s.phase {
 	case phaseConfirm:
 		switch msg.String() {

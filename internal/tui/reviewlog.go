@@ -28,6 +28,7 @@ type (
 type logList struct {
 	deps    Deps
 	ref     string
+	webURL  string
 	entries []runlog.Entry
 	cursor  int
 	loaded  bool
@@ -36,12 +37,12 @@ type logList struct {
 	height  int
 }
 
-func newLogList(deps Deps, ref string) *logList {
-	return &logList{deps: deps, ref: ref}
+func newLogList(deps Deps, ref, webURL string) *logList {
+	return &logList{deps: deps, ref: ref, webURL: webURL}
 }
 
 func (s *logList) Title() string { return "review logs · " + s.ref }
-func (s *logList) Hints() string { return "↑/↓ move · enter view · esc back" }
+func (s *logList) Hints() string { return "↑/↓ move · enter view · o browser · esc back" }
 
 func (s *logList) Init() tea.Cmd {
 	ref, logs := s.ref, s.deps.Logs
@@ -80,8 +81,10 @@ func (s *logList) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		case "enter":
 			if s.cursor < len(s.entries) {
 				e := s.entries[s.cursor]
-				return s, pushScreen(newLogView(e.Ref, e.Path))
+				return s, pushScreen(newLogView(s.deps, e.Ref, s.webURL, e.Path))
 			}
+		case "o":
+			return s, openURLCmd(s.deps, s.webURL)
 		}
 	}
 	return s, nil
@@ -120,7 +123,9 @@ func (s *logList) View() string {
 
 // logView displays one stored review run log in a scrollable viewport.
 type logView struct {
+	deps   Deps
 	ref    string
+	webURL string
 	path   string
 	vp     viewport.Model
 	loaded bool
@@ -129,12 +134,12 @@ type logView struct {
 	height int
 }
 
-func newLogView(ref, path string) *logView {
-	return &logView{ref: ref, path: path, vp: viewport.New()}
+func newLogView(deps Deps, ref, webURL, path string) *logView {
+	return &logView{deps: deps, ref: ref, webURL: webURL, path: path, vp: viewport.New()}
 }
 
 func (s *logView) Title() string { return "review log · " + s.ref }
-func (s *logView) Hints() string { return "↑/↓ scroll · g/G top/bottom · esc back" }
+func (s *logView) Hints() string { return "↑/↓ scroll · g/G top/bottom · o browser · esc back" }
 
 func (s *logView) Init() tea.Cmd {
 	path := s.path
@@ -173,6 +178,8 @@ func (s *logView) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		case "G":
 			s.vp.GotoBottom()
 			return s, nil
+		case "o":
+			return s, openURLCmd(s.deps, s.webURL)
 		}
 	}
 	var cmd tea.Cmd

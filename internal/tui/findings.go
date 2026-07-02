@@ -124,7 +124,7 @@ func (s *findings) Hints() string {
 	if s.logPath != "" {
 		hints += " · l log"
 	}
-	return hints + " · esc back"
+	return hints + " · o browser · esc back"
 }
 
 func (s *findings) Init() tea.Cmd {
@@ -213,11 +213,13 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		}
 	case "l":
 		if s.logPath != "" {
-			return s, pushScreen(newLogView(s.detail.Ref(), s.logPath))
+			return s, pushScreen(newLogView(s.deps, s.detail.Ref(), s.detail.WebURL, s.logPath))
 		}
 	case "c":
 		// A manual MR-level comment, published with the accepted findings.
 		return s, pushScreen(newCommentComposer(nil, "", s.addComment))
+	case "o":
+		return s, openURLCmd(s.deps, s.detail.WebURL)
 	case "p":
 		accepted := s.accepted()
 		if len(accepted) == 0 {
