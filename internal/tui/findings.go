@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -11,6 +12,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 )
 
 var severityStyles = map[review.Severity]lipgloss.Style{
@@ -43,6 +45,14 @@ type findings struct {
 	cursor  int
 	logPath string // this run's stored progress log ("" when not stored)
 
+	// rec is this review's stored record; every curation change re-saves it
+	// so the review can be reopened after the session ends. Nil when result
+	// storage is disabled.
+	rec *resultstore.Record
+	// reopened marks a screen restored from a stored record: curation
+	// continues where it left off, without re-running auto-publish.
+	reopened bool
+
 	// manualReport forwards publish outcomes for manual comments that were
 	// composed in the diff view, so that screen's copies stay in sync.
 	manualReport func(id string, state review.FindingState)
@@ -54,7 +64,7 @@ type findings struct {
 	height int
 }
 
-func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result, logPath string, manual []review.Finding, manualReport func(string, review.FindingState)) *findings {
+func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result, rec *resultstore.Record, manual []review.Finding, manualReport func(string, review.FindingState)) *findings {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
 	cfg := deps.cfgFor(detail.ProjectPath)
@@ -76,16 +86,57 @@ func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, r
 	// alongside the review's findings; they arrive already accepted.
 	items = append(items, manual...)
 
-	return &findings{
+	s := &findings{
 		deps:         deps,
 		detail:       detail,
 		diffs:        diffs,
 		cfg:          cfg,
 		result:       result,
 		items:        items,
-		logPath:      logPath,
+		rec:          rec,
 		manualReport: manualReport,
 		editor:       ta,
+	}
+	if rec != nil {
+		s.logPath = rec.LogPath
+		// The stored record has the model's findings; bring it up to date
+		// with the curated set (auto-accepts, manual comments).
+		s.persist()
+	}
+	return s
+}
+
+// newFindingsFromRecord reopens a stored review: the same curation screen,
+// with findings and their states restored from the record. Further curation
+// re-saves the same file.
+func newFindingsFromRecord(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, rec *resultstore.Record) *findings {
+	ta := textarea.New()
+	ta.ShowLineNumbers = false
+	items := make([]review.Finding, len(rec.Findings))
+	copy(items, rec.Findings)
+	return &findings{
+		deps:     deps,
+		detail:   detail,
+		diffs:    diffs,
+		cfg:      deps.cfgFor(detail.ProjectPath),
+		result:   &review.Result{Summary: rec.Summary, Warnings: rec.Warnings},
+		items:    items,
+		logPath:  rec.LogPath,
+		rec:      rec,
+		reopened: true,
+		editor:   ta,
+	}
+}
+
+// persist re-saves the record with the current curation states. Best-effort:
+// a failed write must never block curation.
+func (s *findings) persist() {
+	if s.rec == nil {
+		return
+	}
+	s.rec.Findings = append([]review.Finding(nil), s.items...)
+	if err := s.deps.Results.Save(*s.rec); err != nil {
+		slog.Warn("storing review result failed", "error", err)
 	}
 }
 
@@ -98,6 +149,7 @@ func (s *findings) setState(id string, state review.FindingState) {
 			if s.items[i].Manual && s.manualReport != nil {
 				s.manualReport(id, state)
 			}
+			s.persist()
 			return
 		}
 	}
@@ -107,6 +159,7 @@ func (s *findings) setState(id string, state review.FindingState) {
 func (s *findings) addComment(f review.Finding) {
 	s.items = append(s.items, f)
 	s.cursor = len(s.items) - 1
+	s.persist()
 }
 
 func (s *findings) Title() string {
@@ -128,7 +181,7 @@ func (s *findings) Hints() string {
 }
 
 func (s *findings) Init() tea.Cmd {
-	if s.cfg.Publish.AutoComment {
+	if s.cfg.Publish.AutoComment && !s.reopened {
 		if auto := s.accepted(); len(auto) > 0 {
 			// Publish the auto-accepted findings straight away; the
 			// publish screen pops back here for the remaining ones.
@@ -161,6 +214,7 @@ func (s *findings) updateEditor(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	case "ctrl+s":
 		s.items[s.cursor].Body = strings.TrimSpace(s.editor.Value())
 		s.editing = false
+		s.persist()
 		return s, nil
 	case "esc":
 		s.editing = false
@@ -191,6 +245,7 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			if s.cursor < len(s.items)-1 {
 				s.cursor++
 			}
+			s.persist()
 		}
 	case "x":
 		if len(s.items) > 0 {
@@ -198,6 +253,7 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 			if s.cursor < len(s.items)-1 {
 				s.cursor++
 			}
+			s.persist()
 		}
 	case "A":
 		for i := range s.items {
@@ -205,6 +261,7 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 				s.items[i].State = review.StateAccepted
 			}
 		}
+		s.persist()
 	case "e":
 		if len(s.items) > 0 {
 			s.editing = true

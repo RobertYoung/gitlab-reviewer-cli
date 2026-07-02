@@ -106,7 +106,7 @@ func (s *mrDetail) Hints() string {
 	if s.treeWidth() > 0 {
 		explorer = "tab explorer · e hide"
 	}
-	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · r review · L logs · o browser · esc back"
+	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · r review · L past reviews · o browser · esc back"
 	if len(s.pendingComments()) > 0 {
 		hints = "P publish comments · " + hints
 	}
@@ -289,7 +289,10 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits, s.pendingComments(), s.setCommentState))
 		case "L":
-			return s, pushScreen(newLogList(s.deps, s.mr.Ref(), s.mr.WebURL))
+			if s.detail == nil || s.loading > 0 {
+				return s, nil
+			}
+			return s, pushScreen(newReviewHistory(s.deps, *s.detail, s.diffs))
 		case "n", "right":
 			s.setFile(s.fileIdx + 1)
 			return s, nil

@@ -200,7 +200,7 @@ func TestEndToEndReviewFlow(t *testing.T) {
 	}
 
 	// --- curate and publish through the real screens ---
-	fs := newFindings(deps, *detail, diffs, result, "", nil, nil)
+	fs := newFindings(deps, *detail, diffs, result, nil, nil, nil)
 	screen = fs
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	_, _ = screen.Update(key("a")) // accept

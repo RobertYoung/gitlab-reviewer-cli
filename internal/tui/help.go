@@ -76,8 +76,15 @@ func (s *helpScreen) View() string {
 			{"e", "toggle file explorer"},
 			{"tab", "switch focus explorer ↔ diff"},
 			{"r", "review with Claude (pending comments ride along)"},
-			{"L", "browse stored review logs"},
+			{"L", "browse past reviews (stored findings and run logs)"},
 			{"o", "open in browser"},
+		}},
+		{"past reviews (L on the MR detail)", [][2]string{
+			{"↑/↓ j/k", "move"},
+			{"enter", "reopen the review's findings, curation states included"},
+			{"l", "view the run's progress log"},
+			{"g/G", "top/bottom (log viewer)"},
+			{"o", "open MR in browser"},
 		}},
 		{"file explorer (when focused)", [][2]string{
 			{"↑/↓ j/k", "move"},
@@ -106,12 +113,6 @@ func (s *helpScreen) View() string {
 			{"enter", "start publishing"},
 			{"P", "publish draft review"},
 			{"esc", "keep as pending drafts"},
-			{"o", "open MR in browser"},
-		}},
-		{"review logs", [][2]string{
-			{"↑/↓ j/k", "move"},
-			{"enter", "open log"},
-			{"g/G", "top/bottom (viewer)"},
 			{"o", "open MR in browser"},
 		}},
 	}

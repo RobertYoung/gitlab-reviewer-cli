@@ -18,6 +18,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/secret"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/tui"
@@ -105,6 +106,7 @@ func newRoot(st *state) *cobra.Command {
 				Svc:      svc,
 				Reviewer: reviewer,
 				Logs:     runlog.NewStore(reviewsDir),
+				Results:  resultstore.NewStore(reviewsDir),
 				Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 					co, err := manager.Ensure(ctx, mr, progress)
 					if err != nil {

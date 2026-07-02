@@ -83,10 +83,13 @@ Inside the TUI press `?` for the full keybinding reference. The core flow:
 pick an MR (`enter`), inspect the diff, press `r` to run the review, then
 `a`/`x`/`e` to accept/reject/edit findings and `p` to publish them.
 
-Every review run's progress log is stored for later reference: press `l`
-on the findings screen (or after a failed review) to read the current
-run's log, and `L` on the MR detail screen to browse the stored logs of
-past runs for that MR.
+Every review is stored for later reference: the result — summary plus every
+finding with its accept/reject state — is saved when the run completes and
+re-saved on every curation change, so nothing is lost by navigating away or
+closing the terminal. Press `L` on the MR detail screen to browse the past
+reviews of that MR and `enter` to reopen one's findings exactly where you
+left off. Each run's progress log is kept too: press `l` on the findings or
+past-reviews screen (or after a failed review) to read it.
 
 You can also comment yourself, without leaving the TUI: in the diff view
 move the line cursor (`↑`/`↓`) and press `c` to comment on the selected
@@ -372,10 +375,11 @@ wide and hides itself below that.
 | `log.level` | `GITLAB_REVIEWER_LOG_LEVEL` | `--log-level` | `info` |
 | `log.file` | `GITLAB_REVIEWER_LOG_FILE` | `--log-file` | `~/.local/state/gitlab-reviewer/gitlab-reviewer.log` |
 
-Raw review transcripts (`.jsonl`) and per-run progress logs (`.log`, the
-lines shown on the review screen) are kept under
-`~/.local/state/gitlab-reviewer/reviews/`; the logs are browsable in the
-TUI with `L` on an MR's detail screen.
+Raw review transcripts (`.jsonl`), per-run progress logs (`.log`, the lines
+shown on the review screen) and review results (`.json`, the findings with
+their curation states) are kept under
+`~/.local/state/gitlab-reviewer/reviews/`; results and logs are browsable in
+the TUI with `L` on an MR's detail screen.
 
 ### Per-project overrides
 
