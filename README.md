@@ -241,6 +241,37 @@ review:
 Verify with a normal review run — the progress log shows the model the
 session started with.
 
+## Development
+
+Requires Go ≥ 1.26, `git`, and the `claude` CLI on your `PATH`.
+
+```sh
+# Build and run from source
+go build ./cmd/gitlab-reviewer
+
+export GITLAB_REVIEWER_GITLAB_TOKEN=glpat-...
+./gitlab-reviewer --project mygroup/myapp
+
+# Or without the build step
+go run ./cmd/gitlab-reviewer --project mygroup/myapp
+```
+
+`gitlab-reviewer config validate` checks your configuration is complete and
+`gitlab-reviewer config show` prints the effective settings (token
+redacted) — both useful before launching the TUI.
+
+```sh
+# Tests (includes an end-to-end run against a fake GitLab and scripted claude)
+go test -race ./...
+
+# Lint (same config as CI)
+golangci-lint run ./...
+```
+
+Releases are cut automatically by semantic-release from [conventional
+commits](https://www.conventionalcommits.org) on `main`, so commit messages
+matter: `feat:`/`fix:` trigger releases.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — component and sequence diagrams
