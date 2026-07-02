@@ -1,0 +1,10 @@
+# Binaries
+/gitlab-reviewer
+dist/
+
+# Test artifacts
+coverage.out
+*.test
+
+# Editor/OS noise
+.DS_Store
