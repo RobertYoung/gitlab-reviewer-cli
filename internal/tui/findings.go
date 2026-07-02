@@ -224,6 +224,10 @@ func (s *findings) View() string {
 
 	var b strings.Builder
 
+	// warnings banner (rebase status, truncation, failed passes) — shown
+	// above the findings list, not only on the empty-review screen.
+	b.WriteString(warningsView(s.result.Warnings, s.width))
+
 	// list pane
 	listH := s.listHeight()
 	start := 0
@@ -261,7 +265,7 @@ func (s *findings) View() string {
 	fmt.Fprintf(&b, "%s %s  %s\n\n", severityStyles[f.Severity].Render(string(f.Severity)+" · "+string(f.Category)),
 		headerStyle.Render(f.Title), subtleStyle.Render(fmt.Sprintf("%s:%s", f.File, lineLabel(f.Line))))
 
-	detailLines := s.detailHeight() - 3
+	detailLines := s.detailHeight() - 3 - warningsHeight(s.result.Warnings)
 	body := wrap(f.Body, s.width-2)
 	if f.Suggestion != "" {
 		body += "\n\n" + subtleStyle.Render("suggested replacement:") + "\n" + addedStyle.Render("+"+f.Suggestion)
@@ -275,6 +279,15 @@ func (s *findings) View() string {
 	}
 	b.WriteString(strings.Join(lines, "\n"))
 	return b.String()
+}
+
+// warningsHeight is the number of screen lines warningsView renders, so
+// panes below the banner can reserve space for it.
+func warningsHeight(warnings []string) int {
+	if len(warnings) == 0 {
+		return 0
+	}
+	return len(warnings) + 1 // one line per warning plus a trailing blank
 }
 
 func warningsView(warnings []string, width int) string {

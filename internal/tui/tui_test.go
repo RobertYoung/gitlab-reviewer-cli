@@ -512,6 +512,22 @@ func TestReviewRunCheckoutFailure(t *testing.T) {
 	}
 }
 
+func TestFindingsRendersWarningsWithFindings(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	// A review that produced findings AND carries a rebase warning: the
+	// warning must still show, not only on the empty-review screen.
+	result.Warnings = []string{"MR branch is 3 commit(s) behind main — a rebase is needed"}
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	if len(s.items) == 0 {
+		t.Fatal("fixture should have findings")
+	}
+	if !strings.Contains(screen.View(), "rebase is needed") {
+		t.Errorf("rebase warning not rendered on findings screen:\n%s", screen.View())
+	}
+}
+
 func TestFindingsCuration(t *testing.T) {
 	detail, diffs, result := reviewFixture()
 	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result)

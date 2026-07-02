@@ -95,9 +95,14 @@ type MRDetail struct {
 }
 
 // NeedsRebase reports whether the source branch is behind its target or
-// conflicts, i.e. the author should rebase before review.
+// conflicts, i.e. the author should rebase before review. It trusts
+// GitLab's detailed_merge_status ("need_rebase") as well as the
+// diverged-commit count, because the latter is often reported as 0 unless
+// merge status has been recomputed server-side.
 func (m MRDetail) NeedsRebase() bool {
-	return m.HasConflicts || m.DivergedCommits > 0
+	return m.HasConflicts ||
+		m.DivergedCommits > 0 ||
+		m.DetailedMergeStatus == "need_rebase"
 }
 
 // Commit is one commit on an MR's source branch, for hygiene checks that
