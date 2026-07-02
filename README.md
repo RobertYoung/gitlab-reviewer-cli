@@ -332,11 +332,21 @@ text itself, add guidance via `review.instructions`, e.g.
 | File key | Environment variable | Flag | Default |
 |---|---|---|---|
 | `ui.diff_view` | `GITLAB_REVIEWER_UI_DIFF_VIEW` | `--diff-view` | `unified` (`unified`\|`split`) |
+| `ui.file_explorer` | `GITLAB_REVIEWER_UI_FILE_EXPLORER` | `--file-explorer` | `closed` (`open`\|`closed`) |
 
 `ui.diff_view` sets the diff layout on the MR detail screen: `unified`
 (classic `+`/`-` stream) or `split` (side-by-side — old lines left, new
 lines right, with line numbers on both sides). Press `v` in the diff view
 to toggle the layout for the current session regardless of the setting.
+
+`ui.file_explorer` sets the initial state of the changed-files explorer on
+the MR detail screen: a collapsible directory tree in a left sidebar, with a
+status glyph per file (`A`dded, `M`odified, `D`eleted, `R`enamed) and the
+number of discussion threads anchored to it. Press `e` to toggle the sidebar
+and `tab` to move focus between the explorer and the diff; inside the
+explorer, `↑`/`↓`/`j`/`k` move, `enter` opens a file or folds a directory,
+and `h`/`l` fold/unfold. The sidebar needs a terminal at least 80 columns
+wide and hides itself below that.
 
 ### Logging
 

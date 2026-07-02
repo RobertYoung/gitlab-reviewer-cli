@@ -113,6 +113,8 @@ func key(k string) tea.Msg {
 		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "esc":
 		return tea.KeyPressMsg{Code: tea.KeyEscape}
+	case "tab":
+		return tea.KeyPressMsg{Code: tea.KeyTab}
 	default:
 		return tea.KeyPressMsg{Code: rune(k[0]), Text: k}
 	}
@@ -373,6 +375,101 @@ func TestMRDetailShowsURLAndOpensBrowser(t *testing.T) {
 	runCmd(cmd)
 	if len(opened) != 1 || opened[0] != mr.WebURL {
 		t.Errorf("opened = %v", opened)
+	}
+}
+
+func TestMRDetailFileExplorer(t *testing.T) {
+	diff := "@@ -1,2 +1,2 @@\n-old\n+new\n"
+	line := 1
+	svc := &fakeService{
+		detail: &gitlabx.MRDetail{MRSummary: gitlabx.MRSummary{IID: 11}},
+		diffs: []gitlabx.FileDiff{
+			{NewPath: "pkg/a.go", OldPath: "pkg/a.go", Diff: diff},
+			{NewPath: "pkg/b.go", OldPath: "pkg/b.go", Diff: diff, NewFile: true},
+			{NewPath: "top.go", OldPath: "top.go", Diff: diff},
+		},
+		discussions: []gitlabx.Discussion{{
+			ID: "d1",
+			Notes: []gitlabx.Note{{
+				Author: "carol", Body: "hm",
+				Position: &gitlabx.Position{NewPath: "pkg/a.go", OldPath: "pkg/a.go", NewLine: &line},
+			}},
+		}},
+	}
+	mr := gitlabx.MRSummary{ProjectPath: "group/app", IID: 11, Title: "Fix"}
+	s := newMRDetail(testDeps(svc), mr)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg, mrDiscussionsLoadedMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	// closed by default; e opens the sidebar
+	if s.treeWidth() != 0 {
+		t.Fatalf("explorer open by default, width %d", s.treeWidth())
+	}
+	screen, _ = screen.Update(key("e"))
+	if s.treeWidth() == 0 {
+		t.Fatal("e did not open the explorer")
+	}
+	view := stripANSI(screen.View())
+	if !strings.Contains(view, "pkg/") || !strings.Contains(view, "a.go") {
+		t.Errorf("explorer entries missing:\n%s", view)
+	}
+	if !strings.Contains(view, "💬1") {
+		t.Errorf("discussion count missing:\n%s", view)
+	}
+
+	// tab focuses the tree; the cursor starts on the current file (a.go)
+	screen, _ = screen.Update(key("tab"))
+	if !s.treeFocus {
+		t.Fatal("tab did not focus the explorer")
+	}
+	if n := s.tree.selected(); n == nil || n.diffIdx != 0 {
+		t.Fatalf("cursor not on current file: %+v", n)
+	}
+
+	// j + enter opens the next file in the diff pane
+	screen, _ = screen.Update(key("j"))
+	screen, _ = screen.Update(key("enter"))
+	if s.fileIdx != 1 {
+		t.Errorf("fileIdx after explorer select = %d, want 1", s.fileIdx)
+	}
+
+	// h jumps to the parent dir, enter folds it
+	screen, _ = screen.Update(key("h"))
+	screen, _ = screen.Update(key("enter"))
+	if n := s.tree.selected(); n == nil || !n.isDir() || !n.collapsed {
+		t.Fatalf("pkg/ not folded: %+v", n)
+	}
+	rows := len(s.tree.rows)
+	if rows != 2 { // pkg/ + top.go
+		t.Errorf("visible rows after fold = %d, want 2", rows)
+	}
+
+	// esc returns focus to the diff without popping the screen
+	screen, _ = screen.Update(key("esc"))
+	if s.treeFocus {
+		t.Error("esc did not unfocus the explorer")
+	}
+
+	// n-navigation re-reveals the folded file in the tree
+	screen, _ = screen.Update(key("n")) // b.go -> top.go
+	screen, _ = screen.Update(key("n")) // top.go -> a.go
+	if s.fileIdx != 0 {
+		t.Fatalf("fileIdx after n n = %d", s.fileIdx)
+	}
+	if n := s.tree.selected(); n == nil || n.diffIdx != 0 {
+		t.Errorf("tree did not follow diff navigation: %+v", n)
+	}
+
+	// e hides the sidebar again and the diff regains the full width
+	screen.Update(key("e"))
+	if s.treeWidth() != 0 || s.mainWidth() != 120 {
+		t.Errorf("explorer still visible: tree=%d main=%d", s.treeWidth(), s.mainWidth())
 	}
 }
 

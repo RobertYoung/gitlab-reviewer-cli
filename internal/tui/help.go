@@ -70,9 +70,18 @@ func (s *helpScreen) View() string {
 			{"]/[", "next/previous hunk"},
 			{"g/G", "top/bottom"},
 			{"v", "toggle unified / side-by-side diff"},
+			{"e", "toggle file explorer"},
+			{"tab", "switch focus explorer ↔ diff"},
 			{"r", "review with Claude"},
 			{"L", "browse stored review logs"},
 			{"o", "open in browser"},
+		}},
+		{"file explorer (when focused)", [][2]string{
+			{"↑/↓ j/k", "move"},
+			{"enter", "open file / fold directory"},
+			{"h/l", "fold / unfold directory"},
+			{"g/G", "top/bottom"},
+			{"esc", "back to the diff"},
 		}},
 		{"review", [][2]string{
 			{"esc", "cancel the running review"},

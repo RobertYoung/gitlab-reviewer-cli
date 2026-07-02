@@ -58,6 +58,7 @@ var envToKey = map[string]string{
 	"PUBLISH_ATTRIBUTION":       "publish.attribution",
 	"PUBLISH_TEMPLATE":          "publish.template",
 	"UI_DIFF_VIEW":              "ui.diff_view",
+	"UI_FILE_EXPLORER":          "ui.file_explorer",
 	"LOG_LEVEL":                 "log.level",
 	"LOG_FILE":                  "log.file",
 }
@@ -117,6 +118,7 @@ var flagToKey = map[string]string{
 	"attribution":       "publish.attribution",
 	"publish-template":  "publish.template",
 	"diff-view":         "ui.diff_view",
+	"file-explorer":     "ui.file_explorer",
 	"log-level":         "log.level",
 	"log-file":          "log.file",
 }
