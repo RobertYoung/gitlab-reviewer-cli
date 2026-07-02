@@ -292,6 +292,62 @@ func TestGetMergeRequestPopulatesRebaseStatus(t *testing.T) {
 	}
 }
 
+func TestGetApprovals(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v4/projects/{project}/merge_requests/11/approvals", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{
+			"approved": true, "approvals_required": 2, "approvals_left": 1,
+			"user_has_approved": true, "user_can_approve": false,
+			"approved_by": []map[string]any{
+				{"user": map[string]any{"username": "alice"}},
+				{"user": map[string]any{"username": "bob"}},
+			},
+		})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	a, err := c.GetApprovals(context.Background(), "group/app", 11)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !a.Approved || a.ApprovalsRequired != 2 || a.ApprovalsLeft != 1 || !a.UserHasApproved || a.UserCanApprove {
+		t.Errorf("approvals mapping: %+v", a)
+	}
+	if len(a.ApprovedBy) != 2 || a.ApprovedBy[0] != "alice" || a.ApprovedBy[1] != "bob" {
+		t.Errorf("approved_by mapping: %v", a.ApprovedBy)
+	}
+}
+
+func TestApproveAndUnapprove(t *testing.T) {
+	mux := http.NewServeMux()
+	var approveBody map[string]any
+	mux.HandleFunc("POST /api/v4/projects/{project}/merge_requests/11/approve", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&approveBody); err != nil {
+			t.Errorf("decoding approve body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(t, w, map[string]any{"approved": true})
+	})
+	unapproved := false
+	mux.HandleFunc("POST /api/v4/projects/{project}/merge_requests/11/unapprove", func(w http.ResponseWriter, r *http.Request) {
+		unapproved = true
+		w.WriteHeader(http.StatusCreated)
+	})
+
+	c := newTestClient(t, nil, nil, mux)
+	if err := c.Approve(context.Background(), "group/app", 11, "head999"); err != nil {
+		t.Fatal(err)
+	}
+	if got := approveBody["sha"]; got != "head999" {
+		t.Errorf("approve sha = %v, want head999", got)
+	}
+	if err := c.Unapprove(context.Background(), "group/app", 11); err != nil {
+		t.Fatal(err)
+	}
+	if !unapproved {
+		t.Error("unapprove endpoint not hit")
+	}
+}
+
 func TestErrorsCarryContext(t *testing.T) {
 	mux := http.NewServeMux() // 404 for everything
 	c := newTestClient(t, []string{"group/app"}, nil, mux)

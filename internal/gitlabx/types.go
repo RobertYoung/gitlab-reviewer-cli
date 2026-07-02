@@ -105,6 +105,16 @@ func (m MRDetail) NeedsRebase() bool {
 		m.DetailedMergeStatus == "need_rebase"
 }
 
+// Approvals is one MR's approval state as seen by the current user.
+type Approvals struct {
+	Approved          bool // every required approval rule is satisfied
+	ApprovalsRequired int64
+	ApprovalsLeft     int64
+	ApprovedBy        []string // usernames
+	UserHasApproved   bool
+	UserCanApprove    bool
+}
+
 // Commit is one commit on an MR's source branch, for hygiene checks that
 // compare commit messages against the diff.
 type Commit struct {

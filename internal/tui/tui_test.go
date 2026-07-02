@@ -45,6 +45,11 @@ type fakeService struct {
 	lastGroupSearch  string
 	lastProjectGroup string
 	memberListed     bool
+
+	approvals    *gitlabx.Approvals
+	approveErr   error
+	approvedSHAs []string
+	unapprovals  int
 }
 
 func (f *fakeService) ListOpenMergeRequests(_ context.Context, filter gitlabx.MRFilter, page gitlabx.Page) ([]gitlabx.MRSummary, bool, error) {
@@ -93,6 +98,28 @@ func (f *fakeService) CreateDraftNote(_ context.Context, _ any, _ int64, body st
 
 func (f *fakeService) PublishAllDraftNotes(context.Context, any, int64) error {
 	f.draftsPublished = true
+	return nil
+}
+
+func (f *fakeService) GetApprovals(context.Context, any, int64) (*gitlabx.Approvals, error) {
+	if f.approvals == nil {
+		return nil, errors.New("approvals unavailable")
+	}
+	return f.approvals, nil
+}
+
+func (f *fakeService) Approve(_ context.Context, _ any, _ int64, sha string) error {
+	if f.approveErr != nil {
+		return f.approveErr
+	}
+	f.approvedSHAs = append(f.approvedSHAs, sha)
+	f.approvals = &gitlabx.Approvals{UserHasApproved: true, ApprovedBy: []string{"you"}}
+	return nil
+}
+
+func (f *fakeService) Unapprove(context.Context, any, int64) error {
+	f.unapprovals++
+	f.approvals = &gitlabx.Approvals{UserCanApprove: true}
 	return nil
 }
 
@@ -377,6 +404,93 @@ func TestMRDetailShowsURLAndOpensBrowser(t *testing.T) {
 	runCmd(cmd)
 	if len(opened) != 1 || opened[0] != mr.WebURL {
 		t.Errorf("opened = %v", opened)
+	}
+}
+
+func TestMRDetailApproveToggle(t *testing.T) {
+	mr := sampleMRs()[0]
+	mr.HeadSHA = "head999"
+	svc := &fakeService{
+		detail:    &gitlabx.MRDetail{MRSummary: mr},
+		diffs:     []gitlabx.FileDiff{{NewPath: "a.go", Diff: "@@ -1,1 +1,1 @@\n-old\n+new\n"}},
+		approvals: &gitlabx.Approvals{UserCanApprove: true, ApprovedBy: []string{"alice"}},
+	}
+	s := newMRDetail(testDeps(svc), mr)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg, mrCommitsLoadedMsg, mrApprovalsMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	if !strings.Contains(screen.View(), "approved by alice") {
+		t.Errorf("view missing existing approval:\n%s", screen.View())
+	}
+	if !strings.Contains(screen.Hints(), "a approve") {
+		t.Errorf("hints should offer approve: %s", screen.Hints())
+	}
+
+	// approve: the action must carry the MR's head SHA and, once the
+	// refreshed state lands, flip the view and the hint.
+	screen, cmd := screen.Update(key("a"))
+	if !s.approvalBusy {
+		t.Error("approvalBusy should be set while the action runs")
+	}
+	for _, msg := range runCmd(cmd) {
+		screen, _ = screen.Update(msg)
+	}
+	if len(svc.approvedSHAs) != 1 || svc.approvedSHAs[0] != "head999" {
+		t.Errorf("approvedSHAs = %v", svc.approvedSHAs)
+	}
+	if !strings.Contains(screen.View(), "approved by you") {
+		t.Errorf("view missing own approval:\n%s", screen.View())
+	}
+	if !strings.Contains(screen.Hints(), "a unapprove") {
+		t.Errorf("hints should offer unapprove: %s", screen.Hints())
+	}
+
+	// press again: removes the approval
+	screen, cmd = screen.Update(key("a"))
+	for _, msg := range runCmd(cmd) {
+		screen, _ = screen.Update(msg)
+	}
+	if svc.unapprovals != 1 {
+		t.Errorf("unapprovals = %d", svc.unapprovals)
+	}
+	if strings.Contains(screen.View(), "approved by") {
+		t.Errorf("view still shows an approval:\n%s", screen.View())
+	}
+}
+
+func TestMRDetailApproveError(t *testing.T) {
+	mr := sampleMRs()[0]
+	svc := &fakeService{
+		detail:     &gitlabx.MRDetail{MRSummary: mr},
+		diffs:      []gitlabx.FileDiff{{NewPath: "a.go", Diff: "@@ -1,1 +1,1 @@\n-old\n+new\n"}},
+		approvals:  &gitlabx.Approvals{UserCanApprove: true},
+		approveErr: errors.New("401 not allowed"),
+	}
+	s := newMRDetail(testDeps(svc), mr)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg, mrCommitsLoadedMsg, mrApprovalsMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	screen, cmd := screen.Update(key("a"))
+	for _, msg := range runCmd(cmd) {
+		screen, _ = screen.Update(msg)
+	}
+	if !strings.Contains(screen.View(), "approval failed") {
+		t.Errorf("view missing approval failure:\n%s", screen.View())
+	}
+	if s.approvalBusy {
+		t.Error("approvalBusy should clear after a failure")
 	}
 }
 

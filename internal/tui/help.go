@@ -77,6 +77,7 @@ func (s *helpScreen) View() string {
 			{"tab", "switch focus explorer ↔ diff"},
 			{"r", "review with Claude (pending comments ride along)"},
 			{"L", "browse past reviews (stored findings and run logs)"},
+			{"a", "approve / remove your approval"},
 			{"o", "open in browser"},
 		}},
 		{"past reviews (L on the MR detail)", [][2]string{

@@ -91,6 +91,11 @@ reviews of that MR and `enter` to reopen one's findings exactly where you
 left off. Each run's progress log is kept too: press `l` on the findings or
 past-reviews screen (or after a failed review) to read it.
 
+You can approve without leaving the TUI: press `a` on the MR detail screen
+to approve the MR (the approval is pinned to the head commit you reviewed),
+and `a` again to remove your approval. The header shows who has already
+approved.
+
 You can also comment yourself, without leaving the TUI: in the diff view
 move the line cursor (`↑`/`↓`) and press `c` to comment on the selected
 line, or `C` for a general MR-level comment. Manual comments post verbatim

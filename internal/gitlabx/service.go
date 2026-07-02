@@ -55,4 +55,15 @@ type Service interface {
 
 	// PublishAllDraftNotes publishes the pending review in one action.
 	PublishAllDraftNotes(ctx context.Context, project any, iid int64) error
+
+	// GetApprovals returns the MR's approval state as seen by the
+	// current user.
+	GetApprovals(ctx context.Context, project any, iid int64) (*Approvals, error)
+
+	// Approve approves the MR. A non-empty sha must match the MR's HEAD,
+	// guarding against approving code pushed after it was reviewed.
+	Approve(ctx context.Context, project any, iid int64, sha string) error
+
+	// Unapprove removes the current user's approval from the MR.
+	Unapprove(ctx context.Context, project any, iid int64) error
 }

@@ -429,6 +429,44 @@ func (c *Client) PublishAllDraftNotes(ctx context.Context, project any, iid int6
 	return nil
 }
 
+func (c *Client) GetApprovals(ctx context.Context, project any, iid int64) (*Approvals, error) {
+	a, _, err := c.gl.MergeRequestApprovals.GetConfiguration(project, iid, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("fetching approvals for MR !%d: %w", iid, err)
+	}
+	out := &Approvals{
+		Approved:          a.Approved,
+		ApprovalsRequired: a.ApprovalsRequired,
+		ApprovalsLeft:     a.ApprovalsLeft,
+		UserHasApproved:   a.UserHasApproved,
+		UserCanApprove:    a.UserCanApprove,
+	}
+	for _, by := range a.ApprovedBy {
+		if by.User != nil {
+			out.ApprovedBy = append(out.ApprovedBy, by.User.Username)
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) Approve(ctx context.Context, project any, iid int64, sha string) error {
+	opts := &gitlab.ApproveMergeRequestOptions{}
+	if sha != "" {
+		opts.SHA = gitlab.Ptr(sha)
+	}
+	if _, _, err := c.gl.MergeRequestApprovals.ApproveMergeRequest(project, iid, opts, gitlab.WithContext(ctx)); err != nil {
+		return fmt.Errorf("approving MR !%d: %w", iid, err)
+	}
+	return nil
+}
+
+func (c *Client) Unapprove(ctx context.Context, project any, iid int64) error {
+	if _, err := c.gl.MergeRequestApprovals.UnapproveMergeRequest(project, iid, gitlab.WithContext(ctx)); err != nil {
+		return fmt.Errorf("removing approval from MR !%d: %w", iid, err)
+	}
+	return nil
+}
+
 func toDiscussion(d *gitlab.Discussion) Discussion {
 	disc := Discussion{ID: d.ID}
 	for _, n := range d.Notes {
