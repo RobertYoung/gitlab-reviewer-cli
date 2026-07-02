@@ -127,7 +127,10 @@ gitlab:
   instances:
     - name: work
       base_url: https://gitlab.example.com
-      token: glpat-work...
+      token_env: WORK_GITLAB_TOKEN   # read the token from this env var
+    - name: staging
+      base_url: https://gitlab.staging.example.com
+      token: glpat-staging...        # or put the token in the file
     - name: personal
       base_url: https://gitlab.com
       # token omitted — falls back to gitlab.token / GITLAB_REVIEWER_GITLAB_TOKEN
@@ -137,10 +140,16 @@ gitlab:
 One instance is selected at startup and its `base_url`/`token` replace the
 top-level `gitlab` settings. With a single instance configured there is no
 prompt; with several, a picker appears unless `--instance <name>` (or
-`gitlab.default_instance`) names one. An instance without a `token` uses
-`gitlab.token` (and its environment fallbacks) — handy when the token comes
-from the environment. Non-interactive runs with several instances must pass
-`--instance` or set `gitlab.default_instance`.
+`gitlab.default_instance`) names one. Non-interactive runs with several
+instances must pass `--instance` or set `gitlab.default_instance`.
+
+Each instance takes its token from, in order: `token` in the file,
+the environment variable named by `token_env`, then `gitlab.token` (and
+its environment fallbacks) when neither is set. `token_env` keeps
+per-instance secrets out of the settings file; the named variable only
+has to be set on machines where that instance is actually selected —
+selecting an instance whose variable is unset is an error rather than a
+silent fallback to the shared token.
 
 ### Review
 
@@ -388,8 +397,9 @@ projects:
 ### Secrets
 
 Treat the GitLab token as a secret: pass it via
-`GITLAB_REVIEWER_GITLAB_TOKEN` (or `GITLAB_TOKEN`) rather than a flag —
-flags are visible in `ps` and shell history. The token (including every
+`GITLAB_REVIEWER_GITLAB_TOKEN` (or `GITLAB_TOKEN`, or per-instance
+`token_env`) rather than a flag — flags are visible in `ps` and shell
+history. The token (including every
 per-instance token under `gitlab.instances`) is never logged, is
 redacted from error messages and `config show`, is handed to git through an
 in-memory credential helper (it never lands in `.git/config` or process

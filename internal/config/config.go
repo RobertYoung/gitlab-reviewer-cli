@@ -50,6 +50,11 @@ type Instance struct {
 	// Token is the access token for this instance; empty falls back to
 	// gitlab.token (useful when one env-provided token covers an instance).
 	Token string `koanf:"token"`
+	// TokenEnv names an environment variable holding the token for this
+	// instance (e.g. WORK_GITLAB_TOKEN), keeping the secret out of the
+	// settings file. Consulted only when token is empty; the variable must
+	// be set whenever this instance is selected.
+	TokenEnv string `koanf:"token_env"`
 }
 
 type Review struct {
@@ -270,8 +275,11 @@ func (c Config) Validate() error {
 func (c Config) ValidateGitLab() error {
 	if len(c.GitLab.Instances) > 0 {
 		for _, inst := range c.GitLab.Instances {
-			if inst.Token == "" && c.GitLab.Token == "" {
-				return fmt.Errorf("gitlab.instances[%s].token is required: add it to the settings file, or set gitlab.token (GITLAB_REVIEWER_GITLAB_TOKEN) as a shared fallback", inst.Name)
+			// A configured token_env counts as a token source even when its
+			// variable is unset here: it may only exist on the machine where
+			// that instance is used. Selection (WithInstance) enforces it.
+			if inst.Token == "" && inst.TokenEnv == "" && c.GitLab.Token == "" {
+				return fmt.Errorf("gitlab.instances[%s].token is required: add token or token_env to the settings file, or set gitlab.token (GITLAB_REVIEWER_GITLAB_TOKEN) as a shared fallback", inst.Name)
 			}
 		}
 		return nil
@@ -294,6 +302,9 @@ func (c Config) InstanceNames() []string {
 // WithInstance returns a copy of the configuration narrowed to the named
 // instance: its base URL and token replace the top-level gitlab settings.
 // An instance with an empty token keeps gitlab.token as the fallback.
+// Tokens named by token_env are resolved at load time; selecting an
+// instance whose variable is unset is an error rather than a silent
+// fallback to the shared token.
 func (c Config) WithInstance(name string) (Config, error) {
 	for _, inst := range c.GitLab.Instances {
 		if inst.Name != name {
@@ -302,6 +313,8 @@ func (c Config) WithInstance(name string) (Config, error) {
 		c.GitLab.BaseURL = inst.BaseURL
 		if inst.Token != "" {
 			c.GitLab.Token = inst.Token
+		} else if inst.TokenEnv != "" {
+			return c, fmt.Errorf("gitlab instance %q: environment variable %s (gitlab.instances[%s].token_env) is not set", name, inst.TokenEnv, name)
 		}
 		return c, nil
 	}

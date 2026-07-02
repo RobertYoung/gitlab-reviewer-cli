@@ -106,6 +106,94 @@ func TestWithInstance(t *testing.T) {
 	}
 }
 
+//nolint:gosec // test fixture; token_env values are env var names, not credentials
+var tokenEnvVars = map[string]string{"WORK_GITLAB_TOKEN": "glpat-from-env"}
+
+//nolint:gosec // test fixture; token_env values are env var names, not credentials
+const tokenEnvYAML = `
+gitlab:
+  instances:
+    - name: work
+      base_url: https://gitlab.example.com
+      token_env: WORK_GITLAB_TOKEN
+    - name: personal
+      base_url: https://gitlab.com
+      token_env: PERSONAL_GITLAB_TOKEN
+`
+
+func TestInstanceTokenEnv(t *testing.T) {
+	file := writeFile(t, tokenEnvYAML)
+	res, err := Load(Options{File: file, LookupEnv: envLookup(tokenEnvVars)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := res.Config
+
+	if got := cfg.GitLab.Instances[0].Token; got != "glpat-from-env" {
+		t.Errorf("work token = %q, want the token_env value", got)
+	}
+	work, err := cfg.WithInstance("work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if work.GitLab.Token != "glpat-from-env" {
+		t.Errorf("selected work token = %q", work.GitLab.Token)
+	}
+
+	// personal's variable is unset on this machine: presence validation
+	// still passes (token_env is a token source) ...
+	if err := cfg.ValidateGitLab(); err != nil {
+		t.Errorf("token_env instances must satisfy ValidateGitLab: %v", err)
+	}
+	// ... but selecting it fails, naming the missing variable, instead of
+	// silently falling back to gitlab.token.
+	cfg.GitLab.Token = "shared-token"
+	if _, err := cfg.WithInstance("personal"); err == nil || !strings.Contains(err.Error(), "PERSONAL_GITLAB_TOKEN") {
+		t.Errorf("selecting instance with unset token_env = %v", err)
+	}
+}
+
+func TestInstanceTokenPrecedesTokenEnv(t *testing.T) {
+	file := writeFile(t, `
+gitlab:
+  instances:
+    - name: work
+      base_url: https://gitlab.example.com
+      token: glpat-literal
+      token_env: WORK_GITLAB_TOKEN
+`)
+	res, err := Load(Options{File: file, LookupEnv: envLookup(tokenEnvVars)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Config.GitLab.Instances[0].Token; got != "glpat-literal" {
+		t.Errorf("token = %q, want the explicit token to win", got)
+	}
+}
+
+func TestForProjectResolvesTokenEnv(t *testing.T) {
+	file := writeFile(t, tokenEnvYAML+`
+projects:
+  group/repo:
+    review:
+      bare: true
+`)
+	res, err := Load(Options{File: file, LookupEnv: envLookup(tokenEnvVars)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := res.ForProject("group/repo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Review.Bare {
+		t.Error("project override not applied")
+	}
+	if got := cfg.GitLab.Instances[0].Token; got != "glpat-from-env" {
+		t.Errorf("work token after ForProject = %q", got)
+	}
+}
+
 func TestValidateInstances(t *testing.T) {
 	cfg := Default()
 	cfg.GitLab.Instances = []Instance{
