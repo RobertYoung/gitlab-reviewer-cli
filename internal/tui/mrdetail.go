@@ -35,6 +35,13 @@ type (
 		iid int64
 		err error
 	}
+	// mrApprovalsMsg carries the approval state after the initial fetch or
+	// an approve/unapprove action; err is only set for failed actions.
+	mrApprovalsMsg struct {
+		iid       int64
+		approvals *gitlabx.Approvals
+		err       error
+	}
 )
 
 // mrDetail shows one MR: metadata header plus a navigable, coloured diff.
@@ -47,6 +54,12 @@ type mrDetail struct {
 	diffs       []gitlabx.FileDiff
 	commits     []gitlabx.Commit
 	discussions []gitlabx.Discussion
+
+	// approvals is nil until fetched (or when the instance exposes none);
+	// approvalBusy guards against double-firing while a toggle is in flight.
+	approvals    *gitlabx.Approvals
+	approvalBusy bool
+	approvalErr  error
 
 	vp        viewport.Model
 	spin      spinner.Model
@@ -106,7 +119,11 @@ func (s *mrDetail) Hints() string {
 	if s.treeWidth() > 0 {
 		explorer = "tab explorer · e hide"
 	}
-	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · r review · L past reviews · o browser · esc back"
+	approve := "a approve"
+	if s.approvals != nil && s.approvals.UserHasApproved {
+		approve = "a unapprove"
+	}
+	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · r review · L past reviews · " + approve + " · o browser · esc back"
 	if len(s.pendingComments()) > 0 {
 		hints = "P publish comments · " + hints
 	}
@@ -154,7 +171,42 @@ func (s *mrDetail) Init() tea.Cmd {
 		}
 		return mrDiscussionsLoadedMsg{iid: mr.IID, discussions: discussions}
 	}
-	return tea.Batch(s.spin.Tick, fetchDetail, fetchDiffs, fetchCommits, fetchDiscussions)
+	fetchApprovals := func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
+		defer cancel()
+		approvals, err := svc.GetApprovals(ctx, mr.Project(), mr.IID)
+		if err != nil {
+			// Approval state is decoration; the view works without it.
+			return mrApprovalsMsg{iid: mr.IID}
+		}
+		return mrApprovalsMsg{iid: mr.IID, approvals: approvals}
+	}
+	return tea.Batch(s.spin.Tick, fetchDetail, fetchDiffs, fetchCommits, fetchDiscussions, fetchApprovals)
+}
+
+// toggleApproval approves the MR, or removes the user's approval when one
+// is already recorded, then refetches the approval state.
+func (s *mrDetail) toggleApproval() tea.Cmd {
+	svc, mr, sha := s.svc, s.mr, s.detail.HeadSHA
+	unapprove := s.approvals != nil && s.approvals.UserHasApproved
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
+		defer cancel()
+		var err error
+		if unapprove {
+			err = svc.Unapprove(ctx, mr.Project(), mr.IID)
+		} else {
+			err = svc.Approve(ctx, mr.Project(), mr.IID, sha)
+		}
+		if err != nil {
+			return mrApprovalsMsg{iid: mr.IID, err: err}
+		}
+		approvals, err := svc.GetApprovals(ctx, mr.Project(), mr.IID)
+		if err != nil {
+			return mrApprovalsMsg{iid: mr.IID, err: err}
+		}
+		return mrApprovalsMsg{iid: mr.IID, approvals: approvals}
+	}
 }
 
 func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -218,6 +270,17 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		if len(s.diffs) > 0 {
 			s.setFile(s.fileIdx) // re-render with threads anchored
+		}
+		return s, nil
+
+	case mrApprovalsMsg:
+		if msg.iid != s.mr.IID {
+			return s, nil
+		}
+		s.approvalBusy = false
+		s.approvalErr = msg.err
+		if msg.approvals != nil {
+			s.approvals = msg.approvals
 		}
 		return s, nil
 
@@ -301,6 +364,12 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		case "o":
 			return s, openURLCmd(s.deps, s.mr.WebURL)
+		case "a":
+			if s.detail == nil || s.loading > 0 || s.approvalBusy {
+				return s, nil
+			}
+			s.approvalBusy = true
+			return s, s.toggleApproval()
 		case "v":
 			s.split = !s.split
 			s.invalidateRender()
@@ -583,6 +652,7 @@ func (s *mrDetail) header() string {
 	if s.detail != nil && s.detail.HasConflicts {
 		b.WriteString(" · " + errorStyle.Render("has conflicts"))
 	}
+	b.WriteString(s.approvalStatus())
 	b.WriteByte('\n')
 	b.WriteString(subtleStyle.Render(truncate(s.mr.WebURL, max(s.width-2, 20))) + "\n")
 	if len(s.diffs) > 0 {
@@ -597,6 +667,28 @@ func (s *mrDetail) header() string {
 		b.WriteString(subtleStyle.Render("no changes") + "\n")
 	}
 	return b.String()
+}
+
+// approvalStatus renders the approval segment of the header's branch line:
+// in-flight progress, the last action's failure, or who has approved.
+func (s *mrDetail) approvalStatus() string {
+	switch {
+	case s.approvalBusy:
+		return " · " + subtleStyle.Render("updating approval…")
+	case s.approvalErr != nil:
+		return " · " + errorStyle.Render(truncate("approval failed: "+s.approvalErr.Error(), 60))
+	case s.approvals != nil && s.approvals.UserHasApproved:
+		others := len(s.approvals.ApprovedBy) - 1
+		status := "✓ approved by you"
+		if others > 0 {
+			status += fmt.Sprintf(" +%d", others)
+		}
+		return " · " + addedStyle.Render(status)
+	case s.approvals != nil && len(s.approvals.ApprovedBy) > 0:
+		return " · " + addedStyle.Render(truncate("✓ approved by "+strings.Join(s.approvals.ApprovedBy, ", "), 60))
+	default:
+		return ""
+	}
 }
 
 // headerHeight is the number of lines header() renders.
