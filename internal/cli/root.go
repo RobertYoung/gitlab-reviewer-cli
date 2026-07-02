@@ -11,7 +11,9 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/secret"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/tui"
 )
 
 // state carries objects built in PersistentPreRunE to the command RunEs.
@@ -46,8 +48,21 @@ func newRoot(st *state) *cobra.Command {
 			return setupLogging(res.Config.Log, st.redactor)
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			// The TUI lands in M1; until then the root command explains itself.
-			return cmd.Help()
+			cfg := st.loaded.Config
+			if err := cfg.Validate(); err != nil {
+				return err
+			}
+			if err := cfg.ValidateGitLab(); err != nil {
+				return err
+			}
+			svc, err := gitlabx.New(cfg.GitLab.BaseURL, cfg.GitLab.Token, cfg.GitLab.Projects, cfg.GitLab.Groups)
+			if err != nil {
+				return st.redactor.RedactError(err)
+			}
+			if err := tui.Run(cfg, svc); err != nil {
+				return st.redactor.RedactError(err)
+			}
+			return nil
 		},
 	}
 

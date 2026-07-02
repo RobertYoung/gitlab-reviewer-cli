@@ -1,0 +1,262 @@
+package gitlabx
+
+import (
+	"context"
+	"fmt"
+	"slices"
+	"strings"
+
+	gitlab "gitlab.com/gitlab-org/api/client-go/v2"
+)
+
+// Client implements Service against a real GitLab instance.
+type Client struct {
+	gl       *gitlab.Client
+	projects []string
+	groups   []string
+}
+
+// New builds a Client for the given instance. projects and groups are the
+// full paths the MR list fans out over.
+func New(baseURL, token string, projects, groups []string) (*Client, error) {
+	gl, err := gitlab.NewClient(token, gitlab.WithBaseURL(baseURL))
+	if err != nil {
+		return nil, fmt.Errorf("creating GitLab client: %w", err)
+	}
+	return &Client{gl: gl, projects: projects, groups: groups}, nil
+}
+
+func (c *Client) ListOpenMergeRequests(ctx context.Context, filter MRFilter, page Page) ([]MRSummary, bool, error) {
+	var (
+		all     []MRSummary
+		seen    = map[int64]bool{}
+		hasMore bool
+	)
+
+	listOpts := gitlab.ListOptions{Page: int64(page.Number), PerPage: int64(page.PerPage)}
+
+	for _, project := range c.projects {
+		opts := &gitlab.ListProjectMergeRequestsOptions{ListOptions: listOpts}
+		applyFilter(&opts.State, &opts.AuthorUsername, &opts.TargetBranch, &opts.Search, filter)
+		mrs, resp, err := c.gl.MergeRequests.ListProjectMergeRequests(project, opts, gitlab.WithContext(ctx))
+		if err != nil {
+			return nil, false, fmt.Errorf("listing MRs for project %s: %w", project, err)
+		}
+		hasMore = hasMore || resp.NextPage > 0
+		collect(&all, seen, mrs, project)
+	}
+
+	for _, group := range c.groups {
+		opts := &gitlab.ListGroupMergeRequestsOptions{ListOptions: listOpts}
+		applyFilter(&opts.State, &opts.AuthorUsername, &opts.TargetBranch, &opts.Search, filter)
+		mrs, resp, err := c.gl.MergeRequests.ListGroupMergeRequests(group, opts, gitlab.WithContext(ctx))
+		if err != nil {
+			return nil, false, fmt.Errorf("listing MRs for group %s: %w", group, err)
+		}
+		hasMore = hasMore || resp.NextPage > 0
+		collect(&all, seen, mrs, "")
+	}
+
+	slices.SortFunc(all, func(a, b MRSummary) int {
+		return b.UpdatedAt.Compare(a.UpdatedAt)
+	})
+	return all, hasMore, nil
+}
+
+func applyFilter(state, author, target, search **string, f MRFilter) {
+	if f.State == "" {
+		*state = gitlab.Ptr("opened")
+	} else if f.State != "all" {
+		*state = gitlab.Ptr(f.State)
+	}
+	if f.AuthorUsername != "" {
+		*author = gitlab.Ptr(f.AuthorUsername)
+	}
+	if f.TargetBranch != "" {
+		*target = gitlab.Ptr(f.TargetBranch)
+	}
+	if f.Search != "" {
+		*search = gitlab.Ptr(f.Search)
+	}
+}
+
+func collect(all *[]MRSummary, seen map[int64]bool, mrs []*gitlab.BasicMergeRequest, projectPath string) {
+	for _, mr := range mrs {
+		if seen[mr.ID] {
+			continue
+		}
+		seen[mr.ID] = true
+		*all = append(*all, toSummary(mr, projectPath))
+	}
+}
+
+func toSummary(mr *gitlab.BasicMergeRequest, projectPath string) MRSummary {
+	s := MRSummary{
+		ProjectID:    mr.ProjectID,
+		ProjectPath:  projectPath,
+		IID:          mr.IID,
+		Title:        mr.Title,
+		Description:  mr.Description,
+		State:        mr.State,
+		Draft:        mr.Draft,
+		SourceBranch: mr.SourceBranch,
+		TargetBranch: mr.TargetBranch,
+		HeadSHA:      mr.SHA,
+		WebURL:       mr.WebURL,
+	}
+	if s.ProjectPath == "" {
+		// Group listings do not carry the project path directly; derive it
+		// from the full reference ("group/app!42").
+		if mr.References != nil {
+			if path, _, found := strings.Cut(mr.References.Full, "!"); found {
+				s.ProjectPath = path
+			}
+		}
+	}
+	if mr.Author != nil {
+		s.Author = mr.Author.Username
+	}
+	if mr.CreatedAt != nil {
+		s.CreatedAt = *mr.CreatedAt
+	}
+	if mr.UpdatedAt != nil {
+		s.UpdatedAt = *mr.UpdatedAt
+	}
+	return s
+}
+
+func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*MRDetail, error) {
+	mr, _, err := c.gl.MergeRequests.GetMergeRequest(project, iid, nil, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("fetching MR !%d: %w", iid, err)
+	}
+	detail := &MRDetail{
+		MRSummary: MRSummary{
+			ProjectID:    mr.ProjectID,
+			IID:          mr.IID,
+			Title:        mr.Title,
+			Description:  mr.Description,
+			State:        mr.State,
+			Draft:        mr.Draft,
+			SourceBranch: mr.SourceBranch,
+			TargetBranch: mr.TargetBranch,
+			HeadSHA:      mr.SHA,
+			WebURL:       mr.WebURL,
+		},
+		DiffRefs: DiffRefs{
+			BaseSHA:  mr.DiffRefs.BaseSha,
+			HeadSHA:  mr.DiffRefs.HeadSha,
+			StartSHA: mr.DiffRefs.StartSha,
+		},
+		HasConflicts: mr.HasConflicts,
+	}
+	if path, ok := project.(string); ok {
+		detail.ProjectPath = path
+	} else if mr.References != nil {
+		if path, _, found := strings.Cut(mr.References.Full, "!"); found {
+			detail.ProjectPath = path
+		}
+	}
+	if mr.Author != nil {
+		detail.Author = mr.Author.Username
+	}
+	if mr.CreatedAt != nil {
+		detail.CreatedAt = *mr.CreatedAt
+	}
+	if mr.UpdatedAt != nil {
+		detail.UpdatedAt = *mr.UpdatedAt
+	}
+	return detail, nil
+}
+
+// maxDiffPages bounds internal pagination; 20 pages × 100 files covers any
+// MR a human would review.
+const maxDiffPages = 20
+
+func (c *Client) ListDiffs(ctx context.Context, project any, iid int64) ([]FileDiff, error) {
+	var out []FileDiff
+	opts := &gitlab.ListMergeRequestDiffsOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+	}
+	for page := 1; page <= maxDiffPages; page++ {
+		opts.Page = int64(page)
+		diffs, resp, err := c.gl.MergeRequests.ListMergeRequestDiffs(project, iid, opts, gitlab.WithContext(ctx))
+		if err != nil {
+			return nil, fmt.Errorf("listing diffs for MR !%d: %w", iid, err)
+		}
+		for _, d := range diffs {
+			out = append(out, FileDiff{
+				OldPath:       d.OldPath,
+				NewPath:       d.NewPath,
+				Diff:          d.Diff,
+				NewFile:       d.NewFile,
+				RenamedFile:   d.RenamedFile,
+				DeletedFile:   d.DeletedFile,
+				GeneratedFile: d.GeneratedFile,
+				TooLarge:      d.TooLarge,
+			})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (c *Client) ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error) {
+	var out []Discussion
+	opts := &gitlab.ListMergeRequestDiscussionsOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+	}
+	for page := 1; page <= maxDiffPages; page++ {
+		opts.Page = int64(page)
+		discussions, resp, err := c.gl.Discussions.ListMergeRequestDiscussions(project, iid, opts, gitlab.WithContext(ctx))
+		if err != nil {
+			return nil, fmt.Errorf("listing discussions for MR !%d: %w", iid, err)
+		}
+		for _, d := range discussions {
+			out = append(out, toDiscussion(d))
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+func toDiscussion(d *gitlab.Discussion) Discussion {
+	disc := Discussion{ID: d.ID}
+	for _, n := range d.Notes {
+		note := Note{
+			ID:       n.ID,
+			Body:     n.Body,
+			System:   n.System,
+			Resolved: n.Resolved,
+		}
+		if n.Author.Username != "" {
+			note.Author = n.Author.Username
+		}
+		if n.CreatedAt != nil {
+			note.CreatedAt = *n.CreatedAt
+		}
+		if n.Position != nil {
+			note.Position = &Position{
+				BaseSHA:  n.Position.BaseSHA,
+				HeadSHA:  n.Position.HeadSHA,
+				StartSHA: n.Position.StartSHA,
+				OldPath:  n.Position.OldPath,
+				NewPath:  n.Position.NewPath,
+			}
+			if n.Position.OldLine != 0 {
+				old := int(n.Position.OldLine)
+				note.Position.OldLine = &old
+			}
+			if n.Position.NewLine != 0 {
+				newLine := int(n.Position.NewLine)
+				note.Position.NewLine = &newLine
+			}
+		}
+		disc.Notes = append(disc.Notes, note)
+	}
+	return disc
+}
