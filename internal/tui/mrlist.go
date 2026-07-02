@@ -120,7 +120,7 @@ func (s *mrList) Hints() string {
 	if s.mode != inputNone {
 		return "enter apply · esc cancel"
 	}
-	return "↑/↓ move · enter open · / search · a author · t target · s state · r reload · q quit"
+	return "↑/↓ move · enter open · o browser · / search · a author · t target · s state · r reload · q quit"
 }
 
 func (s *mrList) Init() tea.Cmd {
@@ -236,6 +236,11 @@ func (s *mrList) updateTable(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 	case "enter":
 		if mr, ok := s.selected(); ok {
 			return s, pushScreen(newMRDetail(s.deps, mr))
+		}
+		return s, nil
+	case "o":
+		if mr, ok := s.selected(); ok {
+			return s, openURLCmd(s.deps, mr.WebURL)
 		}
 		return s, nil
 	case "/", "a", "t":

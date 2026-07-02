@@ -19,7 +19,8 @@ import (
 type CheckoutFunc func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (path string, cleanup func(context.Context) error, err error)
 
 // Deps bundles everything screens need. CfgFor resolves per-project
-// overrides on top of the base configuration.
+// overrides on top of the base configuration. OpenURL overrides the
+// default browser launcher (tests inject a recorder).
 type Deps struct {
 	Cfg      config.Config
 	Svc      gitlabx.Service
@@ -28,7 +29,8 @@ type Deps struct {
 	CfgFor   func(projectPath string) config.Config
 	// Logs stores each review run's progress log for later viewing; nil
 	// disables both storing and the log screens' content.
-	Logs *runlog.Store
+	Logs    *runlog.Store
+	OpenURL func(url string) error
 }
 
 func (d Deps) cfgFor(projectPath string) config.Config {
@@ -36,6 +38,13 @@ func (d Deps) cfgFor(projectPath string) config.Config {
 		return d.Cfg
 	}
 	return d.CfgFor(projectPath)
+}
+
+func (d Deps) openURL(url string) error {
+	if d.OpenURL == nil {
+		return openBrowser(url)
+	}
+	return d.OpenURL(url)
 }
 
 // Screen is one screen on the navigation stack. Screens receive an adjusted

@@ -82,7 +82,7 @@ func (s *mrDetail) Title() string {
 }
 
 func (s *mrDetail) Hints() string {
-	return "↑/↓ scroll · n/p file · ]/[ hunk · v layout · r review · L logs · esc back · q quit"
+	return "↑/↓ scroll · n/p file · ]/[ hunk · v layout · r review · L logs · o browser · esc back · q quit"
 }
 
 func (s *mrDetail) Init() tea.Cmd {
@@ -212,6 +212,8 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		case "p", "left":
 			s.setFile(s.fileIdx - 1)
 			return s, nil
+		case "o":
+			return s, openURLCmd(s.deps, s.mr.WebURL)
 		case "v":
 			s.split = !s.split
 			s.invalidateRender()
@@ -304,6 +306,7 @@ func (s *mrDetail) header() string {
 		b.WriteString(" · " + errorStyle.Render("has conflicts"))
 	}
 	b.WriteByte('\n')
+	b.WriteString(subtleStyle.Render(truncate(s.mr.WebURL, max(s.width-2, 20))) + "\n")
 	if len(s.diffs) > 0 {
 		fmt.Fprintf(&b, "%s\n", subtleStyle.Render(fmt.Sprintf("file %d/%d · %s", s.fileIdx+1, len(s.diffs), truncate(s.diffs[s.fileIdx].Path(), max(s.width-14, 20)))))
 	} else if s.loading > 0 {
@@ -315,7 +318,7 @@ func (s *mrDetail) header() string {
 }
 
 // headerHeight is the number of lines header() renders.
-const headerHeight = 3
+const headerHeight = 4
 
 func (s *mrDetail) layout() {
 	if s.width == 0 {

@@ -100,8 +100,8 @@ func testDeps(svc *fakeService) Deps {
 
 func sampleMRs() []gitlabx.MRSummary {
 	return []gitlabx.MRSummary{
-		{ProjectPath: "group/app", IID: 11, Title: "Fix parser", Author: "alice", TargetBranch: "main", UpdatedAt: time.Now()},
-		{ProjectPath: "group/app", IID: 12, Title: "Add cache", Author: "bob", TargetBranch: "main", UpdatedAt: time.Now()},
+		{ProjectPath: "group/app", IID: 11, Title: "Fix parser", Author: "alice", TargetBranch: "main", UpdatedAt: time.Now(), WebURL: "https://gitlab.com/group/app/-/merge_requests/11"},
+		{ProjectPath: "group/app", IID: 12, Title: "Add cache", Author: "bob", TargetBranch: "main", UpdatedAt: time.Now(), WebURL: "https://gitlab.com/group/app/-/merge_requests/12"},
 	}
 }
 
@@ -322,6 +322,57 @@ func TestMRDetailNavigation(t *testing.T) {
 	}
 	if _, ok := msgs[0].(popScreenMsg); !ok {
 		t.Errorf("expected popScreenMsg, got %T", msgs[0])
+	}
+}
+
+func TestMRListOpensBrowser(t *testing.T) {
+	svc := &fakeService{mrs: sampleMRs()}
+	deps := testDeps(svc)
+	var opened []string
+	deps.OpenURL = func(url string) error { opened = append(opened, url); return nil }
+
+	var screen Screen = newMRList(deps)
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	for _, msg := range runCmd(screen.Init()) {
+		if _, ok := msg.(mrPageLoadedMsg); ok {
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	_, cmd := screen.Update(key("o"))
+	runCmd(cmd)
+	if len(opened) != 1 || opened[0] != "https://gitlab.com/group/app/-/merge_requests/11" {
+		t.Errorf("opened = %v", opened)
+	}
+}
+
+func TestMRDetailShowsURLAndOpensBrowser(t *testing.T) {
+	mr := sampleMRs()[0]
+	svc := &fakeService{
+		detail: &gitlabx.MRDetail{MRSummary: mr},
+		diffs:  []gitlabx.FileDiff{{NewPath: "a.go", Diff: "@@ -1,1 +1,1 @@\n-old\n+new\n"}},
+	}
+	deps := testDeps(svc)
+	var opened []string
+	deps.OpenURL = func(url string) error { opened = append(opened, url); return nil }
+
+	var screen Screen = newMRDetail(deps, mr)
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 20})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	if !strings.Contains(screen.View(), mr.WebURL) {
+		t.Errorf("view missing MR web URL:\n%s", screen.View())
+	}
+
+	_, cmd := screen.Update(key("o"))
+	runCmd(cmd)
+	if len(opened) != 1 || opened[0] != mr.WebURL {
+		t.Errorf("opened = %v", opened)
 	}
 }
 
