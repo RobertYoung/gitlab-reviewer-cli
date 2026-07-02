@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-fenced","model":"claude-fable-5"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":2,"result":"Here are my findings:\n```json\n{\"summary\":\"Recovered from text.\",\"findings\":[{\"file\":\"a.go\",\"new_line\":3,\"severity\":\"minor\",\"category\":\"style\",\"title\":\"Naming\",\"body\":\"Rename x to something meaningful.\"}]}\n```\nDone.","session_id":"sess-fenced","total_cost_usd":0.1}

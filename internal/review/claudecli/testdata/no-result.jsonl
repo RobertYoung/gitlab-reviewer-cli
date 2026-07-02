@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-cut","model":"claude-fable-5"}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"text","text":"Working on it..."}]},"session_id":"sess-cut"}

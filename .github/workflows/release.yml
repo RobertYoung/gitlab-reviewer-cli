@@ -1,0 +1,65 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Semantic-release and GoReleaser run in ONE job on purpose: tags created
+  # with GITHUB_TOKEN do not trigger other workflows, so a separate
+  # tag-triggered build workflow would never fire.
+  release:
+    name: Semantic Release + GoReleaser
+    runs-on: ubuntu-latest
+    permissions:
+      # semantic-release: create tags/releases and comment on issues/PRs
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # semantic-release needs the full history to analyze commits
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Run semantic-release
+        id: semrel
+        uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90 # v6.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # conventionalcommits preset used by .releaserc.json
+          extra_plugins: |
+            conventional-changelog-conventionalcommits@8.0.0
+
+      - name: Set up Go
+        if: steps.semrel.outputs.new_release_published == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Check out the released tag
+        if: steps.semrel.outputs.new_release_published == 'true'
+        run: |
+          git fetch --tags
+          git checkout "${{ steps.semrel.outputs.new_release_git_tag }}"
+
+      - name: Build and attach release artifacts
+        if: steps.semrel.outputs.new_release_published == 'true'
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

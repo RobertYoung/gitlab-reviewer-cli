@@ -1,0 +1,41 @@
+version: 2
+
+project_name: gitlab-reviewer
+
+builds:
+  - id: gitlab-reviewer
+    main: ./cmd/gitlab-reviewer
+    binary: gitlab-reviewer
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/RobertYoung/gitlab-reviewer-cli/internal/version.Version={{ .Version }}
+      - -X github.com/RobertYoung/gitlab-reviewer-cli/internal/version.Commit={{ .Commit }}
+      - -X github.com/RobertYoung/gitlab-reviewer-cli/internal/version.Date={{ .Date }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+# semantic-release generates the release notes; GoReleaser only attaches
+# artifacts to the release it already created.
+changelog:
+  disable: true
+
+release:
+  mode: keep-existing
