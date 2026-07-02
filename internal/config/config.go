@@ -108,6 +108,9 @@ type UI struct {
 	// DiffView is the diff layout in the MR detail screen: unified or
 	// split (side-by-side). Toggleable per session with `v`.
 	DiffView string `koanf:"diff_view"`
+	// FileExplorer is the initial state of the changed-files tree in the
+	// MR detail screen: open or closed. Toggleable per session with `e`.
+	FileExplorer string `koanf:"file_explorer"`
 }
 
 type Log struct {
@@ -150,7 +153,8 @@ func Default() Config {
 			FallbackToNote:  true,
 		},
 		UI: UI{
-			DiffView: "unified",
+			DiffView:     "unified",
+			FileExplorer: "closed",
 		},
 		Log: Log{
 			Level: "info",
@@ -241,6 +245,9 @@ func (c Config) Validate() error {
 	}
 
 	if err := oneOf("ui.diff_view", c.UI.DiffView, "unified", "split"); err != nil {
+		errs = append(errs, err)
+	}
+	if err := oneOf("ui.file_explorer", c.UI.FileExplorer, "open", "closed"); err != nil {
 		errs = append(errs, err)
 	}
 
