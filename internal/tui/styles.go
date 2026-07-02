@@ -44,9 +44,10 @@ func relTime(t time.Time) string {
 	}
 }
 
-// renderDiff colours a unified diff and returns the content plus the indexes
-// (in rendered lines) where hunks start, for hunk navigation.
-func renderDiff(fd gitlabx.FileDiff) (string, []int) {
+// renderDiff renders a unified diff — syntax-highlighted code with coloured
+// +/- markers, existing discussion threads anchored inline — and returns
+// the content plus the indexes (in rendered lines) where hunks start.
+func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int) {
 	var (
 		b         strings.Builder
 		hunkLines []int
@@ -55,7 +56,9 @@ func renderDiff(fd gitlabx.FileDiff) (string, []int) {
 	write := func(s string) {
 		b.WriteString(s)
 		b.WriteByte('\n')
-		lineNo++
+		// Discussion blocks span several rendered lines; hunk offsets must
+		// track what the viewport actually shows.
+		lineNo += strings.Count(s, "\n") + 1
 	}
 
 	write(fileStyle.Render(fd.Path()))
@@ -72,20 +75,101 @@ func renderDiff(fd gitlabx.FileDiff) (string, []int) {
 		return b.String(), hunkLines
 	}
 
+	hl := newHighlighter(fd.NewPath)
+	oldLine, newLine := 0, 0
+	writeThreads := func(useNew bool) {
+		for _, block := range discussionBlocks(discussions, fd, oldLine, newLine, useNew, width) {
+			write(block)
+		}
+	}
+
 	for line := range strings.SplitSeq(strings.TrimSuffix(fd.Diff, "\n"), "\n") {
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			hunkLines = append(hunkLines, lineNo)
+			if o, n, ok := parseHunkStart(line); ok {
+				oldLine, newLine = o, n
+			}
 			write(hunkStyle.Render(line))
 		case strings.HasPrefix(line, "+"):
-			write(addedStyle.Render(line))
+			write(addedStyle.Render("+") + hl.line(line[1:]))
+			writeThreads(true)
+			newLine++
 		case strings.HasPrefix(line, "-"):
-			write(removedStyle.Render(line))
+			write(removedStyle.Render("-") + hl.line(line[1:]))
+			writeThreads(false)
+			oldLine++
+		case strings.HasPrefix(line, `\`):
+			write(subtleStyle.Render(line))
 		default:
-			write(line)
+			code := line
+			if len(code) > 0 {
+				code = code[1:]
+			}
+			write(" " + hl.line(code))
+			writeThreads(true)
+			oldLine++
+			newLine++
 		}
 	}
 	return b.String(), hunkLines
+}
+
+var discussionStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder(), false, false, false, true).
+	BorderForeground(lipgloss.Color("6")).
+	PaddingLeft(1)
+
+// discussionBlocks renders threads anchored at the current diff line.
+// useNew selects which side the just-rendered line lives on.
+func discussionBlocks(discussions []gitlabx.Discussion, fd gitlabx.FileDiff, oldLine, newLine int, useNew bool, width int) []string {
+	var out []string
+	for _, d := range discussions {
+		anchor := d.Anchor()
+		if anchor == nil {
+			continue
+		}
+		if anchor.NewPath != fd.NewPath && anchor.OldPath != fd.OldPath {
+			continue
+		}
+		matches := false
+		if useNew && anchor.NewLine != nil {
+			matches = *anchor.NewLine == newLine
+		} else if !useNew && anchor.OldLine != nil && anchor.NewLine == nil {
+			matches = *anchor.OldLine == oldLine
+		}
+		if !matches {
+			continue
+		}
+		out = append(out, renderThread(d, width))
+	}
+	return out
+}
+
+func renderThread(d gitlabx.Discussion, width int) string {
+	var b strings.Builder
+	for i, n := range d.Notes {
+		if n.System {
+			continue
+		}
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		head := "💬 @" + n.Author
+		if n.Resolved {
+			head += subtleStyle.Render(" (resolved)")
+		}
+		if !n.CreatedAt.IsZero() {
+			head += subtleStyle.Render(" · " + relTime(n.CreatedAt))
+		}
+		b.WriteString(headerStyle.Render(head) + "\n")
+		body := n.Body
+		if lines := strings.Split(body, "\n"); len(lines) > 6 {
+			body = strings.Join(lines[:6], "\n") + "\n…"
+		}
+		b.WriteString(wrap(body, max(width-6, 30)))
+	}
+	return discussionStyle.Width(max(width-4, 30)).Render(b.String())
 }
 
 // truncate shortens s to max display cells, appending an ellipsis.

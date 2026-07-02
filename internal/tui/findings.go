@@ -48,16 +48,40 @@ type findings struct {
 func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result) *findings {
 	ta := textarea.New()
 	ta.ShowLineNumbers = false
+	cfg := deps.cfgFor(detail.ProjectPath)
 	items := make([]review.Finding, len(result.Findings))
 	copy(items, result.Findings)
+
+	// auto_comment: findings at or above the severity threshold are
+	// accepted up front and published without confirmation; weaker ones
+	// still go through interactive curation.
+	if cfg.Publish.AutoComment {
+		for i := range items {
+			if items[i].Severity.AtLeast(review.Severity(cfg.Publish.AutoMinSeverity)) {
+				items[i].State = review.StateAccepted
+			}
+		}
+	}
+
 	return &findings{
 		deps:   deps,
 		detail: detail,
 		diffs:  diffs,
-		cfg:    deps.cfgFor(detail.ProjectPath),
+		cfg:    cfg,
 		result: result,
 		items:  items,
 		editor: ta,
+	}
+}
+
+// setState updates a finding by ID; used by the publish screen to report
+// results back (runs on the UI goroutine).
+func (s *findings) setState(id string, state review.FindingState) {
+	for i := range s.items {
+		if s.items[i].ID == id {
+			s.items[i].State = state
+			return
+		}
 	}
 }
 
@@ -72,7 +96,17 @@ func (s *findings) Hints() string {
 	return "↑/↓ move · a accept · x reject · A accept all · e edit · p publish accepted · esc back"
 }
 
-func (s *findings) Init() tea.Cmd { return nil }
+func (s *findings) Init() tea.Cmd {
+	if s.cfg.Publish.AutoComment {
+		if auto := s.accepted(); len(auto) > 0 {
+			// Publish the auto-accepted findings straight away; the
+			// publish screen pops back here for the remaining ones.
+			return pushScreen(newPublish(s.deps, s.detail, s.diffs, auto,
+				publishOpts{auto: true, popCount: 1, report: s.setState}))
+		}
+	}
+	return nil
+}
 
 func (s *findings) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -151,7 +185,7 @@ func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		if len(accepted) == 0 {
 			return s, nil
 		}
-		return s, pushScreen(newPublish(s.deps, s.detail, s.diffs, accepted))
+		return s, pushScreen(newPublish(s.deps, s.detail, s.diffs, accepted, publishOpts{report: s.setState}))
 	}
 	return s, nil
 }

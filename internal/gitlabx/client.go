@@ -259,6 +259,37 @@ func (c *Client) CreateNote(ctx context.Context, project any, iid int64, body st
 	return nil
 }
 
+func (c *Client) CreateDraftNote(ctx context.Context, project any, iid int64, body string, pos *Position) error {
+	opts := &gitlab.CreateDraftNoteOptions{Note: gitlab.Ptr(body)}
+	if pos != nil {
+		opts.Position = &gitlab.PositionOptions{
+			BaseSHA:      gitlab.Ptr(pos.BaseSHA),
+			HeadSHA:      gitlab.Ptr(pos.HeadSHA),
+			StartSHA:     gitlab.Ptr(pos.StartSHA),
+			OldPath:      gitlab.Ptr(pos.OldPath),
+			NewPath:      gitlab.Ptr(pos.NewPath),
+			PositionType: gitlab.Ptr("text"),
+		}
+		if pos.OldLine != nil {
+			opts.Position.OldLine = gitlab.Ptr(int64(*pos.OldLine))
+		}
+		if pos.NewLine != nil {
+			opts.Position.NewLine = gitlab.Ptr(int64(*pos.NewLine))
+		}
+	}
+	if _, _, err := c.gl.DraftNotes.CreateDraftNote(project, iid, opts, gitlab.WithContext(ctx)); err != nil {
+		return fmt.Errorf("creating draft note on MR !%d: %w", iid, err)
+	}
+	return nil
+}
+
+func (c *Client) PublishAllDraftNotes(ctx context.Context, project any, iid int64) error {
+	if _, err := c.gl.DraftNotes.PublishAllDraftNotes(project, iid, gitlab.WithContext(ctx)); err != nil {
+		return fmt.Errorf("publishing draft review on MR !%d: %w", iid, err)
+	}
+	return nil
+}
+
 func toDiscussion(d *gitlab.Discussion) Discussion {
 	disc := Discussion{ID: d.ID}
 	for _, n := range d.Notes {

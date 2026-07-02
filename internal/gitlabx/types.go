@@ -95,6 +95,17 @@ type Discussion struct {
 	Notes []Note
 }
 
+// Anchor returns the diff position of the discussion's first positioned
+// note, or nil for general (unanchored) threads.
+func (d Discussion) Anchor() *Position {
+	for _, n := range d.Notes {
+		if n.Position != nil {
+			return n.Position
+		}
+	}
+	return nil
+}
+
 // Note is a single comment, optionally anchored to a diff position.
 type Note struct {
 	ID        int64

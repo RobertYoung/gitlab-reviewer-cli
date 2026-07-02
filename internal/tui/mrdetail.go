@@ -21,6 +21,10 @@ type (
 		iid   int64
 		diffs []gitlabx.FileDiff
 	}
+	mrDiscussionsLoadedMsg struct {
+		iid         int64
+		discussions []gitlabx.Discussion
+	}
 	mrDetailErrMsg struct {
 		iid int64
 		err error
@@ -33,8 +37,9 @@ type mrDetail struct {
 	svc  gitlabx.Service
 	mr   gitlabx.MRSummary
 
-	detail *gitlabx.MRDetail
-	diffs  []gitlabx.FileDiff
+	detail      *gitlabx.MRDetail
+	diffs       []gitlabx.FileDiff
+	discussions []gitlabx.Discussion
 
 	vp        viewport.Model
 	spin      spinner.Model
@@ -85,7 +90,17 @@ func (s *mrDetail) Init() tea.Cmd {
 		}
 		return mrDiffsLoadedMsg{iid: mr.IID, diffs: diffs}
 	}
-	return tea.Batch(s.spin.Tick, fetchDetail, fetchDiffs)
+	fetchDiscussions := func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
+		defer cancel()
+		discussions, err := svc.ListDiscussions(ctx, mr.Project(), mr.IID)
+		if err != nil {
+			// Discussions are decoration; the diff view works without them.
+			return mrDiscussionsLoadedMsg{iid: mr.IID}
+		}
+		return mrDiscussionsLoadedMsg{iid: mr.IID, discussions: discussions}
+	}
+	return tea.Batch(s.spin.Tick, fetchDetail, fetchDiffs, fetchDiscussions)
 }
 
 func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -116,6 +131,16 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.loading--
 		s.diffs = msg.diffs
 		s.setFile(0)
+		return s, nil
+
+	case mrDiscussionsLoadedMsg:
+		if msg.iid != s.mr.IID {
+			return s, nil
+		}
+		s.discussions = msg.discussions
+		if len(s.diffs) > 0 {
+			s.setFile(s.fileIdx) // re-render with threads anchored
+		}
 		return s, nil
 
 	case mrDetailErrMsg:
@@ -167,11 +192,17 @@ func (s *mrDetail) setFile(idx int) {
 	if len(s.diffs) == 0 {
 		return
 	}
+	keepOffset := idx == s.fileIdx
+	offset := s.vp.YOffset()
 	s.fileIdx = (idx + len(s.diffs)) % len(s.diffs)
-	content, hunks := renderDiff(s.diffs[s.fileIdx])
+	content, hunks := renderDiff(s.diffs[s.fileIdx], s.discussions, max(s.width, 60))
 	s.hunkLines = hunks
 	s.vp.SetContent(content)
-	s.vp.GotoTop()
+	if keepOffset {
+		s.vp.SetYOffset(offset)
+	} else {
+		s.vp.GotoTop()
+	}
 }
 
 func (s *mrDetail) jumpHunk(dir int) {

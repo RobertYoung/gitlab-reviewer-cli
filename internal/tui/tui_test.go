@@ -20,16 +20,18 @@ type published struct {
 }
 
 type fakeService struct {
-	mrs         []gitlabx.MRSummary
-	hasMore     bool
-	listErr     error
-	lastFilter  gitlabx.MRFilter
-	lastPage    gitlabx.Page
-	detail      *gitlabx.MRDetail
-	diffs       []gitlabx.FileDiff
-	discussions []gitlabx.Discussion
-	posted      []published
-	inlineErr   error
+	mrs             []gitlabx.MRSummary
+	hasMore         bool
+	listErr         error
+	lastFilter      gitlabx.MRFilter
+	lastPage        gitlabx.Page
+	detail          *gitlabx.MRDetail
+	diffs           []gitlabx.FileDiff
+	discussions     []gitlabx.Discussion
+	posted          []published
+	drafts          []published
+	draftsPublished bool
+	inlineErr       error
 }
 
 func (f *fakeService) ListOpenMergeRequests(_ context.Context, filter gitlabx.MRFilter, page gitlabx.Page) ([]gitlabx.MRSummary, bool, error) {
@@ -60,6 +62,16 @@ func (f *fakeService) CreateInlineDiscussion(_ context.Context, _ any, _ int64, 
 
 func (f *fakeService) CreateNote(_ context.Context, _ any, _ int64, body string) error {
 	f.posted = append(f.posted, published{body: body})
+	return nil
+}
+
+func (f *fakeService) CreateDraftNote(_ context.Context, _ any, _ int64, body string, pos *gitlabx.Position) error {
+	f.drafts = append(f.drafts, published{body: body, pos: pos})
+	return nil
+}
+
+func (f *fakeService) PublishAllDraftNotes(context.Context, any, int64) error {
+	f.draftsPublished = true
 	return nil
 }
 
@@ -491,12 +503,13 @@ func TestPublishInlineAndFallback(t *testing.T) {
 	detail, diffs, result := reviewFixture()
 	svc := &fakeService{}
 	deps := testDeps(svc)
+	deps.Cfg.Publish.Mode = "immediate"
 
 	accepted := []review.Finding{result.Findings[0], result.Findings[1]}
 	for i := range accepted {
 		accepted[i].State = review.StateAccepted
 	}
-	s := newPublish(deps, *detail, diffs, accepted)
+	s := newPublish(deps, *detail, diffs, accepted, publishOpts{auto: true})
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	screen.Init()
@@ -507,7 +520,7 @@ func TestPublishInlineAndFallback(t *testing.T) {
 			break
 		}
 	}
-	if !s.done {
+	if s.phase != phaseDone {
 		t.Fatal("publish never completed")
 	}
 	if len(svc.posted) != 2 {
@@ -547,9 +560,10 @@ func TestPublishInlineErrorFallsBack(t *testing.T) {
 	detail, diffs, result := reviewFixture()
 	svc := &fakeService{inlineErr: errors.New("400 line_code invalid")}
 	deps := testDeps(svc)
+	deps.Cfg.Publish.Mode = "immediate"
 
 	accepted := []review.Finding{result.Findings[0]}
-	s := newPublish(deps, *detail, diffs, accepted)
+	s := newPublish(deps, *detail, diffs, accepted, publishOpts{auto: true})
 	var screen Screen = s
 	screen.Init()
 	for range 10 {
@@ -564,5 +578,186 @@ func TestPublishInlineErrorFallsBack(t *testing.T) {
 	}
 	if s.items[0].State != review.StateFellBack {
 		t.Errorf("state = %v", s.items[0].State)
+	}
+}
+
+func TestPublishDraftMode(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	svc := &fakeService{}
+	deps := testDeps(svc) // default publish.mode = draft
+
+	accepted := []review.Finding{result.Findings[0]}
+	s := newPublish(deps, *detail, diffs, accepted, publishOpts{auto: true})
+	var screen Screen = s
+	screen.Init()
+	for range 10 {
+		msg := <-s.ch
+		screen, _ = screen.Update(msg)
+		if _, ok := msg.(publishDoneMsg); ok {
+			break
+		}
+	}
+	if s.phase != phaseDraftReady {
+		t.Fatalf("phase = %v, want draft-ready", s.phase)
+	}
+	if len(svc.drafts) != 1 || len(svc.posted) != 0 {
+		t.Fatalf("drafts=%d posted=%d", len(svc.drafts), len(svc.posted))
+	}
+	if svc.drafts[0].pos == nil {
+		t.Error("draft note should carry the inline position")
+	}
+	if svc.draftsPublished {
+		t.Fatal("review must not be published before P")
+	}
+
+	// P publishes the whole review in one action
+	screen, cmd := screen.Update(key("P"))
+	msg := <-s.ch
+	screen, _ = screen.Update(msg)
+	_ = cmd
+	if !svc.draftsPublished {
+		t.Error("PublishAllDraftNotes not called")
+	}
+	if s.phase != phaseDone {
+		t.Errorf("phase = %v", s.phase)
+	}
+	_ = screen
+}
+
+func TestPublishDraftKeep(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	svc := &fakeService{}
+	deps := testDeps(svc)
+
+	s := newPublish(deps, *detail, diffs, []review.Finding{result.Findings[0]}, publishOpts{auto: true})
+	var screen Screen = s
+	screen.Init()
+	for range 10 {
+		msg := <-s.ch
+		screen, _ = screen.Update(msg)
+		if _, ok := msg.(publishDoneMsg); ok {
+			break
+		}
+	}
+	screen, _ = screen.Update(key("esc")) // keep as pending drafts
+	if svc.draftsPublished {
+		t.Error("esc must not publish the review")
+	}
+	if s.phase != phaseDone || !s.keptAsDrafts {
+		t.Errorf("phase=%v kept=%v", s.phase, s.keptAsDrafts)
+	}
+	_ = screen
+}
+
+func TestPublishConfirmToggleMode(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	svc := &fakeService{}
+	deps := testDeps(svc)
+
+	s := newPublish(deps, *detail, diffs, []review.Finding{result.Findings[0]}, publishOpts{})
+	var screen Screen = s
+	screen.Init()
+	if s.phase != phaseConfirm {
+		t.Fatalf("phase = %v, want confirm", s.phase)
+	}
+	if s.mode != "draft" {
+		t.Fatalf("mode = %q", s.mode)
+	}
+	screen, _ = screen.Update(key("m"))
+	if s.mode != "immediate" {
+		t.Fatalf("mode after toggle = %q", s.mode)
+	}
+	// enter starts posting in the chosen mode
+	screen, _ = screen.Update(key("enter"))
+	for range 10 {
+		msg := <-s.ch
+		screen, _ = screen.Update(msg)
+		if _, ok := msg.(publishDoneMsg); ok {
+			break
+		}
+	}
+	if len(svc.posted) != 1 || len(svc.drafts) != 0 {
+		t.Errorf("posted=%d drafts=%d", len(svc.posted), len(svc.drafts))
+	}
+	if s.phase != phaseDone {
+		t.Errorf("phase = %v", s.phase)
+	}
+	_ = screen
+}
+
+func TestFindingsAutoComment(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	svc := &fakeService{}
+	deps := testDeps(svc)
+	deps.Cfg.Publish.AutoComment = true
+	deps.Cfg.Publish.AutoMinSeverity = "major"
+
+	s := newFindings(deps, *detail, diffs, result)
+	// major finding pre-accepted, info finding untouched
+	if s.items[0].State != review.StateAccepted {
+		t.Errorf("major finding should be pre-accepted: %v", s.items[0].State)
+	}
+	if s.items[1].State != review.StatePending {
+		t.Errorf("info finding should stay pending: %v", s.items[1].State)
+	}
+
+	// Init pushes an auto publish screen for the accepted set only
+	msgs := runCmd(s.Init())
+	if len(msgs) != 1 {
+		t.Fatalf("msgs = %v", msgs)
+	}
+	push, ok := msgs[0].(pushScreenMsg)
+	if !ok {
+		t.Fatalf("expected push, got %T", msgs[0])
+	}
+	pub := push.screen.(*publish)
+	if !pub.opts.auto || pub.opts.popCount != 1 || len(pub.items) != 1 {
+		t.Fatalf("publish opts: %+v items=%d", pub.opts, len(pub.items))
+	}
+
+	// state reports flow back into the findings screen by ID
+	pub.opts.report(s.items[0].ID, review.StatePublished)
+	if s.items[0].State != review.StatePublished {
+		t.Errorf("report did not update findings: %v", s.items[0].State)
+	}
+}
+
+func TestRenderDiffWithDiscussions(t *testing.T) {
+	fd := gitlabx.FileDiff{
+		OldPath: "a.go", NewPath: "a.go",
+		Diff: "@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n@@ -10,2 +10,2 @@\n more\n+tail\n",
+	}
+	discussions := []gitlabx.Discussion{
+		{
+			ID: "d1",
+			Notes: []gitlabx.Note{{
+				Author: "carol", Body: "please rename this\nsecond line",
+				Position: &gitlabx.Position{NewPath: "a.go", OldPath: "a.go", NewLine: intp(2)},
+			}},
+		},
+		{
+			ID: "other-file",
+			Notes: []gitlabx.Note{{
+				Author: "dave", Body: "not here",
+				Position: &gitlabx.Position{NewPath: "b.go", OldPath: "b.go", NewLine: intp(2)},
+			}},
+		},
+	}
+
+	content, hunks := renderDiff(fd, discussions, 80)
+	if !strings.Contains(content, "@carol") || !strings.Contains(content, "please rename this") {
+		t.Errorf("discussion not rendered:\n%s", content)
+	}
+	if strings.Contains(content, "@dave") {
+		t.Errorf("other file's discussion leaked in:\n%s", content)
+	}
+	if len(hunks) != 2 {
+		t.Fatalf("hunks = %v", hunks)
+	}
+	// The second hunk offset must account for the multi-line thread block:
+	// its recorded line must actually contain the second hunk header.
+	lines := strings.Split(content, "\n")
+	if !strings.Contains(lines[hunks[1]], "@@ -10,2") {
+		t.Errorf("hunk offset drifted: line %d = %q", hunks[1], lines[hunks[1]])
 	}
 }

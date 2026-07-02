@@ -28,4 +28,12 @@ type Service interface {
 	// CreateNote posts a general (unpositioned) comment on the MR — the
 	// fallback when no diff position can be resolved.
 	CreateNote(ctx context.Context, project any, iid int64, body string) error
+
+	// CreateDraftNote adds a comment to the user's pending review; pos may
+	// be nil for a general draft note. Nothing is visible to others until
+	// PublishAllDraftNotes.
+	CreateDraftNote(ctx context.Context, project any, iid int64, body string, pos *Position) error
+
+	// PublishAllDraftNotes publishes the pending review in one action.
+	PublishAllDraftNotes(ctx context.Context, project any, iid int64) error
 }
