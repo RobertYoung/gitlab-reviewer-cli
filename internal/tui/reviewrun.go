@@ -76,11 +76,11 @@ func (s *reviewRun) Title() string {
 func (s *reviewRun) Hints() string {
 	if s.done {
 		if s.logPath != "" {
-			return "l view log · esc back"
+			return "l view log · o browser · esc back"
 		}
-		return "esc back"
+		return "o browser · esc back"
 	}
-	return "esc cancel"
+	return "o browser · esc cancel"
 }
 
 func (s *reviewRun) Init() tea.Cmd {
@@ -305,8 +305,10 @@ func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			// After a failure the screen stays up; the stored run log has
 			// the full story, including lines that scrolled away.
 			if s.done && s.logPath != "" {
-				return s, pushScreen(newLogView(s.detail.Ref(), s.logPath))
+				return s, pushScreen(newLogView(s.deps, s.detail.Ref(), s.detail.WebURL, s.logPath))
 			}
+		case "o":
+			return s, openURLCmd(s.deps, s.detail.WebURL)
 		}
 	}
 	return s, nil

@@ -289,7 +289,7 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits, s.pendingComments(), s.setCommentState))
 		case "L":
-			return s, pushScreen(newLogList(s.deps, s.mr.Ref()))
+			return s, pushScreen(newLogList(s.deps, s.mr.Ref(), s.mr.WebURL))
 		case "n", "right":
 			s.setFile(s.fileIdx + 1)
 			return s, nil
