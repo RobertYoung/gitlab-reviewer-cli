@@ -33,6 +33,23 @@ type GitLab struct {
 	Projects []string `koanf:"projects"`
 	Groups   []string `koanf:"groups"`
 	PerPage  int      `koanf:"per_page"`
+	// Instances are named GitLab instances to choose between (settings file
+	// only). When set, one instance is selected at startup — via --instance,
+	// default_instance, or an interactive prompt — and its connection
+	// settings replace gitlab.base_url and gitlab.token.
+	Instances []Instance `koanf:"instances"`
+	// DefaultInstance names the instance to use without prompting; the
+	// --instance flag and GITLAB_REVIEWER_GITLAB_DEFAULT_INSTANCE override it.
+	DefaultInstance string `koanf:"default_instance"`
+}
+
+// Instance is one named GitLab instance in gitlab.instances.
+type Instance struct {
+	Name    string `koanf:"name"`
+	BaseURL string `koanf:"base_url"`
+	// Token is the access token for this instance; empty falls back to
+	// gitlab.token (useful when one env-provided token covers an instance).
+	Token string `koanf:"token"`
 }
 
 type Review struct {
@@ -162,6 +179,24 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("gitlab.per_page: %d must be between 1 and 100", c.GitLab.PerPage))
 	}
 
+	seen := map[string]bool{}
+	for i, inst := range c.GitLab.Instances {
+		if inst.Name == "" {
+			errs = append(errs, fmt.Errorf("gitlab.instances[%d]: name is required", i))
+		} else if seen[inst.Name] {
+			errs = append(errs, fmt.Errorf("gitlab.instances: duplicate name %q", inst.Name))
+		}
+		seen[inst.Name] = true
+		u, err := url.Parse(inst.BaseURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			errs = append(errs, fmt.Errorf("gitlab.instances[%s].base_url: %q is not a valid URL", inst.Name, inst.BaseURL))
+		}
+	}
+	if c.GitLab.DefaultInstance != "" && !seen[c.GitLab.DefaultInstance] {
+		errs = append(errs, fmt.Errorf("gitlab.default_instance: %q is not a configured instance (have %s)",
+			c.GitLab.DefaultInstance, strings.Join(c.InstanceNames(), ", ")))
+	}
+
 	if err := oneOf("review.provider", c.Review.Provider, "anthropic", "bedrock"); err != nil {
 		errs = append(errs, err)
 	}
@@ -226,8 +261,42 @@ func (c Config) Validate() error {
 // ValidateGitLab checks settings required to talk to GitLab at all. An
 // empty project/group scope is fine: the TUI offers in-app selection.
 func (c Config) ValidateGitLab() error {
+	if len(c.GitLab.Instances) > 0 {
+		for _, inst := range c.GitLab.Instances {
+			if inst.Token == "" && c.GitLab.Token == "" {
+				return fmt.Errorf("gitlab.instances[%s].token is required: add it to the settings file, or set gitlab.token (GITLAB_REVIEWER_GITLAB_TOKEN) as a shared fallback", inst.Name)
+			}
+		}
+		return nil
+	}
 	if c.GitLab.Token == "" {
 		return fmt.Errorf("gitlab.token is required: set GITLAB_REVIEWER_GITLAB_TOKEN (or GITLAB_TOKEN), or add it to %s", DefaultFile())
 	}
 	return nil
+}
+
+// InstanceNames returns the configured instance names in file order.
+func (c Config) InstanceNames() []string {
+	names := make([]string, len(c.GitLab.Instances))
+	for i, inst := range c.GitLab.Instances {
+		names[i] = inst.Name
+	}
+	return names
+}
+
+// WithInstance returns a copy of the configuration narrowed to the named
+// instance: its base URL and token replace the top-level gitlab settings.
+// An instance with an empty token keeps gitlab.token as the fallback.
+func (c Config) WithInstance(name string) (Config, error) {
+	for _, inst := range c.GitLab.Instances {
+		if inst.Name != name {
+			continue
+		}
+		c.GitLab.BaseURL = inst.BaseURL
+		if inst.Token != "" {
+			c.GitLab.Token = inst.Token
+		}
+		return c, nil
+	}
+	return c, fmt.Errorf("gitlab instance %q is not configured (have %s)", name, strings.Join(c.InstanceNames(), ", "))
 }

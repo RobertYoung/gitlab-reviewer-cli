@@ -24,6 +24,7 @@ const (
 var envToKey = map[string]string{
 	"GITLAB_BASE_URL":           "gitlab.base_url",
 	"GITLAB_TOKEN":              "gitlab.token",
+	"GITLAB_DEFAULT_INSTANCE":   "gitlab.default_instance",
 	"GITLAB_PROJECTS":           "gitlab.projects",
 	"GITLAB_GROUPS":             "gitlab.groups",
 	"GITLAB_PER_PAGE":           "gitlab.per_page",
@@ -82,6 +83,7 @@ var envFallbacks = map[string]string{
 var flagToKey = map[string]string{
 	"gitlab-base-url":   "gitlab.base_url",
 	"gitlab-token":      "gitlab.token",
+	"instance":          "gitlab.default_instance",
 	"project":           "gitlab.projects",
 	"group":             "gitlab.groups",
 	"per-page":          "gitlab.per_page",
@@ -284,6 +286,15 @@ func (r *Result) Redacted() map[string]any {
 	if g, ok := raw["gitlab"].(map[string]any); ok {
 		if tok, ok := g["token"].(string); ok && tok != "" {
 			g["token"] = "[redacted]"
+		}
+		if instances, ok := g["instances"].([]any); ok {
+			for _, item := range instances {
+				if m, ok := item.(map[string]any); ok {
+					if tok, ok := m["token"].(string); ok && tok != "" {
+						m["token"] = "[redacted]"
+					}
+				}
+			}
 		}
 	}
 	return raw

@@ -105,6 +105,34 @@ redacted) and `gitlab-reviewer config validate` to check it.
 | `gitlab.projects` | `GITLAB_REVIEWER_GITLAB_PROJECTS` (comma-separated) | `--project` (repeatable) | `[]` |
 | `gitlab.groups` | `GITLAB_REVIEWER_GITLAB_GROUPS` (comma-separated) | `--group` (repeatable) | `[]` |
 | `gitlab.per_page` | `GITLAB_REVIEWER_GITLAB_PER_PAGE` | `--per-page` | `50` |
+| `gitlab.instances` | — (file only, list) | — | `[]` |
+| `gitlab.default_instance` | `GITLAB_REVIEWER_GITLAB_DEFAULT_INSTANCE` | `--instance` | unset |
+
+#### Multiple GitLab instances
+
+If you work across more than one GitLab (say a company self-hosted instance
+and gitlab.com), define them as named instances instead of editing
+`gitlab.base_url`/`gitlab.token` by hand:
+
+```yaml
+gitlab:
+  instances:
+    - name: work
+      base_url: https://gitlab.example.com
+      token: glpat-work...
+    - name: personal
+      base_url: https://gitlab.com
+      # token omitted — falls back to gitlab.token / GITLAB_REVIEWER_GITLAB_TOKEN
+  default_instance: work   # optional: skip the picker
+```
+
+One instance is selected at startup and its `base_url`/`token` replace the
+top-level `gitlab` settings. With a single instance configured there is no
+prompt; with several, a picker appears unless `--instance <name>` (or
+`gitlab.default_instance`) names one. An instance without a `token` uses
+`gitlab.token` (and its environment fallbacks) — handy when the token comes
+from the environment. Non-interactive runs with several instances must pass
+`--instance` or set `gitlab.default_instance`.
 
 ### Review
 
@@ -343,7 +371,8 @@ projects:
 
 Treat the GitLab token as a secret: pass it via
 `GITLAB_REVIEWER_GITLAB_TOKEN` (or `GITLAB_TOKEN`) rather than a flag —
-flags are visible in `ps` and shell history. The token is never logged, is
+flags are visible in `ps` and shell history. The token (including every
+per-instance token under `gitlab.instances`) is never logged, is
 redacted from error messages and `config show`, is handed to git through an
 in-memory credential helper (it never lands in `.git/config` or process
 arguments), and is **never** passed to the `claude` subprocess. OS keychain
