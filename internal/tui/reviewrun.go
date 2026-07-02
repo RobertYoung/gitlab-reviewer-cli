@@ -31,10 +31,11 @@ type (
 // reviewRun drives one review: checkout → claude → findings, streaming
 // progress into a scrolling log. Esc cancels the underlying context.
 type reviewRun struct {
-	deps   Deps
-	detail gitlabx.MRDetail
-	diffs  []gitlabx.FileDiff
-	cfg    config.Config
+	deps    Deps
+	detail  gitlabx.MRDetail
+	diffs   []gitlabx.FileDiff
+	commits []gitlabx.Commit
+	cfg     config.Config
 
 	ch      chan tea.Msg
 	cancel  context.CancelFunc
@@ -47,13 +48,14 @@ type reviewRun struct {
 	height  int
 }
 
-func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff) *reviewRun {
+func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit) *reviewRun {
 	return &reviewRun{
-		deps:   deps,
-		detail: detail,
-		diffs:  diffs,
-		cfg:    deps.cfgFor(detail.ProjectPath),
-		spin:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
+		deps:    deps,
+		detail:  detail,
+		diffs:   diffs,
+		commits: commits,
+		cfg:     deps.cfgFor(detail.ProjectPath),
+		spin:    spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
 }
 
@@ -107,9 +109,24 @@ func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Res
 		}
 	}()
 
-	reqs, warnings, err := buildRequests(s.cfg, s.detail, s.diffs, path)
+	// Fetch the MR description template from GitLab (best-effort): it lets
+	// the review run a description-vs-template hygiene check when the team's
+	// instructions ask for one. Fetched here in the Go process, not the
+	// read-only claude subprocess.
+	template, err := s.deps.Svc.GetMergeRequestTemplate(ctx, s.detail.Project())
+	if err != nil {
+		emit("note: could not fetch MR template: " + err.Error())
+	}
+
+	reqs, warnings, err := buildRequests(s.cfg, s.detail, s.diffs, s.commits, template, path)
 	if err != nil {
 		return nil, err
+	}
+	// Rebase status is a deterministic MR-level fact with no diff line to
+	// anchor a finding on, so it surfaces as a review warning rather than a
+	// model finding.
+	if s.detail.NeedsRebase() {
+		warnings = append(warnings, rebaseWarning(s.detail))
 	}
 	for _, w := range warnings {
 		emit(w)
@@ -138,15 +155,34 @@ func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Res
 		}
 		results = append(results, res)
 	}
+	var final *review.Result
 	if len(results) == 1 {
-		return results[0], nil
+		final = results[0]
+	} else {
+		final = review.MergeResults(results)
 	}
-	return review.MergeResults(results), nil
+	// Surface pre-review warnings (chunking, rebase status) in the findings
+	// screen, not just the transient progress log.
+	final.Warnings = append(warnings, final.Warnings...)
+	return final, nil
+}
+
+// rebaseWarning describes why the MR branch is not up to date with its
+// target, for the findings-screen warning banner.
+func rebaseWarning(detail gitlabx.MRDetail) string {
+	switch {
+	case detail.HasConflicts:
+		return fmt.Sprintf("MR branch has conflicts with %s — rebase before review", detail.TargetBranch)
+	case detail.DivergedCommits > 0:
+		return fmt.Sprintf("MR branch is %d commit(s) behind %s — a rebase is needed", detail.DivergedCommits, detail.TargetBranch)
+	default:
+		return "MR branch is not up to date with its target"
+	}
 }
 
 // buildRequests assembles the reviewer request(s) from project-resolved
 // config: chunked diffs, category list, and combined custom instructions.
-func buildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, repoPath string) ([]review.Request, []string, error) {
+func buildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, template, repoPath string) ([]review.Request, []string, error) {
 	var warnings []string
 
 	chunks, skipped := review.ChunkDiffs(diffs, cfg.Review.Exclude, cfg.Review.MaxDiffKB)
@@ -183,6 +219,8 @@ func buildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 			RepoPath:     repoPath,
 			MR:           detail,
 			Diffs:        chunk,
+			Commits:      commits,
+			Template:     template,
 			Truncated:    skipped,
 			Instructions: instructions,
 			Categories:   categories,

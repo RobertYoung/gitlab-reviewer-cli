@@ -62,6 +62,23 @@ func BuildUserPrompt(req Request) string {
 		b.WriteString("\n")
 	}
 
+	if len(req.Commits) > 0 {
+		b.WriteString("\nCommits on this MR (full message per commit, separated by ---):\n")
+		for _, c := range req.Commits {
+			msg := strings.TrimSpace(c.Message)
+			if msg == "" {
+				msg = strings.TrimSpace(c.Title)
+			}
+			fmt.Fprintf(&b, "\n%s:\n%s\n---\n", c.ShortID, msg)
+		}
+	}
+
+	if tmpl := strings.TrimSpace(req.Template); tmpl != "" {
+		b.WriteString("\nThe project's default MR description template follows. Only relevant if\nyour instructions ask you to check the description against it:\n")
+		b.WriteString(tmpl)
+		b.WriteString("\n")
+	}
+
 	b.WriteString("\nReport findings only in these categories:\n")
 	for _, c := range req.Categories {
 		fmt.Fprintf(&b, "- %s: %s\n", c, categoryGuidance[c])

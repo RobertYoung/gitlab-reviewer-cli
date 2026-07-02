@@ -25,6 +25,10 @@ type (
 		iid         int64
 		discussions []gitlabx.Discussion
 	}
+	mrCommitsLoadedMsg struct {
+		iid     int64
+		commits []gitlabx.Commit
+	}
 	mrDetailErrMsg struct {
 		iid int64
 		err error
@@ -39,6 +43,7 @@ type mrDetail struct {
 
 	detail      *gitlabx.MRDetail
 	diffs       []gitlabx.FileDiff
+	commits     []gitlabx.Commit
 	discussions []gitlabx.Discussion
 
 	vp        viewport.Model
@@ -81,7 +86,7 @@ func (s *mrDetail) Hints() string {
 }
 
 func (s *mrDetail) Init() tea.Cmd {
-	s.loading = 2
+	s.loading = 3
 	svc, mr := s.svc, s.mr
 	fetchDetail := func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
@@ -101,6 +106,16 @@ func (s *mrDetail) Init() tea.Cmd {
 		}
 		return mrDiffsLoadedMsg{iid: mr.IID, diffs: diffs}
 	}
+	fetchCommits := func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
+		defer cancel()
+		commits, err := svc.ListCommits(ctx, mr.Project(), mr.IID)
+		if err != nil {
+			// Commit context is best-effort; the review runs without it.
+			return mrCommitsLoadedMsg{iid: mr.IID}
+		}
+		return mrCommitsLoadedMsg{iid: mr.IID, commits: commits}
+	}
 	fetchDiscussions := func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
 		defer cancel()
@@ -111,7 +126,7 @@ func (s *mrDetail) Init() tea.Cmd {
 		}
 		return mrDiscussionsLoadedMsg{iid: mr.IID, discussions: discussions}
 	}
-	return tea.Batch(s.spin.Tick, fetchDetail, fetchDiffs, fetchDiscussions)
+	return tea.Batch(s.spin.Tick, fetchDetail, fetchDiffs, fetchCommits, fetchDiscussions)
 }
 
 func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
@@ -151,6 +166,14 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		s.setFile(0)
 		return s, nil
 
+	case mrCommitsLoadedMsg:
+		if msg.iid != s.mr.IID {
+			return s, nil
+		}
+		s.loading--
+		s.commits = msg.commits
+		return s, nil
+
 	case mrDiscussionsLoadedMsg:
 		if msg.iid != s.mr.IID {
 			return s, nil
@@ -180,7 +203,7 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			if s.detail == nil || s.loading > 0 {
 				return s, nil
 			}
-			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs))
+			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits))
 		case "n", "right":
 			s.setFile(s.fileIdx + 1)
 			return s, nil

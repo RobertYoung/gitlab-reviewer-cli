@@ -29,6 +29,14 @@ type Service interface {
 	// ListDiffs returns every file diff of the MR (paginating internally).
 	ListDiffs(ctx context.Context, project any, iid int64) ([]FileDiff, error)
 
+	// ListCommits returns every commit on the MR's source branch
+	// (paginating internally), for commit-message hygiene checks.
+	ListCommits(ctx context.Context, project any, iid int64) ([]Commit, error)
+
+	// GetMergeRequestTemplate resolves the project's default MR description
+	// template (including group-inherited ones), or "" if none is set.
+	GetMergeRequestTemplate(ctx context.Context, project any) (string, error)
+
 	// ListDiscussions returns every discussion thread on the MR
 	// (paginating internally).
 	ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error)

@@ -86,8 +86,26 @@ type DiffRefs struct {
 // MRDetail is the full view of one merge request.
 type MRDetail struct {
 	MRSummary
-	DiffRefs     DiffRefs
-	HasConflicts bool
+	DiffRefs DiffRefs
+	// HasConflicts and DivergedCommits drive the rebase hygiene check:
+	// DivergedCommits > 0 means the target branch moved ahead.
+	HasConflicts        bool
+	DivergedCommits     int64
+	DetailedMergeStatus string
+}
+
+// NeedsRebase reports whether the source branch is behind its target or
+// conflicts, i.e. the author should rebase before review.
+func (m MRDetail) NeedsRebase() bool {
+	return m.HasConflicts || m.DivergedCommits > 0
+}
+
+// Commit is one commit on an MR's source branch, for hygiene checks that
+// compare commit messages against the diff.
+type Commit struct {
+	ShortID string
+	Title   string
+	Message string // full message (subject + body)
 }
 
 // FileDiff is one file's unified diff within an MR.

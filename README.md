@@ -145,6 +145,45 @@ projects:
       max_budget_usd: 5
 ```
 
+#### MR hygiene checks
+
+Beyond code review, the reviewer gathers the context needed for lightweight
+MR *hygiene* checks and surfaces them without ever giving the model network
+access — the metadata is fetched by the tool over GitLab's API and injected
+into the prompt as text (or computed directly), so the review session stays
+sandboxed to `Read`/`Grep`/`Glob`:
+
+- **Rebase status** is computed by the tool from the MR's
+  `diverged_commits_count` / conflict state and shown as a ⚠ warning on the
+  findings screen when the branch is behind its target. No configuration
+  needed — it always runs.
+- **Commit messages** and the **MR description** are placed in the prompt
+  alongside the diff, and the project's **default MR template** (including
+  group-inherited templates, resolved via the API) is included too. These
+  power *opt-in* checks you enable through `review.instructions`, because
+  they are judgement calls best left to the model:
+
+  ```yaml
+  review:
+    # keep 'docs' in scope so hygiene findings have a category to land in
+    categories: [bug, security, performance, docs, style, design]
+    instructions: |
+      Also run these MR-hygiene checks, reported as 'docs' findings
+      (minor/info severity, never blocking), each anchored on a
+      representative changed line:
+      - Flag any commit message that describes something not in the diff or
+        omits a significant change that is in the diff.
+      - Flag the description if it claims changes not in the diff, omits a
+        significant change, or leaves the MR template's placeholder comments
+        (e.g. `<!-- ... -->`) unfilled.
+  ```
+
+Checks that need *live* GitLab writes or arbitrary web access are
+deliberately out of scope: the review subprocess is never granted network or
+shell tools, so a malicious MR cannot use a prompt-injection to exfiltrate
+local secrets. See [the review sandbox](#the-review-sandbox) for the
+rationale.
+
 ### Bedrock
 
 | File key | Environment variable | Flag | Default |
@@ -302,6 +341,28 @@ redacted from error messages and `config show`, is handed to git through an
 in-memory credential helper (it never lands in `.git/config` or process
 arguments), and is **never** passed to the `claude` subprocess. OS keychain
 support is a planned enhancement.
+
+### The review sandbox
+
+The review runs Claude in headless, non-interactive mode
+(`--permission-mode dontAsk`) over a checkout of code written by the **MR
+author**, who may not be you and may not be trusted. The MR's diff, title,
+description, and commit messages are all fed into the prompt as untrusted
+text — a prompt-injection surface. The tool's defence is capability
+restriction: the review session is allowed only `Read`, `Grep`, and `Glob`;
+`Bash`, `Edit`/`Write`, and **all network tools (`WebFetch`, `WebSearch`)
+are denied**, and those denials cascade into any delegated subagents.
+
+That network denial is deliberate and load-bearing. Even a fully hijacked
+model can *read* local files (`~/.aws/credentials`, `.env`, SSH keys) but has
+no tool with which to *transmit* them — the sandbox is what turns a possible
+data-exfiltration into a non-event. For the same reason, any GitLab metadata
+a hygiene check needs (rebase status, the MR template) is fetched by the
+**tool itself** over the API and injected as prompt text, rather than by
+relaxing the sandbox to let the model make its own calls. If you ever need
+the subprocess to reach the network, do it with an egress allowlist at the
+OS/proxy layer (permit only your GitLab host and the model endpoint), not by
+removing tools from the deny list.
 
 ## Using AWS Bedrock
 
