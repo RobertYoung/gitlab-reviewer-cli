@@ -3,12 +3,36 @@
 package tui
 
 import (
+	"context"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 )
+
+// CheckoutFunc prepares a review worktree for an MR and returns its path
+// plus a cleanup function. Progress lines go to the TUI's review log.
+type CheckoutFunc func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (path string, cleanup func(context.Context) error, err error)
+
+// Deps bundles everything screens need. CfgFor resolves per-project
+// overrides on top of the base configuration.
+type Deps struct {
+	Cfg      config.Config
+	Svc      gitlabx.Service
+	Reviewer review.Reviewer
+	Checkout CheckoutFunc
+	CfgFor   func(projectPath string) config.Config
+}
+
+func (d Deps) cfgFor(projectPath string) config.Config {
+	if d.CfgFor == nil {
+		return d.Cfg
+	}
+	return d.CfgFor(projectPath)
+}
 
 // Screen is one screen on the navigation stack. Screens receive an adjusted
 // WindowSizeMsg (content area only) and may emit pushScreenMsg/popScreenMsg
@@ -25,7 +49,13 @@ type Screen interface {
 // Navigation messages emitted by screens.
 type (
 	pushScreenMsg struct{ screen Screen }
-	popScreenMsg  struct{}
+	// popScreenMsg pops count screens (0 means 1); replacement, when set,
+	// is pushed afterwards — used to swap the review-progress screen for
+	// the findings screen.
+	popScreenMsg struct {
+		count       int
+		replacement Screen
+	}
 )
 
 func pushScreen(s Screen) tea.Cmd {
@@ -34,6 +64,10 @@ func pushScreen(s Screen) tea.Cmd {
 
 func popScreen() tea.Msg { return popScreenMsg{} }
 
+func popScreens(count int, replacement Screen) tea.Cmd {
+	return func() tea.Msg { return popScreenMsg{count: count, replacement: replacement} }
+}
+
 // chrome is the number of lines the app reserves around screen content
 // (title bar + status bar).
 const chrome = 2
@@ -41,17 +75,17 @@ const chrome = 2
 // App is the root Bubble Tea model: it owns the screen stack and window
 // chrome and routes every other message to the top screen.
 type App struct {
-	cfg    config.Config
+	deps   Deps
 	stack  []Screen
 	width  int
 	height int
 }
 
 // NewApp builds the root model with the MR list as the bottom screen.
-func NewApp(cfg config.Config, svc gitlabx.Service) *App {
+func NewApp(deps Deps) *App {
 	return &App{
-		cfg:   cfg,
-		stack: []Screen{newMRList(svc, cfg.GitLab.PerPage)},
+		deps:  deps,
+		stack: []Screen{newMRList(deps)},
 	}
 }
 
@@ -90,8 +124,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(msg.screen.Init(), cmd)
 
 	case popScreenMsg:
-		if len(a.stack) > 1 {
-			a.stack = a.stack[:len(a.stack)-1]
+		n := max(msg.count, 1)
+		for range n {
+			if len(a.stack) > 1 {
+				a.stack = a.stack[:len(a.stack)-1]
+			}
+		}
+		if msg.replacement != nil {
+			return a, pushScreen(msg.replacement)
 		}
 		return a, nil
 	}

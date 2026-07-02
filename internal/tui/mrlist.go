@@ -42,6 +42,7 @@ type (
 // mrList is the MR browser screen: a table of open MRs across all
 // configured projects/groups with filtering.
 type mrList struct {
+	deps    Deps
 	svc     gitlabx.Service
 	perPage int
 
@@ -60,14 +61,15 @@ type mrList struct {
 	height  int
 }
 
-func newMRList(svc gitlabx.Service, perPage int) *mrList {
+func newMRList(deps Deps) *mrList {
 	in := textinput.New()
 	in.Prompt = "/"
 	in.CharLimit = 100
 
 	return &mrList{
-		svc:     svc,
-		perPage: perPage,
+		deps:    deps,
+		svc:     deps.Svc,
+		perPage: deps.Cfg.GitLab.PerPage,
 		filter:  gitlabx.MRFilter{State: "opened"},
 		table: table.New(
 			table.WithFocused(true),
@@ -211,7 +213,7 @@ func (s *mrList) updateTable(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
 		return s, tea.Quit
 	case "enter":
 		if mr, ok := s.selected(); ok {
-			return s, pushScreen(newMRDetail(s.svc, mr))
+			return s, pushScreen(newMRDetail(s.deps, mr))
 		}
 		return s, nil
 	case "/", "a", "t":

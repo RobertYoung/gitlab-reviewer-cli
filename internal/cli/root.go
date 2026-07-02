@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,8 +11,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/secret"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/tui"
 )
@@ -55,11 +58,41 @@ func newRoot(st *state) *cobra.Command {
 			if err := cfg.ValidateGitLab(); err != nil {
 				return err
 			}
+
+			reviewer := claudecli.New(cfg, filepath.Join(config.DefaultStateDir(), "reviews"))
+			if err := reviewer.CheckAvailable(cmd.Context()); err != nil {
+				return err
+			}
+
 			svc, err := gitlabx.New(cfg.GitLab.BaseURL, cfg.GitLab.Token, cfg.GitLab.Projects, cfg.GitLab.Groups)
 			if err != nil {
 				return st.redactor.RedactError(err)
 			}
-			if err := tui.Run(cfg, svc); err != nil {
+			manager, err := checkout.NewManager(cfg.Checkout, cfg.GitLab.BaseURL, cfg.GitLab.Token)
+			if err != nil {
+				return st.redactor.RedactError(err)
+			}
+
+			deps := tui.Deps{
+				Cfg:      cfg,
+				Svc:      svc,
+				Reviewer: reviewer,
+				Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
+					co, err := manager.Ensure(ctx, mr, progress)
+					if err != nil {
+						return "", nil, st.redactor.RedactError(err)
+					}
+					return co.Path, co.Close, nil
+				},
+				CfgFor: func(projectPath string) config.Config {
+					projectCfg, err := st.loaded.ForProject(projectPath)
+					if err != nil {
+						return cfg
+					}
+					return projectCfg
+				},
+			}
+			if err := tui.Run(deps); err != nil {
 				return st.redactor.RedactError(err)
 			}
 			return nil
@@ -88,7 +121,6 @@ func addSettingFlags(root *cobra.Command) {
 	f.String("model", "", "model passed to the claude CLI")
 	f.String("claude-path", "", "path to the claude binary")
 	f.Duration("review-timeout", 0, "maximum duration for one review")
-	f.Int("max-turns", 0, "maximum agent turns per review")
 	f.Float64("max-budget-usd", 0, "maximum spend per review in USD")
 	f.StringSlice("categories", nil, "finding categories to request (bug,security,performance,docs,style,design)")
 	f.String("instructions", "", "extra review instructions appended to the prompt")

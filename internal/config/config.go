@@ -38,7 +38,6 @@ type Review struct {
 	Model            string            `koanf:"model"`
 	ClaudePath       string            `koanf:"claude_path"`
 	Timeout          time.Duration     `koanf:"timeout"`
-	MaxTurns         int               `koanf:"max_turns"`
 	MaxBudgetUSD     float64           `koanf:"max_budget_usd"`
 	Categories       []string          `koanf:"categories"`
 	Instructions     string            `koanf:"instructions"`
@@ -89,7 +88,6 @@ func Default() Config {
 			Provider:   "anthropic",
 			ClaudePath: "claude",
 			Timeout:    10 * time.Minute,
-			MaxTurns:   50,
 			Categories: slices.Clone(Categories),
 			MaxDiffKB:  256,
 			Exclude: []string{
@@ -143,9 +141,6 @@ func (c Config) Validate() error {
 	}
 	if c.Review.Timeout <= 0 {
 		errs = append(errs, fmt.Errorf("review.timeout: must be positive, got %s", c.Review.Timeout))
-	}
-	if c.Review.MaxTurns < 1 {
-		errs = append(errs, fmt.Errorf("review.max_turns: must be at least 1, got %d", c.Review.MaxTurns))
 	}
 	if c.Review.MaxDiffKB < 1 {
 		errs = append(errs, fmt.Errorf("review.max_diff_kb: must be at least 1, got %d", c.Review.MaxDiffKB))

@@ -1,0 +1,349 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+)
+
+var severityStyles = map[review.Severity]lipgloss.Style{
+	review.SeverityCritical: lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("1")).Padding(0, 1),
+	review.SeverityMajor:    lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")).Padding(0, 1),
+	review.SeverityMinor:    lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Padding(0, 1),
+	review.SeverityInfo:     lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Padding(0, 1),
+}
+
+var stateStyles = map[review.FindingState]lipgloss.Style{
+	review.StateAccepted: lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
+	review.StateRejected: lipgloss.NewStyle().Faint(true).Strikethrough(true),
+	review.StatePending:  lipgloss.NewStyle(),
+}
+
+// findings lets the engineer curate the review result: view each finding
+// against its diff hunk, edit the body, accept or reject, then publish.
+type findings struct {
+	deps   Deps
+	detail gitlabx.MRDetail
+	diffs  []gitlabx.FileDiff
+	cfg    config.Config
+
+	result *review.Result
+	items  []review.Finding
+	cursor int
+
+	editing bool
+	editor  textarea.Model
+
+	width  int
+	height int
+}
+
+func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, result *review.Result) *findings {
+	ta := textarea.New()
+	ta.ShowLineNumbers = false
+	items := make([]review.Finding, len(result.Findings))
+	copy(items, result.Findings)
+	return &findings{
+		deps:   deps,
+		detail: detail,
+		diffs:  diffs,
+		cfg:    deps.cfgFor(detail.ProjectPath),
+		result: result,
+		items:  items,
+		editor: ta,
+	}
+}
+
+func (s *findings) Title() string {
+	return fmt.Sprintf("findings · %s · %d suggestion(s)", s.detail.Ref(), len(s.items))
+}
+
+func (s *findings) Hints() string {
+	if s.editing {
+		return "ctrl+s save · esc discard edit"
+	}
+	return "↑/↓ move · a accept · x reject · A accept all · e edit · p publish accepted · esc back"
+}
+
+func (s *findings) Init() tea.Cmd { return nil }
+
+func (s *findings) Update(msg tea.Msg) (Screen, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		s.width, s.height = msg.Width, msg.Height
+		s.editor.SetWidth(max(s.width-4, 20))
+		s.editor.SetHeight(max(s.detailHeight()-2, 3))
+		return s, nil
+
+	case tea.KeyPressMsg:
+		if s.editing {
+			return s.updateEditor(msg)
+		}
+		return s.updateList(msg)
+	}
+	return s, nil
+}
+
+func (s *findings) updateEditor(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+s":
+		s.items[s.cursor].Body = strings.TrimSpace(s.editor.Value())
+		s.editing = false
+		return s, nil
+	case "esc":
+		s.editing = false
+		return s, nil
+	}
+	var cmd tea.Cmd
+	s.editor, cmd = s.editor.Update(msg)
+	return s, cmd
+}
+
+func (s *findings) updateList(msg tea.KeyPressMsg) (Screen, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		return s, popScreen
+	case "q":
+		return s, tea.Quit
+	case "up", "k":
+		if s.cursor > 0 {
+			s.cursor--
+		}
+	case "down", "j":
+		if s.cursor < len(s.items)-1 {
+			s.cursor++
+		}
+	case "a":
+		if len(s.items) > 0 {
+			s.items[s.cursor].State = review.StateAccepted
+			if s.cursor < len(s.items)-1 {
+				s.cursor++
+			}
+		}
+	case "x":
+		if len(s.items) > 0 {
+			s.items[s.cursor].State = review.StateRejected
+			if s.cursor < len(s.items)-1 {
+				s.cursor++
+			}
+		}
+	case "A":
+		for i := range s.items {
+			if s.items[i].State == review.StatePending {
+				s.items[i].State = review.StateAccepted
+			}
+		}
+	case "e":
+		if len(s.items) > 0 {
+			s.editing = true
+			s.editor.SetValue(s.items[s.cursor].Body)
+			return s, s.editor.Focus()
+		}
+	case "p":
+		accepted := s.accepted()
+		if len(accepted) == 0 {
+			return s, nil
+		}
+		return s, pushScreen(newPublish(s.deps, s.detail, s.diffs, accepted))
+	}
+	return s, nil
+}
+
+func (s *findings) accepted() []review.Finding {
+	var out []review.Finding
+	for _, f := range s.items {
+		if f.State == review.StateAccepted {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+func (s *findings) listHeight() int {
+	// list gets up to 40% of the screen, at least 4 lines
+	return max(min(len(s.items)+1, s.height*2/5), 4)
+}
+
+func (s *findings) detailHeight() int {
+	return max(s.height-s.listHeight()-2, 5)
+}
+
+func (s *findings) View() string {
+	if len(s.items) == 0 {
+		summary := s.result.Summary
+		if summary == "" {
+			summary = "The reviewer found nothing to flag."
+		}
+		return headerStyle.Render("no findings") + "\n\n" + wrap(summary, s.width) + "\n\n" +
+			warningsView(s.result.Warnings, s.width) + subtleStyle.Render("esc to go back")
+	}
+
+	var b strings.Builder
+
+	// list pane
+	listH := s.listHeight()
+	start := 0
+	if s.cursor >= listH {
+		start = s.cursor - listH + 1
+	}
+	for i := start; i < min(start+listH, len(s.items)); i++ {
+		f := s.items[i]
+		prefix := "  "
+		if i == s.cursor {
+			prefix = "> "
+		}
+		sev := severityStyles[f.Severity].Render(string(f.Severity))
+		state := f.State.String()
+		if st, ok := stateStyles[f.State]; ok && f.State != review.StatePending {
+			state = st.Render(state)
+		} else if f.State == review.StatePending {
+			state = subtleStyle.Render(state)
+		}
+		line := fmt.Sprintf("%s%s %-30s %s  %s", prefix, sev,
+			truncate(fmt.Sprintf("%s:%s", f.File, lineLabel(f.Line)), 30),
+			truncate(f.Title, max(s.width-55, 15)), state)
+		b.WriteString(truncate(line, s.width) + "\n")
+	}
+	b.WriteString(strings.Repeat("─", max(s.width, 1)) + "\n")
+
+	// detail pane
+	if s.editing {
+		b.WriteString(headerStyle.Render("editing comment body") + "\n")
+		b.WriteString(s.editor.View())
+		return b.String()
+	}
+
+	f := s.items[s.cursor]
+	fmt.Fprintf(&b, "%s %s  %s\n\n", severityStyles[f.Severity].Render(string(f.Severity)+" · "+string(f.Category)),
+		headerStyle.Render(f.Title), subtleStyle.Render(fmt.Sprintf("%s:%s", f.File, lineLabel(f.Line))))
+
+	detailLines := s.detailHeight() - 3
+	body := wrap(f.Body, s.width-2)
+	if f.Suggestion != "" {
+		body += "\n\n" + subtleStyle.Render("suggested replacement:") + "\n" + addedStyle.Render("+"+f.Suggestion)
+	}
+	if hunk := hunkExcerpt(s.diffs, f, 4); hunk != "" {
+		body += "\n\n" + hunk
+	}
+	lines := strings.Split(body, "\n")
+	if len(lines) > detailLines {
+		lines = lines[:detailLines]
+	}
+	b.WriteString(strings.Join(lines, "\n"))
+	return b.String()
+}
+
+func warningsView(warnings []string, width int) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, w := range warnings {
+		b.WriteString(draftStyle.Render("⚠ "+truncate(w, max(width-3, 20))) + "\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+func lineLabel(l review.LineRef) string {
+	switch {
+	case l.NewLine != nil:
+		return fmt.Sprintf("%d", *l.NewLine)
+	case l.OldLine != nil:
+		return fmt.Sprintf("%d(old)", *l.OldLine)
+	default:
+		return "?"
+	}
+}
+
+// hunkExcerpt renders the diff lines around the finding's location so the
+// suggestion can be judged in context without leaving the screen.
+func hunkExcerpt(diffs []gitlabx.FileDiff, f review.Finding, radius int) string {
+	var fd *gitlabx.FileDiff
+	for i := range diffs {
+		if diffs[i].NewPath == f.File || diffs[i].OldPath == f.File {
+			fd = &diffs[i]
+			break
+		}
+	}
+	if fd == nil {
+		return ""
+	}
+
+	type numbered struct {
+		text    string
+		oldLine int
+		newLine int
+	}
+	var lines []numbered
+	oldLine, newLine := 0, 0
+	target := -1
+	for _, raw := range strings.Split(strings.TrimSuffix(fd.Diff, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(raw, "@@"):
+			if o, n, ok := parseHunkStart(raw); ok {
+				oldLine, newLine = o, n
+			}
+			lines = append(lines, numbered{text: hunkStyle.Render(raw)})
+			continue
+		case strings.HasPrefix(raw, "+"):
+			lines = append(lines, numbered{text: addedStyle.Render(raw), newLine: newLine})
+			if f.Line.NewLine != nil && newLine == *f.Line.NewLine {
+				target = len(lines) - 1
+			}
+			newLine++
+		case strings.HasPrefix(raw, "-"):
+			lines = append(lines, numbered{text: removedStyle.Render(raw), oldLine: oldLine})
+			if f.Line.NewLine == nil && f.Line.OldLine != nil && oldLine == *f.Line.OldLine {
+				target = len(lines) - 1
+			}
+			oldLine++
+		default:
+			lines = append(lines, numbered{text: raw, oldLine: oldLine, newLine: newLine})
+			if f.Line.NewLine != nil && newLine == *f.Line.NewLine {
+				target = len(lines) - 1
+			}
+			oldLine++
+			newLine++
+		}
+	}
+	if target < 0 {
+		return ""
+	}
+
+	from := max(target-radius, 0)
+	to := min(target+radius+1, len(lines))
+	var b strings.Builder
+	b.WriteString(subtleStyle.Render("diff context:") + "\n")
+	for i := from; i < to; i++ {
+		marker := "  "
+		if i == target {
+			marker = "→ "
+		}
+		b.WriteString(marker + lines[i].text + "\n")
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// parseHunkStart extracts starting line numbers from a hunk header.
+func parseHunkStart(line string) (oldStart, newStart int, ok bool) {
+	var o, n int
+	if _, err := fmt.Sscanf(line, "@@ -%d", &o); err != nil {
+		return 0, 0, false
+	}
+	plus := strings.Index(line, "+")
+	if plus < 0 {
+		return 0, 0, false
+	}
+	if _, err := fmt.Sscanf(line[plus:], "+%d", &n); err != nil {
+		return 0, 0, false
+	}
+	return max(o, 1), max(n, 1), true
+}

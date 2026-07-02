@@ -29,8 +29,9 @@ type (
 
 // mrDetail shows one MR: metadata header plus a navigable, coloured diff.
 type mrDetail struct {
-	svc gitlabx.Service
-	mr  gitlabx.MRSummary
+	deps Deps
+	svc  gitlabx.Service
+	mr   gitlabx.MRSummary
 
 	detail *gitlabx.MRDetail
 	diffs  []gitlabx.FileDiff
@@ -45,9 +46,10 @@ type mrDetail struct {
 	height    int
 }
 
-func newMRDetail(svc gitlabx.Service, mr gitlabx.MRSummary) *mrDetail {
+func newMRDetail(deps Deps, mr gitlabx.MRSummary) *mrDetail {
 	return &mrDetail{
-		svc:  svc,
+		deps: deps,
+		svc:  deps.Svc,
 		mr:   mr,
 		vp:   viewport.New(),
 		spin: spinner.New(spinner.WithSpinner(spinner.MiniDot)),
@@ -59,7 +61,7 @@ func (s *mrDetail) Title() string {
 }
 
 func (s *mrDetail) Hints() string {
-	return "↑/↓ scroll · n/p file · ]/[ hunk · g/G top/bottom · esc back · q quit"
+	return "↑/↓ scroll · n/p file · ]/[ hunk · r review · esc back · q quit"
 }
 
 func (s *mrDetail) Init() tea.Cmd {
@@ -130,6 +132,11 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, popScreen
 		case "q":
 			return s, tea.Quit
+		case "r":
+			if s.detail == nil || s.loading > 0 {
+				return s, nil
+			}
+			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs))
 		case "n", "right":
 			s.setFile(s.fileIdx + 1)
 			return s, nil

@@ -21,4 +21,11 @@ type Service interface {
 	// ListDiscussions returns every discussion thread on the MR
 	// (paginating internally).
 	ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error)
+
+	// CreateInlineDiscussion posts a positioned comment on the MR diff.
+	CreateInlineDiscussion(ctx context.Context, project any, iid int64, body string, pos *Position) error
+
+	// CreateNote posts a general (unpositioned) comment on the MR — the
+	// fallback when no diff position can be resolved.
+	CreateNote(ctx context.Context, project any, iid int64, body string) error
 }
