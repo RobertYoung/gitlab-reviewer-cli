@@ -208,7 +208,10 @@ func toProjectInfos(projects []*gitlab.Project) []ProjectInfo {
 }
 
 func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*MRDetail, error) {
-	mr, _, err := c.gl.MergeRequests.GetMergeRequest(project, iid, nil, gitlab.WithContext(ctx))
+	opts := &gitlab.GetMergeRequestsOptions{
+		IncludeDivergedCommitsCount: gitlab.Ptr(true),
+	}
+	mr, _, err := c.gl.MergeRequests.GetMergeRequest(project, iid, opts, gitlab.WithContext(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("fetching MR !%d: %w", iid, err)
 	}
@@ -230,7 +233,9 @@ func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*
 			HeadSHA:  mr.DiffRefs.HeadSha,
 			StartSHA: mr.DiffRefs.StartSha,
 		},
-		HasConflicts: mr.HasConflicts,
+		HasConflicts:        mr.HasConflicts,
+		DivergedCommits:     mr.DivergedCommitsCount,
+		DetailedMergeStatus: mr.DetailedMergeStatus,
 	}
 	if path, ok := project.(string); ok {
 		detail.ProjectPath = path
@@ -283,6 +288,58 @@ func (c *Client) ListDiffs(ctx context.Context, project any, iid int64) ([]FileD
 		}
 	}
 	return out, nil
+}
+
+func (c *Client) ListCommits(ctx context.Context, project any, iid int64) ([]Commit, error) {
+	var out []Commit
+	opts := &gitlab.GetMergeRequestCommitsOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+	}
+	for page := 1; page <= maxDiffPages; page++ {
+		opts.Page = int64(page)
+		commits, resp, err := c.gl.MergeRequests.GetMergeRequestCommits(project, iid, opts, gitlab.WithContext(ctx))
+		if err != nil {
+			return nil, fmt.Errorf("listing commits for MR !%d: %w", iid, err)
+		}
+		for _, cm := range commits {
+			out = append(out, Commit{
+				ShortID: cm.ShortID,
+				Title:   cm.Title,
+				Message: cm.Message,
+			})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return out, nil
+}
+
+// GetMergeRequestTemplate resolves the project's default MR description
+// template (including templates inherited from parent groups, which the web
+// UI applies but the API does not substitute). It returns "" when no
+// template is configured. It prefers a template named "Default", otherwise
+// the first one listed.
+func (c *Client) GetMergeRequestTemplate(ctx context.Context, project any) (string, error) {
+	templates, _, err := c.gl.ProjectTemplates.ListTemplates(project, "merge_requests", nil, gitlab.WithContext(ctx))
+	if err != nil {
+		return "", fmt.Errorf("listing MR templates: %w", err)
+	}
+	if len(templates) == 0 {
+		return "", nil
+	}
+	chosen := templates[0]
+	for _, t := range templates {
+		if strings.EqualFold(t.Name, "Default") || strings.EqualFold(t.Key, "Default") {
+			chosen = t
+			break
+		}
+	}
+	full, _, err := c.gl.ProjectTemplates.GetProjectTemplate(project, "merge_requests", chosen.Name, gitlab.WithContext(ctx))
+	if err != nil {
+		return "", fmt.Errorf("fetching MR template %q: %w", chosen.Name, err)
+	}
+	return full.Content, nil
 }
 
 func (c *Client) ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error) {

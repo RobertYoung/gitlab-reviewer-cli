@@ -28,6 +28,8 @@ type fakeService struct {
 	lastPage        gitlabx.Page
 	detail          *gitlabx.MRDetail
 	diffs           []gitlabx.FileDiff
+	commits         []gitlabx.Commit
+	template        string
 	discussions     []gitlabx.Discussion
 	posted          []published
 	drafts          []published
@@ -53,6 +55,14 @@ func (f *fakeService) GetMergeRequest(context.Context, any, int64) (*gitlabx.MRD
 
 func (f *fakeService) ListDiffs(context.Context, any, int64) ([]gitlabx.FileDiff, error) {
 	return f.diffs, nil
+}
+
+func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit, error) {
+	return f.commits, nil
+}
+
+func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) {
+	return f.template, nil
 }
 
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {
@@ -389,7 +399,7 @@ func reviewFixture() (*gitlabx.MRDetail, []gitlabx.FileDiff, *review.Result) {
 func TestReviewRunHappyFlow(t *testing.T) {
 	detail, diffs, result := reviewFixture()
 	rev := &fakeReviewer{result: result, events: []review.Event{{Kind: review.EventToolUse, Text: "Read a.go"}}}
-	deps := testDeps(&fakeService{})
+	deps := testDeps(&fakeService{template: "## What\n<!-- fill this in -->"})
 	deps.Reviewer = rev
 	cleanedUp := false
 	deps.Checkout = func(_ context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
@@ -397,7 +407,7 @@ func TestReviewRunHappyFlow(t *testing.T) {
 		return "/tmp/worktree", func(context.Context) error { cleanedUp = true; return nil }, nil
 	}
 
-	s := newReviewRun(deps, *detail, diffs)
+	s := newReviewRun(deps, *detail, diffs, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 
@@ -430,8 +440,50 @@ func TestReviewRunHappyFlow(t *testing.T) {
 	if len(rev.gotReq.Diffs) != 1 {
 		t.Errorf("bounded diffs = %d", len(rev.gotReq.Diffs))
 	}
+	if !strings.Contains(rev.gotReq.Template, "fill this in") {
+		t.Errorf("MR template not threaded into request: %q", rev.gotReq.Template)
+	}
 	if len(s.log) == 0 {
 		t.Error("no progress lines recorded")
+	}
+}
+
+func TestReviewRunRebaseWarning(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	detail.DivergedCommits = 3
+	deps := testDeps(&fakeService{})
+	deps.Reviewer = &fakeReviewer{result: result}
+	deps.Checkout = func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
+		return "/tmp/worktree", func(context.Context) error { return nil }, nil
+	}
+
+	s := newReviewRun(deps, *detail, diffs, nil)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	screen.Init()
+
+	var got *review.Result
+	for range 50 {
+		msg := <-s.ch
+		if pm, ok := msg.(reviewDoneMsg); ok {
+			if pm.err != nil {
+				t.Fatal(pm.err)
+			}
+			got = pm.result
+			break
+		}
+	}
+	if got == nil {
+		t.Fatal("review never completed")
+	}
+	var found bool
+	for _, w := range got.Warnings {
+		if strings.Contains(w, "3 commit(s) behind") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("rebase warning not surfaced in result: %v", got.Warnings)
 	}
 }
 
@@ -442,7 +494,7 @@ func TestReviewRunCheckoutFailure(t *testing.T) {
 	deps.Checkout = func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
 		return "", nil, errors.New("clone exploded")
 	}
-	s := newReviewRun(deps, *detail, diffs)
+	s := newReviewRun(deps, *detail, diffs, nil)
 	var screen Screen = s
 	screen.Init()
 	for range 10 {

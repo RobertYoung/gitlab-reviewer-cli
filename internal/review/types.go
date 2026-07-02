@@ -95,6 +95,13 @@ type Request struct {
 	MR gitlabx.MRDetail
 	// Diffs is the bounded, pre-filtered set of file diffs to review.
 	Diffs []gitlabx.FileDiff
+	// Commits are the MR's commits, shown to the model as context (and for
+	// commit-message hygiene checks driven via Instructions).
+	Commits []gitlabx.Commit
+	// Template is the project's default MR description template, shown to the
+	// model so instructions can drive a description-vs-template hygiene
+	// check. Empty when the project has no template.
+	Template string
 	// Truncated lists files that were excluded or cut by the diff budget.
 	Truncated []string
 	// Instructions is extra prompt text: global then per-project.

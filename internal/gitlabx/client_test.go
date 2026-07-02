@@ -180,6 +180,42 @@ func TestListDiffsPaginates(t *testing.T) {
 	}
 }
 
+func TestGetMergeRequestTemplatePrefersDefault(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/templates/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, []map[string]any{
+			{"key": "Bug", "name": "Bug"},
+			{"key": "Default", "name": "Default"},
+		})
+	})
+	mux.HandleFunc("/api/v4/projects/{project}/templates/merge_requests/Default", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{"key": "Default", "name": "Default", "content": "## What\n<!-- describe -->"})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	tmpl, err := c.GetMergeRequestTemplate(context.Background(), "group/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(tmpl, "## What") {
+		t.Errorf("template content = %q", tmpl)
+	}
+}
+
+func TestGetMergeRequestTemplateNoneConfigured(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/templates/merge_requests", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, []map[string]any{})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	tmpl, err := c.GetMergeRequestTemplate(context.Background(), "group/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tmpl != "" {
+		t.Errorf("expected empty template, got %q", tmpl)
+	}
+}
+
 func TestListDiscussions(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v4/projects/{project}/merge_requests/11/discussions", func(w http.ResponseWriter, r *http.Request) {
