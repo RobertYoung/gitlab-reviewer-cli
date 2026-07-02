@@ -5,6 +5,7 @@ package review
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -66,29 +67,53 @@ func (s FindingState) String() string {
 	}
 }
 
+// MarshalText encodes the state as its display word, so persisted findings
+// stay readable and survive reordering of the constants.
+func (s FindingState) MarshalText() ([]byte, error) { return []byte(s.String()), nil }
+
+// UnmarshalText is the inverse of MarshalText.
+func (s *FindingState) UnmarshalText(text []byte) error {
+	switch string(text) {
+	case "pending":
+		*s = StatePending
+	case "accepted":
+		*s = StateAccepted
+	case "rejected":
+		*s = StateRejected
+	case "published":
+		*s = StatePublished
+	case "note":
+		*s = StateFellBack
+	default:
+		return fmt.Errorf("unknown finding state %q", text)
+	}
+	return nil
+}
+
 // LineRef locates a finding in a diff: new-side line for added/context
 // lines, old-side line for removed lines. Nil means not applicable.
 type LineRef struct {
-	OldLine *int
-	NewLine *int
+	OldLine *int `json:"old_line,omitempty"`
+	NewLine *int `json:"new_line,omitempty"`
 }
 
-// Finding is one suggested review comment.
+// Finding is one suggested review comment. The json tags define the stored
+// form used by review/resultstore.
 type Finding struct {
-	ID         string
-	File       string // new path, repo-relative; empty on MR-level manual comments
-	OldFile    string // as reported by the model for renames; advisory only
-	Line       LineRef
-	Severity   Severity
-	Category   Category
-	Title      string
-	Body       string // markdown, user-editable
-	Suggestion string // optional replacement for the flagged line
-	State      FindingState
+	ID         string       `json:"id"`
+	File       string       `json:"file,omitempty"`     // new path, repo-relative; empty on MR-level manual comments
+	OldFile    string       `json:"old_file,omitempty"` // as reported by the model for renames; advisory only
+	Line       LineRef      `json:"line,omitzero"`
+	Severity   Severity     `json:"severity,omitempty"`
+	Category   Category     `json:"category,omitempty"`
+	Title      string       `json:"title,omitempty"`
+	Body       string       `json:"body"`                 // markdown, user-editable
+	Suggestion string       `json:"suggestion,omitempty"` // optional replacement for the flagged line
+	State      FindingState `json:"state"`
 	// Manual marks a comment written by the reviewer in the TUI rather than
 	// produced by the model: it publishes verbatim, without the body
 	// template or the attribution footer.
-	Manual bool
+	Manual bool `json:"manual,omitempty"`
 }
 
 // Request is everything a backend needs to run one review.

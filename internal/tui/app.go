@@ -11,6 +11,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
 
@@ -29,7 +30,10 @@ type Deps struct {
 	CfgFor   func(projectPath string) config.Config
 	// Logs stores each review run's progress log for later viewing; nil
 	// disables both storing and the log screens' content.
-	Logs    *runlog.Store
+	Logs *runlog.Store
+	// Results stores each review's result with its curation states, so past
+	// reviews can be reopened; nil disables storing and reopening.
+	Results *resultstore.Store
 	OpenURL func(url string) error
 }
 

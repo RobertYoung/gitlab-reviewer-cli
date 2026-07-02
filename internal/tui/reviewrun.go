@@ -14,6 +14,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 )
 
 type (
@@ -26,6 +27,9 @@ type (
 		result  *review.Result
 		err     error
 		logPath string
+		// rec is the stored result record (nil on failure or cancellation);
+		// the findings screen keeps re-saving it as curation progresses.
+		rec *resultstore.Record
 	}
 )
 
@@ -118,7 +122,28 @@ func (s *reviewRun) run(ctx context.Context) {
 	default:
 		rl.Finish(fmt.Sprintf("completed with %d finding(s)", len(res.Findings)))
 	}
-	s.ch <- reviewDoneMsg{iid: iid, result: res, err: err, logPath: rl.Path()}
+	// Store the result so the review can be reopened later (L on the MR
+	// detail screen), even if this session ends. Curation states are kept
+	// current by the findings screen re-saving the same record.
+	var rec *resultstore.Record
+	if err == nil {
+		rec = &resultstore.Record{
+			IID:       iid,
+			Ref:       s.detail.Ref(),
+			Title:     s.detail.Title,
+			Started:   s.started,
+			Summary:   res.Summary,
+			Warnings:  res.Warnings,
+			SessionID: res.SessionID,
+			CostUSD:   res.CostUSD,
+			LogPath:   rl.Path(),
+			Findings:  res.Findings,
+		}
+		if saveErr := s.deps.Results.Save(*rec); saveErr != nil {
+			res.Warnings = append(res.Warnings, "could not store the review result: "+saveErr.Error())
+		}
+	}
+	s.ch <- reviewDoneMsg{iid: iid, result: res, err: err, logPath: rl.Path(), rec: rec}
 }
 
 func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Result, error) {
@@ -290,7 +315,7 @@ func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			return s, nil
 		}
 		// Swap this progress screen for the findings editor.
-		return s, popScreens(1, newFindings(s.deps, s.detail, s.diffs, msg.result, msg.logPath, s.manual, s.manualReport))
+		return s, popScreens(1, newFindings(s.deps, s.detail, s.diffs, msg.result, msg.rec, s.manual, s.manualReport))
 
 	case tea.KeyPressMsg:
 		switch msg.String() {

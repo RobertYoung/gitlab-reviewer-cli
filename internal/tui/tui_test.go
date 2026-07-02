@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
 
@@ -718,6 +720,7 @@ func TestReviewRunHappyFlow(t *testing.T) {
 	deps := testDeps(&fakeService{template: "## What\n<!-- fill this in -->"})
 	deps.Reviewer = rev
 	deps.Logs = runlog.NewStore(t.TempDir())
+	deps.Results = resultstore.NewStore(t.TempDir())
 	cleanedUp := false
 	deps.Checkout = func(_ context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 		progress("cloning…")
@@ -781,40 +784,121 @@ func TestReviewRunHappyFlow(t *testing.T) {
 	if err != nil || len(entries) != 1 {
 		t.Fatalf("stored entries = %+v, err = %v", entries, err)
 	}
+
+	// the result is stored too, so the review can be reopened later
+	records, err := deps.Results.List(detail.Ref())
+	if err != nil || len(records) != 1 {
+		t.Fatalf("stored records = %+v, err = %v", records, err)
+	}
+	rec, err := deps.Results.Load(records[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.Summary != result.Summary || len(rec.Findings) != 2 || rec.LogPath != s.logPath {
+		t.Errorf("stored record = %+v", rec)
+	}
 }
 
-func TestReviewLogBrowseAndView(t *testing.T) {
+func TestReviewHistoryBrowseAndView(t *testing.T) {
+	detail, diffs, _ := reviewFixture()
+	dir := t.TempDir()
 	deps := testDeps(&fakeService{})
-	deps.Logs = runlog.NewStore(t.TempDir())
-	l := deps.Logs.Start(11, "group/app!11", "Fix parser")
+	deps.Logs = runlog.NewStore(dir)
+	deps.Results = resultstore.NewStore(dir)
+
+	// one full review: a run log plus a stored result with curated states
+	l := deps.Logs.Start(detail.IID, detail.Ref(), "Fix parser")
 	l.Append("preparing repository…")
 	l.Finish("completed with 1 finding(s)")
+	rec := resultstore.Record{
+		IID: detail.IID, Ref: detail.Ref(), Title: "Fix parser",
+		Started: time.Unix(200, 0), Summary: "One bug.", LogPath: l.Path(),
+		Findings: []review.Finding{
+			{
+				ID: "f001", File: "a.go", Line: review.LineRef{NewLine: intp(2)},
+				Severity: review.SeverityMajor, Category: "bug",
+				Title: "Bug on added line", Body: "This is wrong.", State: review.StateAccepted,
+			},
+		},
+	}
+	if err := deps.Results.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	// and one older run that only left a log behind (written directly: two
+	// Starts in the same second would collide on the timestamped filename)
+	oldLog := filepath.Join(dir, "review-11-100.log")
+	if err := os.WriteFile(oldLog, []byte("review of "+detail.Ref()+" — Fix parser\nstarted x\n\ncancelled after 1s\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	s := newLogList(deps, "group/app!11", "https://gitlab.com/group/app/-/merge_requests/11")
+	s := newReviewHistory(deps, *detail, diffs)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	for _, msg := range runCmd(screen.Init()) {
 		screen, _ = screen.Update(msg)
 	}
-	if len(s.entries) != 1 {
+	if len(s.entries) != 2 {
 		t.Fatalf("entries = %+v (err %v)", s.entries, s.err)
 	}
-	if !strings.Contains(screen.View(), "Fix parser") {
-		t.Errorf("list view missing title:\n%s", screen.View())
+	view := screen.View()
+	for _, want := range []string{"Fix parser", "1 finding(s), 1 accepted", "log only"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("list view missing %q:\n%s", want, view)
+		}
 	}
 
-	// enter opens the viewer on the selected log
+	// enter on the stored result reopens the findings screen, states intact
+	for i, e := range s.entries {
+		if e.recordPath != "" {
+			s.cursor = i
+		}
+	}
 	_, cmd := screen.Update(key("enter"))
+	var push pushScreenMsg
+	for _, msg := range runCmd(cmd) { // load record → push findings
+		var c tea.Cmd
+		screen, c = screen.Update(msg)
+		for _, m := range runCmd(c) {
+			if p, ok := m.(pushScreenMsg); ok {
+				push = p
+			}
+		}
+	}
+	fs, ok := push.screen.(*findings)
+	if !ok {
+		t.Fatalf("expected findings screen, got %T", push.screen)
+	}
+	if len(fs.items) != 1 || fs.items[0].State != review.StateAccepted {
+		t.Fatalf("restored items = %+v", fs.items)
+	}
+	if fs.result.Summary != "One bug." {
+		t.Errorf("summary = %q", fs.result.Summary)
+	}
+
+	// continuing curation on the reopened review re-saves the record
+	var fScreen Screen = fs
+	fScreen, _ = fScreen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	_, _ = fScreen.Update(key("x"))
+	entries, err := deps.Results.List(detail.Ref())
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %+v, err = %v", entries, err)
+	}
+	if entries[0].Accepted != 0 {
+		t.Errorf("rejection not persisted: %+v", entries[0])
+	}
+
+	// l opens the run log
+	_, cmd = screen.Update(key("l"))
 	msgs := runCmd(cmd)
 	if len(msgs) != 1 {
 		t.Fatalf("msgs = %v", msgs)
 	}
-	push, ok := msgs[0].(pushScreenMsg)
+	logPush, ok := msgs[0].(pushScreenMsg)
 	if !ok {
 		t.Fatalf("expected pushScreenMsg, got %T", msgs[0])
 	}
-	view := push.screen.(*logView)
-	var vScreen Screen = view
+	lv := logPush.screen.(*logView)
+	var vScreen Screen = lv
 	vScreen, _ = vScreen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	for _, msg := range runCmd(vScreen.Init()) {
 		vScreen, _ = vScreen.Update(msg)
@@ -845,9 +929,9 @@ func TestOpenBrowserOnMRScreens(t *testing.T) {
 
 	screens := map[string]Screen{
 		"reviewrun": newReviewRun(deps, *detail, diffs, nil, nil, nil),
-		"findings":  newFindings(deps, *detail, diffs, result, "", nil, nil),
+		"findings":  newFindings(deps, *detail, diffs, result, nil, nil, nil),
 		"publish":   newPublish(deps, *detail, diffs, result.Findings, publishOpts{}),
-		"loglist":   newLogList(deps, detail.Ref(), detail.WebURL),
+		"history":   newReviewHistory(deps, *detail, diffs),
 		"logview":   newLogView(deps, detail.Ref(), detail.WebURL, "unused.log"),
 	}
 	for name, screen := range screens {
@@ -860,21 +944,53 @@ func TestOpenBrowserOnMRScreens(t *testing.T) {
 	}
 }
 
-func TestReviewLogListEmpty(t *testing.T) {
+func TestReviewHistoryEmpty(t *testing.T) {
+	detail, diffs, _ := reviewFixture()
 	deps := testDeps(&fakeService{})
 	deps.Logs = runlog.NewStore(t.TempDir())
-	s := newLogList(deps, "group/app!99", "https://gitlab.com/group/app/-/merge_requests/99")
+	deps.Results = resultstore.NewStore(t.TempDir())
+	s := newReviewHistory(deps, *detail, diffs)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	for _, msg := range runCmd(screen.Init()) {
 		screen, _ = screen.Update(msg)
 	}
-	if !strings.Contains(screen.View(), "no stored review logs") {
+	if !strings.Contains(screen.View(), "no stored reviews") {
 		t.Errorf("empty state not rendered:\n%s", screen.View())
 	}
 	// enter with no entries must not push anything
 	if _, cmd := screen.Update(key("enter")); cmd != nil {
 		t.Error("enter on empty list must be a no-op")
+	}
+}
+
+func TestFindingsCurationPersists(t *testing.T) {
+	detail, diffs, result := reviewFixture()
+	deps := testDeps(&fakeService{})
+	deps.Results = resultstore.NewStore(t.TempDir())
+	rec := &resultstore.Record{
+		IID: detail.IID, Ref: detail.Ref(), Title: detail.Title,
+		Started: time.Unix(300, 0), Summary: result.Summary, Findings: result.Findings,
+	}
+
+	s := newFindings(deps, *detail, diffs, result, rec, nil, nil)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	screen, _ = screen.Update(key("a")) // accept the first finding
+	_, _ = screen.Update(key("x"))      // reject the second
+
+	entries, err := deps.Results.List(detail.Ref())
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("entries = %+v, err = %v", entries, err)
+	}
+	stored, err := deps.Results.Load(entries[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Findings) != 2 ||
+		stored.Findings[0].State != review.StateAccepted ||
+		stored.Findings[1].State != review.StateRejected {
+		t.Errorf("stored findings = %+v", stored.Findings)
 	}
 }
 
@@ -947,7 +1063,7 @@ func TestFindingsRendersWarningsWithFindings(t *testing.T) {
 	// A review that produced findings AND carries a rebase warning: the
 	// warning must still show, not only on the empty-review screen.
 	result.Warnings = []string{"MR branch is 3 commit(s) behind main — a rebase is needed"}
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", nil, nil)
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, nil, nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	if len(s.items) == 0 {
@@ -960,7 +1076,7 @@ func TestFindingsRendersWarningsWithFindings(t *testing.T) {
 
 func TestFindingsCuration(t *testing.T) {
 	detail, diffs, result := reviewFixture()
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", nil, nil)
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, nil, nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -1197,7 +1313,7 @@ func TestFindingsAutoComment(t *testing.T) {
 	deps.Cfg.Publish.AutoComment = true
 	deps.Cfg.Publish.AutoMinSeverity = "major"
 
-	s := newFindings(deps, *detail, diffs, result, "", nil, nil)
+	s := newFindings(deps, *detail, diffs, result, nil, nil, nil)
 	// major finding pre-accepted, info finding untouched
 	if s.items[0].State != review.StateAccepted {
 		t.Errorf("major finding should be pre-accepted: %v", s.items[0].State)
@@ -1229,7 +1345,7 @@ func TestFindingsAutoComment(t *testing.T) {
 
 func TestFindingsManualComment(t *testing.T) {
 	detail, diffs, result := reviewFixture()
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", nil, nil)
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, nil, nil, nil)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
@@ -1267,7 +1383,7 @@ func TestFindingsForwardsManualStateToDiffView(t *testing.T) {
 	var gotID string
 	var gotState review.FindingState
 	report := func(id string, state review.FindingState) { gotID, gotState = id, state }
-	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, "", manual, report)
+	s := newFindings(testDeps(&fakeService{}), *detail, diffs, result, nil, manual, report)
 
 	if len(s.items) != 3 || !s.items[2].Manual {
 		t.Fatalf("manual comment not merged: %+v", s.items)
