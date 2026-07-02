@@ -13,6 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/bmatcuk/doublestar/v4"
+
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 )
@@ -96,16 +98,104 @@ func (m *Manager) Ensure(ctx context.Context, mr gitlabx.MRDetail, progress func
 		return nil, err
 	}
 	// A leftover worktree from an interrupted run is reused if intact.
+	reused := false
 	if _, statErr := os.Stat(wtDir); statErr == nil {
 		if _, err := m.git(ctx, wtDir, "rev-parse", "--is-inside-work-tree"); err == nil {
-			return &Checkout{Path: wtDir, repoDir: repoDir, keep: m.cfg.Keep, git: m.git}, nil
+			reused = true
+		} else {
+			_, _ = m.git(ctx, repoDir, "worktree", "remove", "--force", wtDir)
 		}
-		_, _ = m.git(ctx, repoDir, "worktree", "remove", "--force", wtDir)
 	}
-	if _, err := m.git(ctx, repoDir, "worktree", "add", "--detach", wtDir, mr.HeadSHA); err != nil {
-		return nil, fmt.Errorf("creating worktree: %w", err)
+	if !reused {
+		if _, err := m.git(ctx, repoDir, "worktree", "add", "--detach", wtDir, mr.HeadSHA); err != nil {
+			return nil, fmt.Errorf("creating worktree: %w", err)
+		}
+	}
+
+	if err := m.overlayLocalFiles(ctx, repoDir, wtDir, progress); err != nil {
+		return nil, err
 	}
 	return &Checkout{Path: wtDir, repoDir: repoDir, keep: m.cfg.Keep, git: m.git}, nil
+}
+
+// overlayLocalFiles copies untracked files matching checkout.local_overlay
+// from the user's local clone into the review worktree. This carries team
+// conventions that are deliberately kept out of the repository (typically
+// via .git/info/exclude) — CLAUDE.md, .claude/ agents and skills — so the
+// reviewer follows them. Only applies to path/root modes, where a working
+// tree exists to copy from; paths tracked at the MR head are never
+// overridden, so the review always sees the committed state of real code.
+func (m *Manager) overlayLocalFiles(ctx context.Context, srcDir, wtDir string, progress func(string)) error {
+	if m.cfg.Mode == "clone" || len(m.cfg.LocalOverlay) == 0 {
+		return nil
+	}
+
+	// All untracked files in the source clone, including ignored/excluded.
+	out, err := m.git(ctx, srcDir, "ls-files", "--others", "-z")
+	if err != nil {
+		return fmt.Errorf("listing local overlay candidates: %w", err)
+	}
+	var candidates []string
+	for _, path := range strings.Split(strings.TrimRight(out, "\x00"), "\x00") {
+		if path != "" && matchesAny(path, m.cfg.LocalOverlay) {
+			candidates = append(candidates, path)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Never shadow files that exist at the MR head commit.
+	trackedOut, err := m.git(ctx, wtDir, "ls-files", "-z")
+	if err != nil {
+		return fmt.Errorf("listing worktree files: %w", err)
+	}
+	tracked := map[string]bool{}
+	for _, path := range strings.Split(strings.TrimRight(trackedOut, "\x00"), "\x00") {
+		tracked[path] = true
+	}
+
+	copied := 0
+	for _, path := range candidates {
+		if tracked[path] {
+			continue
+		}
+		src := filepath.Join(srcDir, path)
+		info, err := os.Lstat(src)
+		if err != nil || !info.Mode().IsRegular() {
+			continue // skip symlinks and anything unusual
+		}
+		// git paths are repo-relative, but keep the write provably inside
+		// the worktree regardless.
+		dst := filepath.Join(wtDir, path)
+		if !strings.HasPrefix(dst, filepath.Clean(wtDir)+string(filepath.Separator)) {
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(src) //nolint:gosec // path comes from git ls-files in the user's own clone
+		if err != nil {
+			return fmt.Errorf("reading overlay file %s: %w", path, err)
+		}
+		if err := os.WriteFile(dst, data, info.Mode().Perm()); err != nil { //nolint:gosec // dst is prefix-checked against the worktree above
+			return fmt.Errorf("writing overlay file %s: %w", path, err)
+		}
+		copied++
+	}
+	if copied > 0 {
+		progress(fmt.Sprintf("copied %d local convention file(s) into the worktree", copied))
+	}
+	return nil
+}
+
+func matchesAny(path string, globs []string) bool {
+	for _, g := range globs {
+		if ok, err := doublestar.Match(g, path); err == nil && ok {
+			return true
+		}
+	}
+	return false
 }
 
 // repoDir returns the repository (clone) the worktree hangs off, creating

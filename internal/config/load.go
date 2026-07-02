@@ -48,6 +48,7 @@ var envToKey = map[string]string{
 	"CHECKOUT_CACHE_MAX_MB":     "checkout.cache_max_mb",
 	"CHECKOUT_KEEP":             "checkout.keep",
 	"CHECKOUT_CLONE_MISSING":    "checkout.clone_missing",
+	"CHECKOUT_LOCAL_OVERLAY":    "checkout.local_overlay",
 	"PUBLISH_MODE":              "publish.mode",
 	"PUBLISH_AUTO_COMMENT":      "publish.auto_comment",
 	"PUBLISH_AUTO_MIN_SEVERITY": "publish.auto_min_severity",
@@ -59,10 +60,11 @@ var envToKey = map[string]string{
 
 // listKeys hold comma-separated values in env vars.
 var listKeys = map[string]bool{
-	"gitlab.projects":   true,
-	"gitlab.groups":     true,
-	"review.categories": true,
-	"review.exclude":    true,
+	"gitlab.projects":        true,
+	"gitlab.groups":          true,
+	"review.categories":      true,
+	"review.exclude":         true,
+	"checkout.local_overlay": true,
 }
 
 // envFallbacks are conventional env vars honoured only when the prefixed
@@ -101,6 +103,7 @@ var flagToKey = map[string]string{
 	"cache-dir":         "checkout.cache_dir",
 	"cache-max-mb":      "checkout.cache_max_mb",
 	"keep-worktree":     "checkout.keep",
+	"local-overlay":     "checkout.local_overlay",
 	"publish-mode":      "publish.mode",
 	"auto-comment":      "publish.auto_comment",
 	"auto-min-severity": "publish.auto_min_severity",

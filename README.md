@@ -144,6 +144,7 @@ off if you authenticate with a Claude subscription rather than an API key.
 | `checkout.cache_max_mb` | `GITLAB_REVIEWER_CHECKOUT_CACHE_MAX_MB` | `--cache-max-mb` | `2048` |
 | `checkout.keep` | `GITLAB_REVIEWER_CHECKOUT_KEEP` | `--keep-worktree` | `false` |
 | `checkout.clone_missing` | `GITLAB_REVIEWER_CHECKOUT_CLONE_MISSING` | — | `false` |
+| `checkout.local_overlay` | `GITLAB_REVIEWER_CHECKOUT_LOCAL_OVERLAY` (comma-separated globs) | `--local-overlay` (repeatable) | `**/CLAUDE.md`, `**/CLAUDE.local.md`, `.claude/**` |
 
 Checkout modes:
 
@@ -160,6 +161,29 @@ Checkout modes:
 
 Whatever the mode, the review itself always runs in a **detached git
 worktree at the MR head commit** — never in your working tree.
+
+#### Local convention files (uncommitted CLAUDE.md, .claude/)
+
+Teams often keep Claude conventions — `CLAUDE.md`, `.claude/` agents and
+skills — locally before they are ready to commit them, typically listed in
+`.git/info/exclude`. Because reviews run in a clean worktree, those files
+would normally be invisible to the reviewer. In `path` and `root` modes,
+untracked files in your clone matching `checkout.local_overlay` are copied
+into the review worktree so Claude follows them. The default globs cover
+exactly the files Claude Code reads (`**/CLAUDE.md`, `**/CLAUDE.local.md`,
+`.claude/**`); extend them per project for other convention files:
+
+```yaml
+projects:
+  mygroup/myapp:
+    checkout:
+      local_overlay: ["**/CLAUDE.md", "**/CLAUDE.local.md", ".claude/**", "Taskfile*.yaml"]
+```
+
+Files tracked at the MR head commit are never overridden — the review
+always sees the committed state of real code — and nothing else from
+`.git/info/exclude` (e.g. a local `.env`) is copied unless a glob matches
+it.
 
 ### Publishing
 

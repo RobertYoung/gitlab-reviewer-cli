@@ -62,6 +62,10 @@ type Checkout struct {
 	CacheMaxMB   int    `koanf:"cache_max_mb"`
 	Keep         bool   `koanf:"keep"`
 	CloneMissing bool   `koanf:"clone_missing"`
+	// LocalOverlay globs select untracked files in the local clone (path
+	// and root modes) that are copied into the review worktree — team
+	// standards kept out of the repo, e.g. via .git/info/exclude.
+	LocalOverlay []string `koanf:"local_overlay"`
 }
 
 type Publish struct {
@@ -103,6 +107,8 @@ func Default() Config {
 			Transport:  "https",
 			CacheDir:   DefaultCacheDir(),
 			CacheMaxMB: 2048,
+			// The files Claude Code itself reads for repo conventions.
+			LocalOverlay: []string{"**/CLAUDE.md", "**/CLAUDE.local.md", ".claude/**"},
 		},
 		Publish: Publish{
 			Mode:            "draft",

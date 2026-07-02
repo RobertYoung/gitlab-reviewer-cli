@@ -201,3 +201,104 @@ func TestEnsureRootModeMissingClone(t *testing.T) {
 		t.Errorf("want missing-clone hint, got %v", err)
 	}
 }
+
+func TestEnsureLocalOverlay(t *testing.T) {
+	base, head := setupOrigin(t)
+
+	// user's clone with local-only Claude convention files, deliberately
+	// kept out of the repo via .git/info/exclude
+	local := filepath.Join(t.TempDir(), "app")
+	run(t, "", "git", "clone", "-q", "file://"+filepath.Join(base, "group", "app.git"), local)
+	writeLocal := func(rel, content string) {
+		t.Helper()
+		path := filepath.Join(local, rel)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeLocal("CLAUDE.md", "# repo conventions\n")
+	writeLocal("CLAUDE.local.md", "# personal notes\n")
+	writeLocal(".claude/skills/review/SKILL.md", "standards skill\n")
+	writeLocal("pkg/CLAUDE.md", "# nested conventions\n")
+	writeLocal(".env", "SECRET=1\n")   // excluded but must NOT be copied
+	writeLocal("scratch.txt", "wip\n") // untracked, not matching globs
+	writeLocal(".git/info/exclude", "CLAUDE.md\nCLAUDE.local.md\n.claude/\n.env\n")
+
+	m := newManager(t, config.Checkout{
+		Mode: "path", Path: local, Transport: "https", CacheDir: t.TempDir(),
+		LocalOverlay: config.Default().Checkout.LocalOverlay,
+	}, base)
+	co, err := m.Ensure(context.Background(), mrDetail(head), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = co.Close(context.Background()) }()
+
+	for _, want := range []string{"CLAUDE.md", "CLAUDE.local.md", ".claude/skills/review/SKILL.md", "pkg/CLAUDE.md"} {
+		if _, err := os.Stat(filepath.Join(co.Path, want)); err != nil {
+			t.Errorf("overlay file %s missing from worktree: %v", want, err)
+		}
+	}
+	for _, banned := range []string{".env", "scratch.txt"} {
+		if _, err := os.Stat(filepath.Join(co.Path, banned)); !os.IsNotExist(err) {
+			t.Errorf("%s must not be copied into the worktree", banned)
+		}
+	}
+
+	// overlaid files must not dirty the review checkout's git view of
+	// tracked content
+	out := run(t, co.Path, "git", "status", "--porcelain", "--untracked-files=no")
+	if strings.TrimSpace(out) != "" {
+		t.Errorf("worktree tracked files dirty:\n%s", out)
+	}
+}
+
+func TestEnsureLocalOverlayNeverShadowsTracked(t *testing.T) {
+	base, head := setupOrigin(t)
+
+	local := filepath.Join(t.TempDir(), "app")
+	run(t, "", "git", "clone", "-q", "file://"+filepath.Join(base, "group", "app.git"), local)
+	// main.go is tracked at the MR head; a local untracked variant with
+	// the same name must not replace it (contrived, but the guard matters)
+	m := newManager(t, config.Checkout{
+		Mode: "path", Path: local, Transport: "https", CacheDir: t.TempDir(),
+		LocalOverlay: []string{"main.go", "CLAUDE.md"},
+	}, base)
+
+	// make main.go appear untracked in a scratch state: delete + recreate
+	// with different content while keeping it out of the index is not
+	// possible for a tracked file, so simulate via a new untracked file
+	// that IS tracked at head: feature.go exists at head but not on main
+	if err := os.WriteFile(filepath.Join(local, "feature.go"), []byte("LOCAL OVERRIDE\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m.cfg.LocalOverlay = []string{"feature.go"}
+
+	co, err := m.Ensure(context.Background(), mrDetail(head), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = co.Close(context.Background()) }()
+
+	data, err := os.ReadFile(filepath.Join(co.Path, "feature.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "LOCAL OVERRIDE") {
+		t.Error("tracked file at MR head was shadowed by a local overlay file")
+	}
+}
+
+func TestEnsureCloneModeSkipsOverlay(t *testing.T) {
+	base, head := setupOrigin(t)
+	m := newManager(t, config.Checkout{
+		Mode: "clone", Transport: "https", CacheDir: t.TempDir(),
+		LocalOverlay: config.Default().Checkout.LocalOverlay,
+	}, base)
+	if _, err := m.Ensure(context.Background(), mrDetail(head), nil); err != nil {
+		t.Fatalf("clone mode must not attempt overlay: %v", err)
+	}
+}

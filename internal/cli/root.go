@@ -149,6 +149,7 @@ func addSettingFlags(root *cobra.Command) {
 	f.String("cache-dir", "", "cache directory for clones and worktrees")
 	f.Int("cache-max-mb", 0, "clone cache size budget in MiB")
 	f.Bool("keep-worktree", false, "keep review worktrees after the review")
+	f.StringArray("local-overlay", nil, "glob of untracked files copied from the local clone into the review worktree, repeatable (path/root modes)")
 
 	f.String("publish-mode", "", "publish mode: draft|immediate")
 	f.Bool("auto-comment", false, "publish findings at/above --auto-min-severity without confirmation")
