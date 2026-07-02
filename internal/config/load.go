@@ -55,6 +55,7 @@ var envToKey = map[string]string{
 	"PUBLISH_AUTO_MIN_SEVERITY": "publish.auto_min_severity",
 	"PUBLISH_FALLBACK_TO_NOTE":  "publish.fallback_to_note",
 	"PUBLISH_ATTRIBUTION":       "publish.attribution",
+	"PUBLISH_TEMPLATE":          "publish.template",
 	"LOG_LEVEL":                 "log.level",
 	"LOG_FILE":                  "log.file",
 }
@@ -111,6 +112,7 @@ var flagToKey = map[string]string{
 	"auto-min-severity": "publish.auto_min_severity",
 	"fallback-to-note":  "publish.fallback_to_note",
 	"attribution":       "publish.attribution",
+	"publish-template":  "publish.template",
 	"log-level":         "log.level",
 	"log-file":          "log.file",
 }

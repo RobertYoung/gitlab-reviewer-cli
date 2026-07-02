@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"text/template"
 	"time"
 )
 
@@ -78,6 +79,11 @@ type Publish struct {
 	AutoMinSeverity string `koanf:"auto_min_severity"`
 	FallbackToNote  bool   `koanf:"fallback_to_note"`
 	Attribution     bool   `koanf:"attribution"`
+	// Template is a Go text/template for the comment body with fields
+	// severity, category, title, body, file. Empty means the built-in
+	// "**[severity · category] title**" layout; set e.g. "{{.body}}" for
+	// comments with no machine-looking header.
+	Template string `koanf:"template"`
 }
 
 type Log struct {
@@ -182,6 +188,11 @@ func (c Config) Validate() error {
 	}
 	if err := oneOf("publish.auto_min_severity", c.Publish.AutoMinSeverity, Severities...); err != nil {
 		errs = append(errs, err)
+	}
+	if c.Publish.Template != "" {
+		if _, err := template.New("publish.template").Parse(c.Publish.Template); err != nil {
+			errs = append(errs, fmt.Errorf("publish.template: %w", err))
+		}
 	}
 
 	if err := oneOf("log.level", c.Log.Level, "debug", "info", "warn", "error"); err != nil {
