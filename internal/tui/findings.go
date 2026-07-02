@@ -89,6 +89,9 @@ func (s *findings) Title() string {
 	return fmt.Sprintf("findings · %s · %d suggestion(s)", s.detail.Ref(), len(s.items))
 }
 
+// Typing reports whether the body editor currently captures keystrokes.
+func (s *findings) Typing() bool { return s.editing }
+
 func (s *findings) Hints() string {
 	if s.editing {
 		return "ctrl+s save · esc discard edit"

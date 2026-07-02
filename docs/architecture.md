@@ -84,6 +84,7 @@ sequenceDiagram
 
 config → MR list → MR detail (diffs + existing discussions) → worktree at
 head SHA → prompt (metadata + custom instructions + bounded diff) → `claude
--p` with read-only tools in the worktree → schema-validated findings → user
-curation → position mapping against parsed diff hunks → inline discussions
-(or note fallback) on the MR.
+-p` with read-only tools in the worktree (one pass per diff chunk for large
+MRs, results merged) → schema-validated findings → user curation → position
+mapping against parsed diff hunks → inline discussions or draft review
+(with note fallback) on the MR.

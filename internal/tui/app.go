@@ -113,8 +113,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, tea.Batch(cmds...)
 
 	case tea.KeyPressMsg:
-		if msg.String() == "ctrl+c" {
+		switch msg.String() {
+		case "ctrl+c":
 			return a, tea.Quit
+		case "?":
+			if t, ok := a.top().(typer); ok && t.Typing() {
+				break // "?" is a literal character while typing
+			}
+			if _, ok := a.top().(*helpScreen); !ok {
+				return a, pushScreen(&helpScreen{})
+			}
 		}
 
 	case pushScreenMsg:

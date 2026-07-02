@@ -26,10 +26,10 @@ All modes converge on the same invariant: the review runs in a **detached
 `refs/merge-requests/<iid>/head`), never in the user's working tree, so a
 review can never touch uncommitted work and two reviews cannot interfere.
 
-Transport is configurable: HTTPS (default) with the token supplied via a
-`GIT_ASKPASS` helper built into the binary — the token never lands in
-`.git/config`, remotes, or process arguments — or SSH using the user's own
-agent and keys.
+Transport is configurable: HTTPS (default) with the token supplied through
+an inline git credential helper that reads it from an environment variable
+scoped to the git subprocess — the token never lands in `.git/config`,
+remotes, or process arguments — or SSH using the user's own agent and keys.
 
 ## Consequences
 

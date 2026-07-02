@@ -94,6 +94,9 @@ func (s *mrList) Title() string {
 	return t
 }
 
+// Typing reports whether a filter input currently captures keystrokes.
+func (s *mrList) Typing() bool { return s.mode != inputNone }
+
 func (s *mrList) Hints() string {
 	if s.mode != inputNone {
 		return "enter apply · esc cancel"
