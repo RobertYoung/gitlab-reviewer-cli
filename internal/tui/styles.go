@@ -44,10 +44,36 @@ func relTime(t time.Time) string {
 	}
 }
 
-// renderDiff renders a unified diff — syntax-highlighted code with coloured
-// +/- markers, existing discussion threads anchored inline — and returns
+// renderDiff renders a file diff — syntax-highlighted code with existing
+// discussion threads anchored inline, unified or side-by-side — and returns
 // the content plus the indexes (in rendered lines) where hunks start.
-func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int) {
+func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int, split bool) (string, []int) {
+	if split {
+		return renderSplitDiff(fd, discussions, width)
+	}
+	return renderUnifiedDiff(fd, discussions, width)
+}
+
+// writeDiffHeader emits the file name and status lines shared by both
+// layouts; it returns false when GitLab returned no diff body.
+func writeDiffHeader(write func(string), fd gitlabx.FileDiff) bool {
+	write(fileStyle.Render(fd.Path()))
+	switch {
+	case fd.NewFile:
+		write(subtleStyle.Render("(new file)"))
+	case fd.DeletedFile:
+		write(subtleStyle.Render("(deleted)"))
+	case fd.RenamedFile:
+		write(subtleStyle.Render("(renamed)"))
+	}
+	if fd.TooLarge {
+		write(errorStyle.Render("diff too large — not returned by GitLab"))
+		return false
+	}
+	return true
+}
+
+func renderUnifiedDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int) {
 	var (
 		b         strings.Builder
 		hunkLines []int
@@ -61,17 +87,7 @@ func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int
 		lineNo += strings.Count(s, "\n") + 1
 	}
 
-	write(fileStyle.Render(fd.Path()))
-	switch {
-	case fd.NewFile:
-		write(subtleStyle.Render("(new file)"))
-	case fd.DeletedFile:
-		write(subtleStyle.Render("(deleted)"))
-	case fd.RenamedFile:
-		write(subtleStyle.Render("(renamed)"))
-	}
-	if fd.TooLarge {
-		write(errorStyle.Render("diff too large — not returned by GitLab"))
+	if !writeDiffHeader(write, fd) {
 		return b.String(), hunkLines
 	}
 
@@ -112,6 +128,118 @@ func renderDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int
 			newLine++
 		}
 	}
+	return b.String(), hunkLines
+}
+
+// splitSide is one half of a side-by-side row; kind 0 means the side is
+// blank (an unpaired addition or removal).
+type splitSide struct {
+	no   int
+	text string
+	kind byte // '+', '-', ' ', or 0
+}
+
+// renderSplitDiff renders the diff side-by-side: old lines left, new lines
+// right, removals paired with the additions that replaced them.
+func renderSplitDiff(fd gitlabx.FileDiff, discussions []gitlabx.Discussion, width int) (string, []int) {
+	var (
+		b         strings.Builder
+		hunkLines []int
+		lineNo    int
+	)
+	write := func(s string) {
+		b.WriteString(s)
+		b.WriteByte('\n')
+		lineNo += strings.Count(s, "\n") + 1
+	}
+
+	if !writeDiffHeader(write, fd) {
+		return b.String(), hunkLines
+	}
+
+	hl := newHighlighter(fd.NewPath)
+	colWidth := max((width-1)/2, 24)
+	// "1234 " gutter + one marker cell in front of the code.
+	codeWidth := colWidth - 6
+
+	column := func(s splitSide) string {
+		if s.kind == 0 {
+			return strings.Repeat(" ", colWidth)
+		}
+		marker := " "
+		switch s.kind {
+		case '+':
+			marker = addedStyle.Render("+")
+		case '-':
+			marker = removedStyle.Render("-")
+		}
+		cell := subtleStyle.Render(fmt.Sprintf("%4d ", s.no)) + marker + hl.line(truncate(s.text, codeWidth))
+		if pad := colWidth - lipgloss.Width(cell); pad > 0 {
+			cell += strings.Repeat(" ", pad)
+		}
+		return cell
+	}
+
+	emit := func(left, right splitSide) {
+		write(column(left) + subtleStyle.Render("│") + column(right))
+		if left.kind == '-' {
+			for _, block := range discussionBlocks(discussions, fd, left.no, 0, false, width) {
+				write(block)
+			}
+		}
+		if right.kind != 0 {
+			for _, block := range discussionBlocks(discussions, fd, 0, right.no, true, width) {
+				write(block)
+			}
+		}
+	}
+
+	var removed, added []splitSide
+	flush := func() {
+		for i := range max(len(removed), len(added)) {
+			var left, right splitSide
+			if i < len(removed) {
+				left = removed[i]
+			}
+			if i < len(added) {
+				right = added[i]
+			}
+			emit(left, right)
+		}
+		removed, added = nil, nil
+	}
+
+	oldLine, newLine := 0, 0
+	for line := range strings.SplitSeq(strings.TrimSuffix(fd.Diff, "\n"), "\n") {
+		switch {
+		case strings.HasPrefix(line, "@@"):
+			flush()
+			hunkLines = append(hunkLines, lineNo)
+			if o, n, ok := parseHunkStart(line); ok {
+				oldLine, newLine = o, n
+			}
+			write(hunkStyle.Render(truncate(line, width)))
+		case strings.HasPrefix(line, "+"):
+			added = append(added, splitSide{no: newLine, text: line[1:], kind: '+'})
+			newLine++
+		case strings.HasPrefix(line, "-"):
+			removed = append(removed, splitSide{no: oldLine, text: line[1:], kind: '-'})
+			oldLine++
+		case strings.HasPrefix(line, `\`):
+			flush()
+			write(subtleStyle.Render(line))
+		default:
+			flush()
+			code := line
+			if len(code) > 0 {
+				code = code[1:]
+			}
+			emit(splitSide{no: oldLine, text: code, kind: ' '}, splitSide{no: newLine, text: code, kind: ' '})
+			oldLine++
+			newLine++
+		}
+	}
+	flush()
 	return b.String(), hunkLines
 }
 

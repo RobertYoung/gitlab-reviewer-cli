@@ -165,6 +165,8 @@ func addSettingFlags(root *cobra.Command) {
 	f.Bool("attribution", false, "append an attribution footer to published comments")
 	f.String("publish-template", "", "comment body template ({{.severity}} {{.category}} {{.title}} {{.body}} {{.file}}); e.g. '{{.body}}' for plain comments")
 
+	f.String("diff-view", "", "diff layout in the MR detail screen: unified|split")
+
 	f.String("log-level", "", "log level: debug|info|warn|error")
 	f.String("log-file", "", "log file path")
 }

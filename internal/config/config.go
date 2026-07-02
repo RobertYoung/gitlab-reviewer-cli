@@ -23,6 +23,7 @@ type Config struct {
 	Bedrock  Bedrock  `koanf:"bedrock"`
 	Checkout Checkout `koanf:"checkout"`
 	Publish  Publish  `koanf:"publish"`
+	UI       UI       `koanf:"ui"`
 	Log      Log      `koanf:"log"`
 }
 
@@ -86,6 +87,12 @@ type Publish struct {
 	Template string `koanf:"template"`
 }
 
+type UI struct {
+	// DiffView is the diff layout in the MR detail screen: unified or
+	// split (side-by-side). Toggleable per session with `v`.
+	DiffView string `koanf:"diff_view"`
+}
+
 type Log struct {
 	Level string `koanf:"level"`
 	File  string `koanf:"file"`
@@ -124,6 +131,9 @@ func Default() Config {
 			Mode:            "draft",
 			AutoMinSeverity: "major",
 			FallbackToNote:  true,
+		},
+		UI: UI{
+			DiffView: "unified",
 		},
 		Log: Log{
 			Level: "info",
@@ -193,6 +203,10 @@ func (c Config) Validate() error {
 		if _, err := template.New("publish.template").Parse(c.Publish.Template); err != nil {
 			errs = append(errs, fmt.Errorf("publish.template: %w", err))
 		}
+	}
+
+	if err := oneOf("ui.diff_view", c.UI.DiffView, "unified", "split"); err != nil {
+		errs = append(errs, err)
 	}
 
 	if err := oneOf("log.level", c.Log.Level, "debug", "info", "warn", "error"); err != nil {
