@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"text/template"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -56,6 +57,7 @@ type publish struct {
 	cfg    config.Config
 	opts   publishOpts
 	mode   string // draft | immediate, per-run overridable
+	tmpl   *template.Template
 	index  []position.FileIndex
 
 	ch             chan tea.Msg
@@ -74,7 +76,7 @@ func newPublish(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, ac
 		opts.popCount = 2
 	}
 	cfg := deps.cfgFor(detail.ProjectPath)
-	return &publish{
+	s := &publish{
 		deps:   deps,
 		detail: detail,
 		items:  accepted,
@@ -84,6 +86,14 @@ func newPublish(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, ac
 		index:  position.Index(diffs),
 		spin:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
+	// A bad per-project template falls back to the built-in layout rather
+	// than blocking the publish; the error is surfaced on screen.
+	tmpl, err := review.ParseBodyTemplate(cfg.Publish.Template)
+	if err != nil {
+		s.errs = append(s.errs, err.Error()+" — using the built-in layout")
+	}
+	s.tmpl = tmpl
+	return s
 }
 
 func (s *publish) Title() string {
@@ -136,7 +146,7 @@ func (s *publish) run() {
 
 func (s *publish) publishOne(ctx context.Context, f review.Finding) (review.FindingState, error) {
 	project := s.detail.Project()
-	body := f.RenderBody(s.cfg.Publish.Attribution)
+	body := f.RenderBody(s.tmpl, s.cfg.Publish.Attribution)
 	draft := s.mode == "draft"
 
 	post := func(body string, pos *gitlabx.Position) error {
@@ -161,7 +171,7 @@ func (s *publish) publishOne(ctx context.Context, f review.Finding) (review.Find
 	}
 
 	// Fallback: unpositioned comment with a permalink to the flagged line.
-	fallback := f.RenderFallbackBody(s.cfg.Publish.Attribution, s.blobURL(f))
+	fallback := f.RenderFallbackBody(s.tmpl, s.cfg.Publish.Attribution, s.blobURL(f))
 	if err := post(fallback, nil); err != nil {
 		return review.StatePending, err
 	}
@@ -307,6 +317,9 @@ func (s *publish) View() string {
 			b.WriteString("mode: " + addedStyle.Render("immediate") + subtleStyle.Render("  — each comment appears on the MR as it is posted") + "\n\n")
 		}
 		s.renderItems(&b)
+		for _, e := range s.errs {
+			b.WriteString("\n" + errorStyle.Render(truncate(e, max(s.width-2, 20))))
+		}
 		return b.String()
 
 	case phasePosting:

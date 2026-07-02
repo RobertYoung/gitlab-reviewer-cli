@@ -14,6 +14,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/secret"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/tui"
@@ -56,6 +57,11 @@ func newRoot(st *state) *cobra.Command {
 				return err
 			}
 			if err := cfg.ValidateGitLab(); err != nil {
+				return err
+			}
+			// Full template check (field names included) — cfg.Validate
+			// only covers syntax.
+			if _, err := review.ParseBodyTemplate(cfg.Publish.Template); err != nil {
 				return err
 			}
 
@@ -157,6 +163,7 @@ func addSettingFlags(root *cobra.Command) {
 	f.String("auto-min-severity", "", "severity threshold for --auto-comment (info|minor|major|critical)")
 	f.Bool("fallback-to-note", true, "post a general MR note when an inline position cannot be resolved")
 	f.Bool("attribution", false, "append an attribution footer to published comments")
+	f.String("publish-template", "", "comment body template ({{.severity}} {{.category}} {{.title}} {{.body}} {{.file}}); e.g. '{{.body}}' for plain comments")
 
 	f.String("log-level", "", "log level: debug|info|warn|error")
 	f.String("log-file", "", "log file path")

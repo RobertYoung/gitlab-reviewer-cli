@@ -214,6 +214,7 @@ it.
 | `publish.auto_min_severity` | `GITLAB_REVIEWER_PUBLISH_AUTO_MIN_SEVERITY` | `--auto-min-severity` | `major` |
 | `publish.fallback_to_note` | `GITLAB_REVIEWER_PUBLISH_FALLBACK_TO_NOTE` | `--fallback-to-note` | `true` |
 | `publish.attribution` | `GITLAB_REVIEWER_PUBLISH_ATTRIBUTION` | `--attribution` | `false` |
+| `publish.template` | `GITLAB_REVIEWER_PUBLISH_TEMPLATE` | `--publish-template` | built-in layout |
 
 - **`draft`** mode creates GitLab draft notes (a pending review) and
   publishes them in one action — or leaves them pending for the web UI.
@@ -224,6 +225,35 @@ it.
   findings still go through the interactive findings screen.
 - `publish.attribution` appends a small footer marking comments as
   AI-suggested.
+
+#### Comment layout
+
+`publish.template` is a Go [text/template](https://pkg.go.dev/text/template)
+that controls how each comment body is built. The default layout is
+
+```
+**[{{.severity}} · {{.category}}] {{.title}}**
+
+{{.body}}
+```
+
+which renders as `**[major · design] Title**` followed by the body. If you
+would rather your comments read like something you typed yourself, drop the
+badge:
+
+```yaml
+publish:
+  template: "{{.body}}"           # body only, no header at all
+  # template: "{{.title}} — {{.body}}"
+```
+
+Available fields: `{{.severity}}`, `{{.category}}`, `{{.title}}`,
+`{{.body}}`, `{{.file}}`. Severity and category are still shown in the TUI
+findings screen either way, so nothing is lost by omitting them from the
+published comment. Suggestion blocks and the optional attribution footer are
+appended after the templated body. To also change the *tone* of the comment
+text itself, add guidance via `review.instructions`, e.g.
+`"Write comment bodies in first person, as a colleague would phrase them."`
 
 ### Logging
 

@@ -138,7 +138,7 @@ func TestRenderBody(t *testing.T) {
 		Severity: SeverityMajor, Category: "bug",
 		Title: "Nil deref", Body: "Pointer may be nil.", Suggestion: "if p != nil {",
 	}
-	body := f.RenderBody(false)
+	body := f.RenderBody(nil, false)
 	for _, want := range []string{"**[major · bug] Nil deref**", "Pointer may be nil.", "```suggestion:-0+0\nif p != nil {\n```"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q:\n%s", want, body)
@@ -147,18 +147,18 @@ func TestRenderBody(t *testing.T) {
 	if strings.Contains(body, "gitlab-reviewer") {
 		t.Error("attribution must be off by default")
 	}
-	if !strings.Contains(f.RenderBody(true), "gitlab-reviewer") {
+	if !strings.Contains(f.RenderBody(nil, true), "gitlab-reviewer") {
 		t.Error("attribution missing when enabled")
 	}
 
 	// suggestions only make sense on new-side anchors
 	old := 9
 	f.Line = LineRef{OldLine: &old}
-	if strings.Contains(f.RenderBody(false), "suggestion:") {
+	if strings.Contains(f.RenderBody(nil, false), "suggestion:") {
 		t.Error("old-line finding must not carry a suggestion block")
 	}
 
-	fb := f.RenderFallbackBody(false, "https://x/-/blob/h/a.go")
+	fb := f.RenderFallbackBody(nil, false, "https://x/-/blob/h/a.go")
 	if !strings.Contains(fb, "could not anchor") || !strings.Contains(fb, "a.go:9 (old)") {
 		t.Errorf("fallback body: %q", fb)
 	}
