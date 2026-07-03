@@ -172,6 +172,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /{$}", s.handleHome)
 	mux.HandleFunc("GET /i/{inst}/{$}", s.withDeps(s.handleMRList))
+	mux.HandleFunc("GET /i/{inst}/browse", s.withDeps(s.handleBrowse))
 	mux.HandleFunc("GET /i/{inst}/mr", s.withDeps(s.handleMRDetail))
 	mux.HandleFunc("GET /i/{inst}/mr/diff", s.withDeps(s.handleDiff))
 	mux.HandleFunc("POST /i/{inst}/mr/comment", s.withDeps(s.handleCommentAdd))

@@ -131,9 +131,10 @@ gitlab-reviewer gui --no-browser   # just print the URL
 
 </details>
 
-The GUI mirrors the TUI screen for screen — instance picker, MR list with
-filters, MR overview, diff, review progress, findings triage, publish
-(draft or immediate), past reviews — over the exact same core: reviews run
+The GUI mirrors the TUI screen for screen — instance picker, group/project
+scope picker when nothing is configured, MR list with filters, MR overview,
+diff, review progress, findings triage, publish (draft or immediate), past
+reviews — over the exact same core: reviews run
 through the same pipeline, results land in the same stores, and a review
 started in one frontend can be reopened in the other. What the browser
 adds is rendering the terminal can't match: syntax-highlighted diffs with

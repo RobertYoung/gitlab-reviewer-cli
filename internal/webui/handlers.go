@@ -72,7 +72,8 @@ type mrListContent struct {
 	Target     string
 	Projects   string // scope override, comma-separated
 	Groups     string
-	NeedsScope bool // no configured projects/groups: show the scope inputs
+	NeedsScope bool   // no configured projects/groups: show the scope inputs
+	BrowseURL  string // the scope picker, offered alongside the inputs
 	Page       int
 	PrevURL    string
 	NextURL    string
@@ -105,6 +106,7 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 		Projects:   q.Get("projects"),
 		Groups:     q.Get("groups"),
 		NeedsScope: len(d.Cfg.GitLab.Projects) == 0 && len(d.Cfg.GitLab.Groups) == 0,
+		BrowseURL:  instPath(inst, "/browse"),
 		Page:       page,
 		MRURL: func(m gitlabx.MRSummary) string {
 			project := m.ProjectPath
@@ -116,9 +118,9 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 	}
 
 	// An empty scope with nothing configured would query nothing useful;
-	// show the scope form instead of an error.
+	// send the user to the scope picker instead.
 	if content.NeedsScope && len(filter.Projects) == 0 && len(filter.Groups) == 0 {
-		s.render(w, http.StatusOK, "mrs", pageData{Title: "merge requests", Instance: inst, Content: content})
+		http.Redirect(w, r, content.BrowseURL, http.StatusSeeOther) //nolint:gosec // local path with the instance segment escaped
 		return
 	}
 

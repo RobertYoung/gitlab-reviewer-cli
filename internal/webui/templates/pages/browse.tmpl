@@ -1,0 +1,40 @@
+{{define "content"}}
+{{$c := .Content}}
+<section class="panel">
+  {{if not (or $c.Group $c.Mine)}}
+  <p class="note">No projects or groups are configured for this instance — pick what to browse.</p>
+  {{end}}
+
+  <form method="get" class="filters">
+    {{if $c.Group}}<input type="hidden" name="group" value="{{$c.Group}}">{{end}}
+    {{if $c.Mine}}<input type="hidden" name="mine" value="1">{{end}}
+    <input type="search" name="search" placeholder="search" value="{{$c.Search}}">
+    <button type="submit">Search</button>
+    {{if $c.BackURL}}<a class="button" href="{{$c.BackURL}}">← groups</a>{{end}}
+    {{if $c.GroupMRsURL}}<a class="button primary" href="{{$c.GroupMRsURL}}">Browse whole group</a>{{end}}
+  </form>
+
+  {{if $c.Err}}<p class="error">{{$c.Err}}</p>{{end}}
+
+  {{if $c.Rows}}
+  <table class="list">
+    <tbody>
+      {{range $c.Rows}}
+      <tr>
+        <td>{{if .OpenURL}}<a href="{{.OpenURL}}">{{.Label}}</a>{{else}}<a href="{{.MRsURL}}">{{.Label}}</a>{{end}}</td>
+        <td class="subtle">{{.Desc}}</td>
+        <td class="actions-cell">{{if and .OpenURL .MRsURL}}<a class="button" href="{{.MRsURL}}">Merge requests</a>{{end}}</td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{else if not $c.Err}}
+  <p class="note">Nothing found.</p>
+  {{end}}
+
+  <div class="pager">
+    {{if $c.PrevURL}}<a class="button" href="{{$c.PrevURL}}">← previous</a>{{end}}
+    {{if $c.NextURL}}<a class="button" href="{{$c.NextURL}}">more →</a>{{end}}
+  </div>
+</section>
+{{end}}
