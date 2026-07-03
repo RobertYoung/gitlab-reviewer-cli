@@ -27,6 +27,7 @@ import (
 	"github.com/alecthomas/chroma/v2/formatters/html"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
@@ -70,11 +71,17 @@ func (d *Deps) catalog() *agents.Catalog {
 }
 
 // projectCatalog extends the catalog with agents shipped in the MR's
-// repository under .gitlab-reviewer/agents/, fetched over the API at the MR
-// head so the review form can offer them before any checkout exists.
-// Best-effort: on fetch failure the base catalog is returned with a warning.
+// repository under .gitlab-reviewer/agents/, so the review form can offer
+// them before any checkout exists: read from the local clone in path/root
+// checkout modes (covering definitions kept untracked), otherwise fetched
+// over the API at the MR head. Best-effort: on fetch failure the base
+// catalog is returned with a warning.
 func (d *Deps) projectCatalog(ctx context.Context, detail *gitlabx.MRDetail) (*agents.Catalog, []string) {
 	base := d.catalog()
+	cfg := d.cfgFor(detail.ProjectPath)
+	if dir, ok := checkout.LocalRepoDir(cfg.Checkout, cfg.GitLab.BaseURL, detail.ProjectPath); ok {
+		return base.WithProject(dir), nil
+	}
 	if detail.HeadSHA == "" {
 		return base, nil
 	}

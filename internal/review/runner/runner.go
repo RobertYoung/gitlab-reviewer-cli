@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
@@ -140,7 +141,7 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 		emit(w)
 	}
 
-	selected, err := r.resolveAgents(path, emit)
+	selected, err := r.resolveAgents(detail, path, emit)
 	if err != nil {
 		return nil, err
 	}
@@ -254,10 +255,17 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 // resolveAgents merges project-shipped agents into the catalog and resolves
 // this run's selection against it. Selection precedence: the run's explicit
 // AgentNames (picker, --agents), then cfg.Review.Agents.
-func (r Runner) resolveAgents(repoPath string, emit func(string)) ([]agents.Agent, error) {
+func (r Runner) resolveAgents(detail gitlabx.MRDetail, repoPath string, emit func(string)) ([]agents.Agent, error) {
 	catalog := r.Catalog
 	if catalog == nil {
 		catalog = agents.NewCatalog("")
+	}
+	// Path/root checkout modes may keep agent definitions untracked in the
+	// user's local clone (like local_overlay files); merge them first so
+	// definitions committed at the MR head shadow them — mirroring the
+	// pickers, which offer local-clone agents in those modes.
+	if dir, ok := checkout.LocalRepoDir(r.Cfg.Checkout, r.Cfg.GitLab.BaseURL, detail.ProjectPath); ok {
+		catalog = catalog.WithProject(dir)
 	}
 	catalog = catalog.WithProject(repoPath)
 	for _, w := range catalog.Warnings() {
