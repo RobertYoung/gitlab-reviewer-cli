@@ -18,6 +18,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
@@ -103,11 +104,13 @@ func newRoot(st *state) *cobra.Command {
 			}()
 
 			deps := tui.Deps{
-				Cfg:      cfg,
-				Svc:      svc,
-				Reviewer: reviewer,
-				Logs:     runlog.NewStore(reviewsDir),
-				Results:  resultstore.NewStore(reviewsDir),
+				Cfg:       cfg,
+				Svc:       svc,
+				Reviewer:  reviewer,
+				Agents:    agents.NewCatalog(config.DefaultAgentsDir()),
+				Selection: agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json")),
+				Logs:      runlog.NewStore(reviewsDir),
+				Results:   resultstore.NewStore(reviewsDir),
 				Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 					co, err := manager.Ensure(ctx, mr, progress)
 					if err != nil {
@@ -156,8 +159,11 @@ func addSettingFlags(root *cobra.Command) {
 	f.String("model", "", "model passed to the claude CLI")
 	f.String("claude-path", "", "path to the claude binary")
 	f.Duration("review-timeout", 0, "maximum duration for one review")
-	f.Float64("max-budget-usd", 0, "maximum spend per review in USD")
+	f.Float64("max-budget-usd", 0, "maximum spend per review in USD, shared across the selected agents")
+	f.StringSlice("agents", nil, "review agents to run (builtin: bug,security,performance,docs,style,design; plus custom agents by name)")
+	f.Int("agent-concurrency", 0, "how many agent passes run at once (default 3)")
 	f.StringSlice("categories", nil, "finding categories to request (bug,security,performance,docs,style,design)")
+	_ = f.MarkDeprecated("categories", "use --agents; category names are builtin agent names")
 	f.String("instructions", "", "extra review instructions appended to the prompt")
 	f.String("instructions-file", "", "file with extra review instructions")
 	f.Int("max-diff-kb", 0, "diff budget sent to Claude, in KiB")
@@ -183,7 +189,7 @@ func addSettingFlags(root *cobra.Command) {
 	f.String("auto-min-severity", "", "severity threshold for --auto-comment (info|minor|major|critical)")
 	f.Bool("fallback-to-note", true, "post a general MR note when an inline position cannot be resolved")
 	f.Bool("attribution", false, "append an attribution footer to published comments")
-	f.String("publish-template", "", "comment body template ({{.severity}} {{.category}} {{.title}} {{.body}} {{.file}}); e.g. '{{.body}}' for plain comments")
+	f.String("publish-template", "", "comment body template ({{.severity}} {{.category}} {{.agent}} {{.title}} {{.body}} {{.file}}); e.g. '{{.body}}' for plain comments")
 
 	f.String("diff-view", "", "diff layout in the MR detail screen: unified|split")
 	f.String("file-explorer", "", "initial state of the changed-files explorer in the MR detail screen: open|closed")

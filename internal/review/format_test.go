@@ -13,6 +13,7 @@ func sampleFinding() Finding {
 		Line:     LineRef{NewLine: intPtr(42)},
 		Severity: SeverityMajor,
 		Category: Category("design"),
+		Agent:    "architecture",
 		Title:    "Handler owns too much",
 		Body:     "This handler builds its own client; inject it instead.",
 	}
@@ -33,6 +34,7 @@ func TestRenderBodyCustomTemplate(t *testing.T) {
 		{"body only", "{{.body}}", "This handler builds its own client; inject it instead."},
 		{"title and body", "{{.title}} — {{.body}}", "Handler owns too much — This handler builds its own client; inject it instead."},
 		{"file reference", "{{.body}} ({{.file}})", "This handler builds its own client; inject it instead. (internal/app/server.go)"},
+		{"agent badge", "[{{.agent}}] {{.title}}", "[architecture] Handler owns too much"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -566,7 +566,7 @@ func TestReviewRunToFindingsToPublish(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 
 	// Kick off a review; the redirect lands on the run page.
-	code, body := env.post("/i/default/mr/review", mrForm(nil))
+	code, body := env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
 	if code != http.StatusOK || !strings.Contains(body, "Reviewing group/app!5") {
 		t.Fatalf("review start: %d\n%s", code, body)
 	}
@@ -622,7 +622,7 @@ func TestReviewRunToFindingsToPublish(t *testing.T) {
 
 func TestDraftPublishFlow(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
-	env.post("/i/default/mr/review", mrForm(nil))
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
 	run := waitRun(t, env.srv)
 	_, _, out := run.snapshot()
 
@@ -649,7 +649,7 @@ func TestManualCommentsRideAlongWithRun(t *testing.T) {
 	env.post("/i/default/mr/comment", mrForm(url.Values{
 		"file": {"main.go"}, "new": {"2"}, "body": {"manual note"},
 	}))
-	env.post("/i/default/mr/review", mrForm(nil))
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
 	run := waitRun(t, env.srv)
 	_, _, out := run.snapshot()
 
@@ -728,7 +728,7 @@ func TestParseDiffLines(t *testing.T) {
 
 func TestRunEventsStream(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
-	env.post("/i/default/mr/review", mrForm(nil))
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
 	run := waitRun(t, env.srv)
 
 	code, body := env.get(fmt.Sprintf("/i/default/run/%s/events", run.ID))
@@ -740,5 +740,46 @@ func TestRunEventsStream(t *testing.T) {
 	}
 	if !strings.Contains(body, "findingsUrl") {
 		t.Fatalf("done event missing findings URL:\n%s", body)
+	}
+}
+
+func TestAgentSelectionDrivesRunAndBadge(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	// The MR page offers the agent checkboxes, all builtins pre-checked.
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	for _, want := range []string{`name="agents" value="bug"`, `name="agents" value="security"`, "checked"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("mr page missing %q", want)
+		}
+	}
+
+	// Starting a review with one agent selected attributes its findings.
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"security"}}))
+	run := waitRun(t, env.srv)
+	_, _, out := run.snapshot()
+	rec := loadRecord(t, env, out.RecName)
+	if len(rec.Findings) != 1 || rec.Findings[0].Agent != "security" {
+		t.Fatalf("findings: %+v", rec.Findings)
+	}
+
+	// The findings page badges the agent when it differs from the category.
+	code, body = env.get("/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName)
+	if code != http.StatusOK || !strings.Contains(body, "· security") {
+		t.Fatalf("findings page missing agent badge: %d\n%s", code, body)
+	}
+
+	// A record without agent attribution (pre-agents era) renders plainly.
+	rec.Findings[0].Agent = ""
+	d, _ := env.srv.instanceDeps("default")
+	if err := d.Results.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	code, body = env.get("/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName)
+	if code != http.StatusOK || strings.Contains(body, "· security") {
+		t.Fatalf("legacy record must render without an agent badge: %d", code)
 	}
 }

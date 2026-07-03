@@ -375,7 +375,7 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			if s.detail == nil || s.loading > 0 {
 				return s, nil
 			}
-			return s, pushScreen(newReviewRun(s.deps, *s.detail, s.diffs, s.commits, s.pendingComments(), s.setCommentState))
+			return s, pushScreen(newAgentPicker(s.deps, *s.detail, s.diffs, s.commits, s.pendingComments(), s.setCommentState))
 		case "L":
 			if s.detail == nil || s.loading > 0 {
 				return s, nil

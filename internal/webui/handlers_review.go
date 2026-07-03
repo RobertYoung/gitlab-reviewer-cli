@@ -34,7 +34,12 @@ func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request, d *De
 		return
 	}
 	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), detail.IID) // best-effort
-	run := s.startRun(d, inst, *detail, diffs, commits)
+	_ = r.ParseForm()
+	agentNames := r.Form["agents"]
+	if len(agentNames) > 0 {
+		d.Selection.Save(detail.ProjectPath, agentNames)
+	}
+	run := s.startRun(d, inst, *detail, diffs, commits, agentNames)
 	http.Redirect(w, r, instPath(inst, "/run/"+run.ID), http.StatusSeeOther) //nolint:gosec // server-built path: escaped instance + generated run ID
 }
 

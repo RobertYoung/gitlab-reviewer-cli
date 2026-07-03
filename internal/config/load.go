@@ -2,7 +2,9 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/knadh/koanf/parsers/yaml"
@@ -33,6 +35,8 @@ var envToKey = map[string]string{
 	"REVIEW_CLAUDE_PATH":        "review.claude_path",
 	"REVIEW_TIMEOUT":            "review.timeout",
 	"REVIEW_MAX_BUDGET_USD":     "review.max_budget_usd",
+	"REVIEW_AGENTS":             "review.agents",
+	"REVIEW_AGENT_CONCURRENCY":  "review.agent_concurrency",
 	"REVIEW_CATEGORIES":         "review.categories",
 	"REVIEW_INSTRUCTIONS":       "review.instructions",
 	"REVIEW_INSTRUCTIONS_FILE":  "review.instructions_file",
@@ -67,6 +71,7 @@ var envToKey = map[string]string{
 var listKeys = map[string]bool{
 	"gitlab.projects":        true,
 	"gitlab.groups":          true,
+	"review.agents":          true,
 	"review.categories":      true,
 	"review.exclude":         true,
 	"checkout.local_overlay": true,
@@ -93,6 +98,8 @@ var flagToKey = map[string]string{
 	"claude-path":       "review.claude_path",
 	"review-timeout":    "review.timeout",
 	"max-budget-usd":    "review.max_budget_usd",
+	"agents":            "review.agents",
+	"agent-concurrency": "review.agent_concurrency",
 	"categories":        "review.categories",
 	"instructions":      "review.instructions",
 	"instructions-file": "review.instructions_file",
@@ -188,7 +195,21 @@ func Load(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("parsing configuration: %w", err)
 	}
 	resolveInstanceTokens(&res.Config, lookup)
+	if len(res.Config.Review.Agents) == 0 && !slices.Equal(res.Config.Review.Categories, Default().Review.Categories) {
+		slog.Warn("review.categories is deprecated; use review.agents (category names are builtin agent names)")
+	}
+	finalizeAgents(&res.Config)
 	return res, nil
+}
+
+// finalizeAgents resolves the agent selection: review.agents when set,
+// otherwise the deprecated review.categories key — whose defaults make the
+// builtin agents the overall default. This runs after every unmarshal so
+// per-project overrides of either key behave the same way.
+func finalizeAgents(cfg *Config) {
+	if len(cfg.Review.Agents) == 0 {
+		cfg.Review.Agents = slices.Clone(cfg.Review.Categories)
+	}
 }
 
 // resolveInstanceTokens fills each instance's Token from the environment
@@ -296,6 +317,7 @@ func (r *Result) ForProject(projectPath string) (Config, error) {
 		return r.Config, fmt.Errorf("parsing overrides for %s: %w", projectPath, err)
 	}
 	resolveInstanceTokens(&cfg, r.lookup)
+	finalizeAgents(&cfg)
 	return cfg, nil
 }
 

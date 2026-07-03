@@ -363,7 +363,13 @@ func (s *findings) View() string {
 		fmt.Fprintf(&b, "%s %s  %s\n\n", manualStyle.Render("manual"),
 			headerStyle.Render("your comment"), subtleStyle.Render(findingLocation(f)))
 	} else {
-		fmt.Fprintf(&b, "%s %s  %s\n\n", severityStyles[f.Severity].Render(string(f.Severity)+" · "+string(f.Category)),
+		meta := string(f.Severity) + " · " + string(f.Category)
+		// The agent badge only adds signal when it isn't the category's
+		// builtin agent (custom agents, shadowed builtins).
+		if f.Agent != "" && f.Agent != string(f.Category) {
+			meta += " · " + f.Agent
+		}
+		fmt.Fprintf(&b, "%s %s  %s\n\n", severityStyles[f.Severity].Render(meta),
 			headerStyle.Render(f.Title), subtleStyle.Render(findingLocation(f)))
 	}
 

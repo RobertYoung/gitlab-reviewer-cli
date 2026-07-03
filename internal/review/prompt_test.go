@@ -124,6 +124,7 @@ func TestBuildUserPromptShape(t *testing.T) {
 		Unavailable:  []string{"massive.sql"},
 		Instructions: "Focus on concurrency.",
 		Categories:   []Category{"bug", "security"},
+		AgentName:    "correctness",
 	}
 	p := BuildUserPrompt(req)
 	for _, want := range []string{
@@ -132,7 +133,8 @@ func TestBuildUserPromptShape(t *testing.T) {
 		"Speeds things up.",
 		"abc1234:", "Avoids recompute.",
 		"## What", "describe the change",
-		"- bug:", "- security:",
+		`running as the "correctness" review agent`,
+		"these categories: bug, security",
 		"Focus on concurrency.",
 		"--- a/c.go", "+++ b/c.go",
 		"vendor/big.go", "excluded from review by configuration",
@@ -143,8 +145,18 @@ func TestBuildUserPromptShape(t *testing.T) {
 			t.Errorf("prompt missing %q", want)
 		}
 	}
-	if strings.Contains(p, "- docs:") {
+	if strings.Contains(p, "docs") {
 		t.Error("disabled category leaked into prompt")
+	}
+}
+
+func TestFullSystemPrompt(t *testing.T) {
+	if got := FullSystemPrompt(Request{}); got != SystemPrompt {
+		t.Error("empty agent prompt must return the shared prompt unchanged")
+	}
+	got := FullSystemPrompt(Request{AgentPrompt: "Focus on security.\n"})
+	if !strings.HasPrefix(got, SystemPrompt) || !strings.HasSuffix(got, "Focus on security.") {
+		t.Errorf("unexpected system prompt: %q", got)
 	}
 }
 

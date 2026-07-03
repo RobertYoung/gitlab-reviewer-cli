@@ -55,7 +55,9 @@ other modality (keyboard-driven vs browser-native).
 | Feature | TUI | GUI | Notes |
 |---|:-:|:-:|---|
 | Run AI review (multi-pass for large MRs) | ✅ | ✅ | Same runner |
-| Live progress log | ✅ | ✅ | GUI streams over server-sent events |
+| Agent selection before each scan | ✅ | ✅ | TUI: picker on `r`; GUI: checkboxes on the review form. Last selection remembered per project |
+| Custom review agents (user + repo `.md` definitions) | ✅ | ✅ | Shared catalog; repo > user > builtin on name collision |
+| Live progress log | ✅ | ✅ | GUI streams over server-sent events; lines prefixed per agent |
 | Cancel a running review | ✅ | ✅ | |
 | Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | |
 | Publish immediately or as a draft review | ✅ | ✅ | |

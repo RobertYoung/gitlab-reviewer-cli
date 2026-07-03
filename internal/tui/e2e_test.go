@@ -174,7 +174,7 @@ func TestEndToEndReviewFlow(t *testing.T) {
 	}
 
 	// --- run the review screen ---
-	run := newReviewRun(deps, *detail, diffs, nil, nil, nil)
+	run := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"})
 	var screen Screen = run
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	screen.Init()

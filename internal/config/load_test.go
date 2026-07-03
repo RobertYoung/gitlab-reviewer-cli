@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -35,6 +36,7 @@ func flagSet(t *testing.T, args ...string) *pflag.FlagSet {
 	fs.Int("per-page", 0, "")
 	fs.Duration("review-timeout", 0, "")
 	fs.StringSlice("categories", nil, "")
+	fs.StringSlice("agents", nil, "")
 	fs.StringArray("review-env", nil, "")
 	fs.String("publish-mode", "", "")
 	if err := fs.Parse(args); err != nil {
@@ -120,6 +122,94 @@ func TestPrecedence(t *testing.T) {
 		}
 		if got := res.Config.GitLab.BaseURL; got != "https://env.example.com" {
 			t.Errorf("base_url = %q", got)
+		}
+	})
+}
+
+// TestAgentSelection covers the review.agents key and its deprecated
+// review.categories alias.
+func TestAgentSelection(t *testing.T) {
+	t.Run("defaults to all builtin agents", func(t *testing.T) {
+		res, err := Load(Options{LookupEnv: envLookup(nil)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Config.Review.Agents; !slices.Equal(got, Categories) {
+			t.Errorf("agents = %v", got)
+		}
+	})
+
+	t.Run("categories aliases agents when agents unset", func(t *testing.T) {
+		file := writeFile(t, "review:\n  categories: [bug, security]\n")
+		res, err := Load(Options{File: file, LookupEnv: envLookup(nil)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Config.Review.Agents; !slices.Equal(got, []string{"bug", "security"}) {
+			t.Errorf("agents = %v", got)
+		}
+	})
+
+	t.Run("agents wins over categories", func(t *testing.T) {
+		file := writeFile(t, "review:\n  categories: [bug]\n  agents: [docs, my-custom]\n")
+		res, err := Load(Options{File: file, LookupEnv: envLookup(nil)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Config.Review.Agents; !slices.Equal(got, []string{"docs", "my-custom"}) {
+			t.Errorf("agents = %v", got)
+		}
+	})
+
+	t.Run("agents flag and env", func(t *testing.T) {
+		env := map[string]string{"GITLAB_REVIEWER_REVIEW_AGENTS": "style"}
+		fs := flagSet(t, "--agents", "security,my-custom")
+		res, err := Load(Options{LookupEnv: envLookup(env), Flags: fs})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := res.Config.Review.Agents; !slices.Equal(got, []string{"security", "my-custom"}) {
+			t.Errorf("agents = %v", got)
+		}
+	})
+
+	t.Run("per-project override of agents", func(t *testing.T) {
+		file := writeFile(t, `review:
+  agents: [bug]
+projects:
+  group/app:
+    review:
+      agents: [security]
+`)
+		res, err := Load(Options{File: file, LookupEnv: envLookup(nil)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := res.ForProject("group/app")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Review.Agents; !slices.Equal(got, []string{"security"}) {
+			t.Errorf("agents = %v", got)
+		}
+	})
+
+	t.Run("per-project categories alias still works", func(t *testing.T) {
+		file := writeFile(t, `projects:
+  group/app:
+    review:
+      categories: [docs]
+`)
+		res, err := Load(Options{File: file, LookupEnv: envLookup(nil)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := res.ForProject("group/app")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := cfg.Review.Agents; !slices.Equal(got, []string{"docs"}) {
+			t.Errorf("agents = %v", got)
 		}
 	})
 }

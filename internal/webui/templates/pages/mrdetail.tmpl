@@ -13,10 +13,22 @@
 
   <div class="actions">
     <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
-    <form method="post" action="{{$c.Nav.ReviewURL}}">
+    <form method="post" action="{{$c.Nav.ReviewURL}}" class="review-form">
       <input type="hidden" name="project" value="{{$c.Nav.Project}}">
       <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
       <button type="submit" class="button review">▶ Run AI review</button>
+      <details class="agent-select">
+        <summary>agents</summary>
+        <fieldset>
+          {{range $c.AgentOptions}}
+          <label title="{{.Description}}">
+            <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
+            {{.Name}}{{if .Source}} <span class="badge">{{.Source}}</span>{{end}}
+          </label>
+          {{end}}
+        </fieldset>
+        {{range $c.AgentWarnings}}<p class="warning">⚠ {{.}}</p>{{end}}
+      </details>
     </form>
     <a class="button" href="{{$c.Nav.HistoryURL}}">Past reviews</a>
     {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}

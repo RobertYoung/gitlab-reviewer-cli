@@ -92,6 +92,13 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 	if onEvent == nil {
 		onEvent = func(review.Event) {}
 	}
+	if req.AgentName != "" {
+		inner := onEvent
+		onEvent = func(e review.Event) {
+			e.Agent = req.AgentName
+			inner(e)
+		}
+	}
 	if req.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
@@ -123,7 +130,7 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 
 	final, transcript, streamErr := b.consumeStream(stdout, onEvent)
 	waitErr := cmd.Wait()
-	dumpPath := b.dump(transcript, req.MR.IID)
+	dumpPath := b.dump(transcript, req.MR.IID, req.AgentName)
 
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -170,7 +177,7 @@ func (b *Backend) buildArgs(req review.Request) []string {
 		"--permission-mode", "dontAsk",
 		"--disallowedTools", disallowed,
 		"--strict-mcp-config",
-		"--append-system-prompt", review.SystemPrompt,
+		"--append-system-prompt", review.FullSystemPrompt(req),
 	}
 	if b.Model != "" {
 		args = append(args, "--model", b.Model)
@@ -360,14 +367,20 @@ func (b *Backend) subprocessEnv() []string {
 	return env
 }
 
-func (b *Backend) dump(transcript []byte, iid int64) string {
+func (b *Backend) dump(transcript []byte, iid int64, agent string) string {
 	if b.DumpDir == "" || len(transcript) == 0 {
 		return ""
 	}
 	if err := os.MkdirAll(b.DumpDir, 0o700); err != nil {
 		return ""
 	}
-	path := filepath.Join(b.DumpDir, fmt.Sprintf("review-%d-%d.jsonl", iid, time.Now().Unix()))
+	name := fmt.Sprintf("review-%d-%d.jsonl", iid, time.Now().Unix())
+	if agent != "" {
+		// Concurrent agent passes dump in the same second; the agent name
+		// keeps their transcripts apart.
+		name = fmt.Sprintf("review-%d-%s-%d.jsonl", iid, agent, time.Now().Unix())
+	}
+	path := filepath.Join(b.DumpDir, name)
 	if err := os.WriteFile(path, transcript, 0o600); err != nil {
 		return ""
 	}

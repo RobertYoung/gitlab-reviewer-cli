@@ -221,7 +221,9 @@ silent fallback to the shared token.
 | `review.claude_path` | `GITLAB_REVIEWER_REVIEW_CLAUDE_PATH` | `--claude-path` | `claude` on `PATH` |
 | `review.timeout` | `GITLAB_REVIEWER_REVIEW_TIMEOUT` | `--review-timeout` | `10m` |
 | `review.max_budget_usd` | `GITLAB_REVIEWER_REVIEW_MAX_BUDGET_USD` | `--max-budget-usd` | unset |
-| `review.categories` | `GITLAB_REVIEWER_REVIEW_CATEGORIES` (comma-separated) | `--categories` | all (`bug,security,performance,docs,style,design`) |
+| `review.agents` | `GITLAB_REVIEWER_REVIEW_AGENTS` (comma-separated) | `--agents` | all built-ins (`bug,security,performance,docs,style,design`) |
+| `review.agent_concurrency` | `GITLAB_REVIEWER_REVIEW_AGENT_CONCURRENCY` | `--agent-concurrency` | `3` |
+| `review.categories` | `GITLAB_REVIEWER_REVIEW_CATEGORIES` (comma-separated) | `--categories` | **deprecated** — alias for `review.agents` |
 | `review.instructions` | `GITLAB_REVIEWER_REVIEW_INSTRUCTIONS` | `--instructions` | `""` |
 | `review.instructions_file` | `GITLAB_REVIEWER_REVIEW_INSTRUCTIONS_FILE` | `--instructions-file` | unset |
 | `review.max_diff_kb` | `GITLAB_REVIEWER_REVIEW_MAX_DIFF_KB` | `--max-diff-kb` | `256` |
@@ -256,6 +258,62 @@ projects:
       max_budget_usd: 5
 ```
 
+> **Naming note:** `review.use_agents` (Claude Code *subagents* inside one
+> review pass) is unrelated to `review.agents` (which *review agents* run —
+> see below).
+
+#### Review agents
+
+A review scan is run by **agents**: focused reviewers that each make their
+own pass over the MR with their own prompt. Six built-in agents mirror the
+finding categories — `bug`, `security`, `performance`, `docs`, `style`,
+`design` — and you can add your own.
+
+**Choosing what runs.** In the TUI, pressing `r` opens a picker listing the
+available agents; in the GUI the *Run AI review* button has an *agents*
+selector. Both remember your last selection per project. Non-interactively,
+`--agents bug,security` (or `review.agents`) sets the default selection.
+Unknown names fail the run loudly rather than silently reviewing less. The
+old `review.categories` key still works as an alias and will be removed in
+a future release.
+
+**Cost and limits.** Each selected agent is one `claude` invocation per
+diff chunk, so six agents cost roughly six times one combined pass.
+`review.max_budget_usd` is the **total** for the run — it is divided evenly
+across the planned passes. `review.timeout` applies to each pass, and
+`review.agent_concurrency` (default 3) caps how many run at once. Trim the
+selection (e.g. `agents: [bug, security, design]`) if cost or latency
+matters more than coverage.
+
+**Bring your own agents.** Drop Markdown files in
+`~/.config/gitlab-reviewer/agents/` (yours) or `.gitlab-reviewer/agents/`
+in the reviewed repo (the team's). The file body is the agent's prompt; an
+optional YAML frontmatter adds metadata:
+
+```markdown
+---
+name: sql-migrations           # optional; defaults to the file name
+description: Reviews schema migrations for lock hazards
+categories: [bug, performance] # finding labels it may use (default: all)
+severity: major                # optional severity hint
+---
+You are reviewing database schema migrations. Focus on long-running
+locks, missing indexes for new query patterns, and irreversible
+migrations without a documented rollback.
+```
+
+Name collisions resolve as repo > user > built-in, so a repo can sharpen
+the stock `security` agent by shipping its own `security.md`. Invalid
+definition files are skipped with a warning in the picker and the run log.
+Repo-shipped agents run in the same read-only sandbox as every review
+(`Read`/`Grep`/`Glob` only); in clone mode they are discovered after
+checkout, so they appear in the run log the first time and in the picker
+once a local checkout exists.
+
+Findings carry the agent that produced them: the findings screens show it
+alongside severity and category, and `publish.template` can reference it as
+`{{.agent}}`.
+
 #### MR hygiene checks
 
 Beyond code review, the reviewer gathers the context needed for lightweight
@@ -276,8 +334,8 @@ sandboxed to `Read`/`Grep`/`Glob`:
 
   ```yaml
   review:
-    # keep 'docs' in scope so hygiene findings have a category to land in
-    categories: [bug, security, performance, docs, style, design]
+    # keep the 'docs' agent selected so hygiene findings have a home
+    agents: [bug, security, performance, docs, style, design]
     instructions: |
       Also run these MR-hygiene checks, reported as 'docs' findings
       (minor/info severity, never blocking), each anchored on a
@@ -397,8 +455,8 @@ publish:
   # template: "{{.title}} — {{.body}}"
 ```
 
-Available fields: `{{.severity}}`, `{{.category}}`, `{{.title}}`,
-`{{.body}}`, `{{.file}}`. Severity and category are still shown in the TUI
+Available fields: `{{.severity}}`, `{{.category}}`, `{{.agent}}`,
+`{{.title}}`, `{{.body}}`, `{{.file}}`. Severity and category are still shown in the TUI
 findings screen either way, so nothing is lost by omitting them from the
 published comment. Suggestion blocks and the optional attribution footer are
 appended after the templated body. To also change the *tone* of the comment
@@ -452,7 +510,7 @@ projects:
   mygroup/myapp:
     review:
       instructions: "This service is latency-critical; flag every allocation in the hot path."
-      categories: [bug, security, performance]
+      agents: [bug, security, performance]
     publish:
       mode: immediate
 ```

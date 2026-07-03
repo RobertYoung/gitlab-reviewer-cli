@@ -26,6 +26,11 @@ func DefaultFile() string {
 	return filepath.Join(xdgDir("XDG_CONFIG_HOME", ".config"), appName, "config.yaml")
 }
 
+// DefaultAgentsDir is where user-level review agent definitions live.
+func DefaultAgentsDir() string {
+	return filepath.Join(xdgDir("XDG_CONFIG_HOME", ".config"), appName, "agents")
+}
+
 // DefaultCacheDir is where repository clones and worktrees are cached.
 func DefaultCacheDir() string {
 	return filepath.Join(xdgDir("XDG_CACHE_HOME", ".cache"), appName)

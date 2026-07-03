@@ -11,11 +11,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
@@ -31,6 +33,13 @@ type Runner struct {
 	Svc      gitlabx.Service
 	Reviewer review.Reviewer
 	Checkout CheckoutFunc
+	// Catalog is the available agents (builtins + user agents); nil means
+	// builtins only. Project agents shipped in the checkout are merged in
+	// after checkout, so they can shadow or satisfy selected names.
+	Catalog *agents.Catalog
+	// AgentNames is the agent selection for this run (from the picker or
+	// --agents); empty falls back to cfg.Review.Agents.
+	AgentNames []string
 	// Logs stores the run's progress log; nil disables storing.
 	Logs *runlog.Store
 	// Results stores the run's result record; nil disables storing.
@@ -131,40 +140,163 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 		emit(w)
 	}
 
-	// Oversized MRs run as several passes; Claude has the whole repo on
-	// disk in every pass, only the focus diff changes.
-	results := make([]*review.Result, 0, len(reqs))
-	for i, req := range reqs {
-		files := len(req.Diffs) + len(req.DiffFiles)
-		if len(reqs) > 1 {
-			emit(fmt.Sprintf("review pass %d/%d (%d file(s)) with %s…", i+1, len(reqs), files, r.Reviewer.Name()))
-		} else {
-			emit(fmt.Sprintf("reviewing %d file(s) with %s…", files, r.Reviewer.Name()))
+	selected, err := r.resolveAgents(path, emit)
+	if err != nil {
+		return nil, err
+	}
+
+	// One reviewer pass per selected agent per diff chunk, run concurrently
+	// under the configured limit. Claude has the whole repo on disk in every
+	// pass; only the focus diff and the agent prompt change.
+	type task struct {
+		agent agents.Agent
+		req   review.Request
+		pass  int // 1-based chunk index, for multi-chunk progress lines
+	}
+	tasks := make([]task, 0, len(selected)*len(reqs))
+	for _, a := range selected {
+		for i, req := range reqs {
+			req.AgentName = a.Name
+			req.AgentPrompt = agentPrompt(a)
+			req.Categories = append([]review.Category(nil), a.Categories...)
+			tasks = append(tasks, task{agent: a, req: req, pass: i + 1})
 		}
-		res, err := r.Reviewer.Review(ctx, req, func(e review.Event) {
-			emit(e.Text)
-		})
-		if err != nil {
-			if len(results) > 0 {
-				// Keep what earlier passes found rather than losing it all.
-				merged := review.MergeResults(results)
-				merged.Warnings = append(merged.Warnings, fmt.Sprintf("pass %d/%d failed: %v", i+1, len(reqs), err))
-				return merged, nil
+	}
+	// The budget is a total for the run: split it evenly across the planned
+	// passes so worst-case spend stays at the configured amount. Unspent
+	// slices are not redistributed.
+	if total := r.Cfg.Review.MaxBudgetUSD; total > 0 {
+		per := total / float64(len(tasks))
+		for i := range tasks {
+			tasks[i].req.MaxBudgetUSD = per
+		}
+	}
+
+	emit(fmt.Sprintf("running %d agent(s) over %d review pass(es) with %s…", len(selected), len(reqs), r.Reviewer.Name()))
+
+	concurrency := r.Cfg.Review.AgentConcurrency
+	if concurrency < 1 {
+		concurrency = 1
+	}
+	var (
+		mu      sync.Mutex // guards emit: the run log writer is not concurrent-safe
+		wg      sync.WaitGroup
+		sem     = make(chan struct{}, concurrency)
+		results = make([]*review.Result, len(tasks))
+		errs    = make([]error, len(tasks))
+	)
+	log := func(agent, text string) {
+		mu.Lock()
+		defer mu.Unlock()
+		emit("[" + agent + "] " + text)
+	}
+	for i, t := range tasks {
+		wg.Add(1)
+		go func(i int, t task) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			if ctx.Err() != nil {
+				errs[i] = ctx.Err()
+				return
 			}
-			return nil, err
+			files := len(t.req.Diffs) + len(t.req.DiffFiles)
+			if len(reqs) > 1 {
+				log(t.agent.Name, fmt.Sprintf("pass %d/%d starting (%d file(s))…", t.pass, len(reqs), files))
+			} else {
+				log(t.agent.Name, fmt.Sprintf("reviewing %d file(s)…", files))
+			}
+			res, err := r.Reviewer.Review(ctx, t.req, func(e review.Event) {
+				log(t.agent.Name, e.Text)
+			})
+			if err != nil {
+				errs[i] = err
+				log(t.agent.Name, "failed: "+err.Error())
+				return
+			}
+			res.Agent = t.agent.Name
+			for j := range res.Findings {
+				res.Findings[j].Agent = t.agent.Name
+			}
+			results[i] = res
+			log(t.agent.Name, fmt.Sprintf("done: %d finding(s), $%.2f", len(res.Findings), res.CostUSD))
+		}(i, t)
+	}
+	wg.Wait()
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	var ok []*review.Result
+	for i, res := range results {
+		if res != nil {
+			ok = append(ok, res)
+			continue
 		}
-		results = append(results, res)
+		// Keep what the other agents found rather than losing it all.
+		warnings = append(warnings, fmt.Sprintf("agent %s (pass %d/%d) failed: %v", tasks[i].agent.Name, tasks[i].pass, len(reqs), errs[i]))
+	}
+	if len(ok) == 0 {
+		return nil, errs[0]
 	}
 	var final *review.Result
-	if len(results) == 1 {
-		final = results[0]
+	if len(ok) == 1 {
+		final = ok[0]
 	} else {
-		final = review.MergeResults(results)
+		final = review.MergeResults(ok)
 	}
-	// Surface pre-review warnings (chunking, rebase status) in the findings
-	// screen, not just the transient progress log.
+	// Surface pre-review warnings (chunking, rebase status, failed agents)
+	// in the findings screen, not just the transient progress log.
 	final.Warnings = append(warnings, final.Warnings...)
 	return final, nil
+}
+
+// resolveAgents merges project-shipped agents into the catalog and resolves
+// this run's selection against it. Selection precedence: the run's explicit
+// AgentNames (picker, --agents), then cfg.Review.Agents.
+func (r Runner) resolveAgents(repoPath string, emit func(string)) ([]agents.Agent, error) {
+	catalog := r.Catalog
+	if catalog == nil {
+		catalog = agents.NewCatalog("")
+	}
+	catalog = catalog.WithProject(repoPath)
+	for _, w := range catalog.Warnings() {
+		emit(w)
+	}
+	names := r.AgentNames
+	if len(names) == 0 {
+		names = r.Cfg.Review.Agents
+	}
+	if len(names) == 0 {
+		// Config that skipped load-time finalisation (e.g. built from
+		// config.Default() directly): apply the same categories fallback.
+		names = r.Cfg.Review.Categories
+	}
+	selected, err := catalog.Resolve(names)
+	if err != nil {
+		return nil, err
+	}
+	// Point out repo-shipped agents the user has not enabled.
+	inSelection := map[string]bool{}
+	for _, a := range selected {
+		inSelection[a.Name] = true
+	}
+	for _, a := range catalog.All() {
+		if a.Source == agents.SourceProject && !inSelection[a.Name] {
+			emit(fmt.Sprintf("note: this repo defines agent %q (%s); enable it with --agents or the picker", a.Name, a.Path))
+		}
+	}
+	return selected, nil
+}
+
+// agentPrompt renders the agent's focus prompt, folding in the optional
+// severity hint from its frontmatter.
+func agentPrompt(a agents.Agent) string {
+	p := a.Prompt
+	if a.Severity != "" {
+		p += fmt.Sprintf("\nUnless clearly otherwise, findings from this agent are typically %q severity.", a.Severity)
+	}
+	return p
 }
 
 // RebaseWarning describes why the MR branch is not up to date with its
@@ -185,11 +317,12 @@ func RebaseWarning(detail gitlabx.MRDetail) string {
 const DiffFilesDir = ".review-diffs"
 
 // BuildRequests assembles the reviewer request(s) from project-resolved
-// config: chunked diffs, category list, and combined custom instructions.
-// Diffs too large to inline are written into the checkout under
-// DiffFilesDir so the reviewer can still see them. It returns the requests,
-// informational progress lines, and warnings worth persisting with the
-// result (only genuine information loss qualifies).
+// config: chunked diffs and combined custom instructions. The requests are
+// agent-neutral; the runner specialises a copy per selected agent. Diffs too
+// large to inline are written into the checkout under DiffFilesDir so the
+// reviewer can still see them. It returns the requests, informational
+// progress lines, and warnings worth persisting with the result (only
+// genuine information loss qualifies).
 func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, template, repoPath string) ([]review.Request, []string, []string, error) {
 	var info, warnings []string
 
@@ -248,11 +381,6 @@ func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 		instructions += string(data)
 	}
 
-	categories := make([]review.Category, 0, len(cfg.Review.Categories))
-	for _, c := range cfg.Review.Categories {
-		categories = append(categories, review.Category(c))
-	}
-
 	if len(chunks) == 0 {
 		// Everything inline-sized was filtered out but oversized diffs
 		// remain reviewable from disk: run one pass with no inline diff.
@@ -269,7 +397,6 @@ func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 			Excluded:     excluded,
 			Unavailable:  unavailable,
 			Instructions: instructions,
-			Categories:   categories,
 			Model:        cfg.Review.Model,
 			Timeout:      cfg.Review.Timeout,
 			MaxBudgetUSD: cfg.Review.MaxBudgetUSD,
