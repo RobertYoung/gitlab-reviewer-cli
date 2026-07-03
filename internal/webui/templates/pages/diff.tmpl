@@ -1,6 +1,15 @@
 {{define "content"}}
 {{$c := .Content}}
 {{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<header class="mr-header">
+  {{template "mrhead" $c.Detail}}
+  {{if $c.Detail.Description}}
+  <details class="mr-description panel">
+    <summary>{{if $c.Detail.Draft}}<span class="badge draft">draft</span> {{end}}{{$c.Detail.Title}}</summary>
+    <div class="md">{{markdown $c.Detail.Description}}</div>
+  </details>
+  {{end}}
+</header>
 <div class="diff-layout">
   <aside class="filetree">
     <h3>{{len $c.Files}} changed file{{if ne (len $c.Files) 1}}s{{end}}</h3>

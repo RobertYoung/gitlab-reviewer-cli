@@ -3,7 +3,7 @@
 {{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
 <section class="panel">
   <h2>{{if $c.Detail.Draft}}<span class="badge draft">draft</span> {{end}}{{$c.Detail.Title}}</h2>
-  <p class="subtle">{{$c.Detail.Ref}} · {{$c.Detail.Author}} · {{$c.Detail.SourceBranch}} → {{$c.Detail.TargetBranch}} · updated {{reltime $c.Detail.UpdatedAt}} · {{$c.Detail.State}}</p>
+  {{template "mrhead" $c.Detail}}
 
   {{if $c.RebaseWarning}}<p class="warning">⚠ {{$c.RebaseWarning}}</p>{{end}}
   {{with $c.Approvals}}
@@ -50,7 +50,7 @@
 
   {{if $c.Detail.Description}}
   <h3>Description</h3>
-  <pre class="prose">{{$c.Detail.Description}}</pre>
+  <div class="md">{{markdown $c.Detail.Description}}</div>
   {{end}}
 
   {{if $c.Commits}}

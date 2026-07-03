@@ -23,8 +23,8 @@ other modality (keyboard-driven vs browser-native).
 
 | Feature | TUI | GUI | Notes |
 |---|:-:|:-:|---|
-| Title, branches, author, state, draft badge | ✅ | ✅ | |
-| Description and commit list | ✅ | ✅ | TUI: `d` toggles the overview over the diff |
+| Title, branches, author, state, draft badge | ✅ | ✅ | GUI: MR ref, author, and branches link to their GitLab pages |
+| Description and commit list | ✅ | ✅ | TUI: `d` toggles the overview over the diff; GUI renders the description as markdown, also collapsible atop the diff view |
 | Needs-rebase / conflict warning | ✅ | ✅ | |
 | Approval status (who approved, approvals outstanding) | ✅ | ✅ | |
 | Approve / unapprove | ✅ | ✅ | Approval is pinned to the head commit that was on screen; TUI: `a` |
