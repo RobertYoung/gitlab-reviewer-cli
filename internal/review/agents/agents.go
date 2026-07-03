@@ -30,6 +30,10 @@ type Agent struct {
 	Categories []review.Category
 	// Severity is an optional frontmatter hint folded into the prompt.
 	Severity review.Severity
+	// Model is an optional frontmatter default: the review model this agent
+	// runs with unless the picker overrides it. Empty falls back to
+	// review.model, then the claude CLI's own default.
+	Model string
 	// Prompt is the agent's persona/focus text, appended to the shared
 	// reviewer system prompt.
 	Prompt string

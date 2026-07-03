@@ -35,6 +35,7 @@ type frontmatter struct {
 	Description string   `yaml:"description"`
 	Categories  []string `yaml:"categories"`
 	Severity    string   `yaml:"severity"`
+	Model       string   `yaml:"model"`
 }
 
 // loadDir reads every *.md agent definition in dir. Invalid files are
@@ -133,6 +134,7 @@ func parse(raw []byte, path string, source Source) (Agent, error) {
 		Name:        fm.Name,
 		Description: fm.Description,
 		Source:      source,
+		Model:       strings.TrimSpace(fm.Model),
 		Prompt:      strings.TrimSpace(body),
 		Path:        path,
 	}

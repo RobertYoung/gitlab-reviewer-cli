@@ -29,6 +29,23 @@ review:
 Unknown names fail the run loudly rather than silently reviewing less. The
 deprecated `review.categories` key still works as an alias.
 
+### Per-agent model
+
+Each agent can run on a different model. In the TUI picker, press `m` on
+the highlighted agent to choose one from the configured list
+([`review.models`](Configuration-Reference.md#review), or the built-in
+suggestions — the same list `gitlab-reviewer models` prints). The chosen
+model shows on the agent's row and is remembered per project alongside the
+selection; the `(default)` entry clears the override.
+
+The model an agent runs with resolves in this order:
+
+1. the picker choice for this project (remembered);
+2. the agent's frontmatter `model:` (see below) — how repo/user agents and
+   non-interactive runs set a per-agent model;
+3. [`review.model`](Configuration-Reference.md#review), the run-wide default;
+4. the `claude` CLI's own default when none of the above is set.
+
 ## Cost and limits
 
 Each selected agent is one `claude` invocation per diff chunk, so six
@@ -50,7 +67,7 @@ Drop Markdown files in `~/.config/gitlab-reviewer/agents/` (yours) or
 `.gitlab-reviewer/agents/` in the reviewed repo (the team's). Repos that
 keep review guidance in Claude Code's `.claude/agents/` are picked up too —
 the definition format is compatible, and frontmatter fields this tool does
-not know (`tools`, `model`, …) are ignored.
+not know (`tools`, …) are ignored.
 
 The file body is the agent's prompt; an optional YAML frontmatter adds
 metadata:
@@ -61,6 +78,7 @@ name: sql-migrations           # optional; defaults to the file name
 description: Reviews schema migrations for lock hazards
 categories: [bug, performance] # finding labels it may use (default: all)
 severity: major                # optional severity hint
+model: opus                    # optional default model for this agent
 ---
 You are reviewing database schema migrations. Focus on long-running
 locks, missing indexes for new query patterns, and irreversible

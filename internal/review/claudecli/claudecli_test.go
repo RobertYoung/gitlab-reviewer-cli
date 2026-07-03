@@ -274,6 +274,42 @@ func bedrockCfg(region, profile string) config.Bedrock {
 	return config.Bedrock{Region: region, Profile: profile}
 }
 
+func TestBuildArgsModel(t *testing.T) {
+	find := func(args []string, flag string) string {
+		for i, a := range args {
+			if a == flag && i+1 < len(args) {
+				return args[i+1]
+			}
+		}
+		return ""
+	}
+
+	// The per-agent model on the request takes precedence over the
+	// backend-global model the runner leaves as a fallback.
+	t.Run("request model wins", func(t *testing.T) {
+		args := (&Backend{Model: "backend"}).buildArgs(review.Request{Model: "peragent"})
+		if got := find(args, "--model"); got != "peragent" {
+			t.Errorf("model = %q, want peragent", got)
+		}
+	})
+
+	// With no per-agent model the backend-global model still applies.
+	t.Run("falls back to backend model", func(t *testing.T) {
+		args := (&Backend{Model: "backend"}).buildArgs(review.Request{})
+		if got := find(args, "--model"); got != "backend" {
+			t.Errorf("model = %q, want backend", got)
+		}
+	})
+
+	// Neither set: no --model flag, so the claude CLI's own default is used.
+	t.Run("no model flag when unset", func(t *testing.T) {
+		args := (&Backend{}).buildArgs(review.Request{})
+		if got := find(args, "--model"); got != "" {
+			t.Errorf("unexpected --model %q", got)
+		}
+	})
+}
+
 func TestBuildArgsToolPolicy(t *testing.T) {
 	req := review.Request{MaxBudgetUSD: 2.5}
 

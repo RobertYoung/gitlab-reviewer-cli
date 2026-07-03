@@ -298,8 +298,14 @@ func (b *Backend) buildArgs(req review.Request) []string {
 		"--strict-mcp-config",
 		"--append-system-prompt", review.FullSystemPrompt(req),
 	)
-	if b.Model != "" {
-		args = append(args, "--model", b.Model)
+	// req.Model carries the per-agent model the runner resolved; it falls
+	// back to the backend-global model (cfg.Review.Model) when unset.
+	model := req.Model
+	if model == "" {
+		model = b.Model
+	}
+	if model != "" {
+		args = append(args, "--model", model)
 	}
 	if req.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.MaxBudgetUSD, 'f', -1, 64))
