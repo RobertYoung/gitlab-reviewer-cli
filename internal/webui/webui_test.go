@@ -264,6 +264,44 @@ func TestAuthRequired(t *testing.T) {
 	}
 }
 
+func TestCrossOriginPosts(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	post := func(headers map[string]string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodPost, env.ts.URL+"/i/default/mr/comment",
+			strings.NewReader(mrForm(url.Values{"body": {"hi"}}).Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		resp, err := env.client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Firefox under a strict referrer policy sends Origin: null on
+	// same-origin form POSTs; Sec-Fetch-Site must win over it.
+	if code := post(map[string]string{"Sec-Fetch-Site": "same-origin", "Origin": "null"}); code == http.StatusForbidden {
+		t.Fatalf("same-origin POST with Origin: null refused")
+	}
+
+	if code := post(map[string]string{"Sec-Fetch-Site": "cross-site", "Origin": "https://evil.example"}); code != http.StatusForbidden {
+		t.Fatalf("cross-site POST: got %d, want 403", code)
+	}
+
+	// Older browsers without fetch metadata: the Origin fallback applies.
+	if code := post(map[string]string{"Origin": "https://evil.example"}); code != http.StatusForbidden {
+		t.Fatalf("cross-origin POST without Sec-Fetch-Site: got %d, want 403", code)
+	}
+}
+
 func TestHomeRedirectsToSingleInstance(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 	code, body := env.get("/")

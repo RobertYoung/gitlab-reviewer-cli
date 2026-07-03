@@ -3,7 +3,6 @@ package webui
 import (
 	"crypto/subtle"
 	"net/http"
-	"net/url"
 )
 
 const sessionCookie = "gitlab_reviewer_session"
@@ -13,10 +12,15 @@ const sessionCookie = "gitlab_reviewer_session"
 // cookie so links stay clean. Other local processes cannot drive the
 // session without the token, and cross-origin POSTs are refused outright.
 func (s *Server) auth(next http.Handler) http.Handler {
+	// Sec-Fetch-Site based, with Origin fallback. The manual Origin==Host
+	// check used before broke Firefox: under Referrer-Policy: no-referrer it
+	// sends Origin: null even on same-origin form POSTs.
+	csrf := http.NewCrossOriginProtection()
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Referrer-Policy", "same-origin")
 
 		// Cookie bootstrap: a GET with the right token gets the session
 		// cookie and a redirect to the same URL without the token, so the
@@ -48,14 +52,10 @@ func (s *Server) auth(next http.Handler) http.Handler {
 		}
 
 		// The session cookie is same-site strict, but belt-and-braces:
-		// refuse state-changing requests whose Origin is another site.
-		if r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if origin := r.Header.Get("Origin"); origin != "" {
-				if u, err := url.Parse(origin); err != nil || u.Host != r.Host {
-					http.Error(w, "cross-origin request refused", http.StatusForbidden)
-					return
-				}
-			}
+		// refuse state-changing requests coming from another site.
+		if err := csrf.Check(r); err != nil {
+			http.Error(w, "cross-origin request refused", http.StatusForbidden)
+			return
 		}
 
 		next.ServeHTTP(w, r)
