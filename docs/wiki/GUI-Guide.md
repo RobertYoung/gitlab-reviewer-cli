@@ -42,8 +42,10 @@ The GUI mirrors the TUI screen for screen:
   folders, and existing MR discussions rendered inline where they were
   made.
 - **Review form** — the *Run AI review* button has an agents selector
-  (checkboxes) matching the TUI's picker; the last selection per project
-  is remembered across both frontends.
+  (checkboxes) matching the TUI's picker, with a per-agent model dropdown
+  next to each; the selection and model picks per project are remembered
+  across both frontends. See
+  [Review Agents](Review-Agents.md#per-agent-model).
 - **Review progress** — the run log streams live over server-sent events;
   the page jumps to the findings when the run completes. A cancel button
   stops the run.

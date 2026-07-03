@@ -36,11 +36,32 @@ func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request, d *De
 	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), detail.IID) // best-effort
 	_ = r.ParseForm()
 	agentNames := r.Form["agents"]
+	agentModels := parseAgentModels(r.Form, agentNames)
 	if len(agentNames) > 0 {
 		d.Selection.Save(detail.ProjectPath, agentNames)
+		d.Selection.SaveModels(detail.ProjectPath, agentModels)
 	}
-	run := s.startRun(d, inst, *detail, diffs, commits, agentNames)
+	run := s.startRun(d, inst, *detail, diffs, commits, agentNames, agentModels)
 	http.Redirect(w, r, instPath(inst, "/run/"+run.ID), http.StatusSeeOther) //nolint:gosec // server-built path: escaped instance + generated run ID
+}
+
+// parseAgentModels reads the per-agent model picks from the review form
+// (fields named "model:<agent>"), restricted to the checked agents and
+// dropping the empty "(default)" selections.
+func parseAgentModels(form url.Values, agentNames []string) map[string]string {
+	selected := map[string]bool{}
+	for _, n := range agentNames {
+		selected[n] = true
+	}
+	models := map[string]string{}
+	for field, vals := range form {
+		name, ok := strings.CutPrefix(field, "model:")
+		if !ok || len(vals) == 0 || vals[0] == "" || !selected[name] {
+			continue
+		}
+		models[name] = vals[0]
+	}
+	return models
 }
 
 type runContent struct {

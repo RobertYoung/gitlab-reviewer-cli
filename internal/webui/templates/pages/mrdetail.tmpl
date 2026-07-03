@@ -24,6 +24,9 @@
           <label title="{{.Description}}">
             <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
             {{.Name}}{{if .Source}} <span class="badge">{{.Source}}</span>{{end}}
+            <select name="model:{{.Name}}" class="agent-model" title="model for {{.Name}}">
+              {{range .Models}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+            </select>
           </label>
           {{end}}
         </fieldset>
