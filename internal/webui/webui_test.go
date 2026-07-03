@@ -46,12 +46,15 @@ func sampleDiffs() []gitlabx.FileDiff {
 }
 
 type fakeService struct {
-	mu           sync.Mutex
-	mrs          []gitlabx.MRSummary
-	inline       []string
-	notes        []string
-	drafts       []string
-	publishedAll bool
+	mu             sync.Mutex
+	mrs            []gitlabx.MRSummary
+	groups         []gitlabx.GroupInfo
+	groupProjects  map[string][]gitlabx.ProjectInfo
+	memberProjects []gitlabx.ProjectInfo
+	inline         []string
+	notes          []string
+	drafts         []string
+	publishedAll   bool
 }
 
 func (f *fakeService) ListOpenMergeRequests(context.Context, gitlabx.MRFilter, gitlabx.Page) ([]gitlabx.MRSummary, bool, error) {
@@ -59,15 +62,15 @@ func (f *fakeService) ListOpenMergeRequests(context.Context, gitlabx.MRFilter, g
 }
 
 func (f *fakeService) ListGroups(context.Context, string, gitlabx.Page) ([]gitlabx.GroupInfo, bool, error) {
-	return nil, false, nil
+	return f.groups, false, nil
 }
 
-func (f *fakeService) ListGroupProjects(context.Context, string, string, gitlabx.Page) ([]gitlabx.ProjectInfo, bool, error) {
-	return nil, false, nil
+func (f *fakeService) ListGroupProjects(_ context.Context, group string, _ string, _ gitlabx.Page) ([]gitlabx.ProjectInfo, bool, error) {
+	return f.groupProjects[group], false, nil
 }
 
 func (f *fakeService) ListMemberProjects(context.Context, string, gitlabx.Page) ([]gitlabx.ProjectInfo, bool, error) {
-	return nil, false, nil
+	return f.memberProjects, false, nil
 }
 
 func (f *fakeService) GetMergeRequest(context.Context, any, int64) (*gitlabx.MRDetail, error) {
@@ -157,13 +160,16 @@ type testEnv struct {
 	svc    *fakeService
 }
 
-func newTestEnv(t *testing.T, rev review.Reviewer) *testEnv {
+func newTestEnv(t *testing.T, rev review.Reviewer, cfgOpts ...func(*config.Config)) *testEnv {
 	t.Helper()
 	dir := t.TempDir()
 	svc := &fakeService{mrs: []gitlabx.MRSummary{sampleMR().MRSummary}}
 
 	cfg := config.Default()
 	cfg.GitLab.Projects = []string{"group/app"}
+	for _, opt := range cfgOpts {
+		opt(&cfg)
+	}
 
 	srv, err := New(Options{
 		ReviewsDir: dir,
@@ -277,6 +283,50 @@ func TestMRListAndDetail(t *testing.T) {
 	code, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
 	if code != http.StatusOK || !strings.Contains(body, "Imports fmt.") || !strings.Contains(body, "Run AI review") {
 		t.Fatalf("MR detail: %d\n%s", code, body)
+	}
+}
+
+func TestScopePickerWhenNothingConfigured(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.GitLab.Projects = nil
+	})
+	env.svc.groups = []gitlabx.GroupInfo{{FullPath: "acme", Description: "Acme group\nsecond line"}}
+	env.svc.memberProjects = []gitlabx.ProjectInfo{{PathWithNamespace: "rob/tool"}}
+	env.svc.groupProjects = map[string][]gitlabx.ProjectInfo{
+		"acme": {{PathWithNamespace: "acme/app", Description: "The app", LastActivity: time.Now()}},
+	}
+
+	// With no scope configured the MR list redirects to the picker, which
+	// lists the user's groups plus the member-projects entry.
+	code, body := env.get("/i/default/")
+	if code != http.StatusOK {
+		t.Fatalf("scope picker: %d", code)
+	}
+	for _, want := range []string{"your projects", "mine=1", "acme", "Acme group", "groups=acme"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("picker missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "second line") {
+		t.Fatalf("description not truncated to its first line:\n%s", body)
+	}
+
+	// Drilling into a group lists its projects, linked to the scoped MR list.
+	code, body = env.get("/i/default/browse?group=acme")
+	if code != http.StatusOK || !strings.Contains(body, "acme/app") || !strings.Contains(body, "projects=acme%2Fapp") {
+		t.Fatalf("group projects: %d\n%s", code, body)
+	}
+
+	// The member-projects pseudo-entry works the same way.
+	code, body = env.get("/i/default/browse?mine=1")
+	if code != http.StatusOK || !strings.Contains(body, "rob/tool") {
+		t.Fatalf("member projects: %d\n%s", code, body)
+	}
+
+	// An ad-hoc scope lists MRs without any configured projects/groups.
+	code, body = env.get("/i/default/?groups=acme")
+	if code != http.StatusOK || !strings.Contains(body, "Add fmt import") {
+		t.Fatalf("scoped MR list: %d\n%s", code, body)
 	}
 }
 

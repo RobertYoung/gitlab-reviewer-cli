@@ -19,13 +19,10 @@
     <input type="hidden" name="groups" value="{{$c.Groups}}">
     {{end}}
     <button type="submit">Filter</button>
+    {{if $c.NeedsScope}}<a class="button" href="{{$c.BrowseURL}}">Browse groups &amp; projects</a>{{end}}
   </form>
 
   {{if $c.Err}}<p class="error">{{$c.Err}}</p>{{end}}
-
-  {{if and $c.NeedsScope (not $c.MRs)}}
-  <p class="note">No projects or groups are configured for this instance — enter a project or group above to browse its merge requests.</p>
-  {{end}}
 
   {{if $c.MRs}}
   <table class="list">
