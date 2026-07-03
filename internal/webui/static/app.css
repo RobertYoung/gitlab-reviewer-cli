@@ -275,6 +275,16 @@ table.diff.split tr.line td:nth-child(3) { border-right: 1px solid var(--border)
 tr.line:hover .add-comment { visibility: visible; }
 
 tr.inline-comment td { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.thread summary {
+  cursor: pointer;
+  padding: 0.35rem 0.6rem;
+  font-family: system-ui, sans-serif;
+  user-select: none;
+}
+.thread summary .who { font-weight: 600; }
+.thread[open] summary { border-bottom: 1px solid var(--border); }
+.thread.resolved summary .who { color: var(--fg-subtle); font-weight: 500; }
+.badge.resolved { color: var(--ok); border-color: var(--ok); }
 .comment { padding: 0.5rem 0.6rem; font-family: system-ui, sans-serif; }
 .comment.pending { border-left: 3px solid var(--manual); }
 .comment .meta { margin-bottom: 0.2rem; }

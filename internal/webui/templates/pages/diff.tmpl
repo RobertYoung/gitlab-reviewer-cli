@@ -58,8 +58,8 @@
           <td class="gutter {{.Right.Kind}}">{{if eq .Right.Kind "add"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="" data-new="{{.Right.Num}}">+</button>{{else if eq .Right.Kind "ctx"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="{{.Left.Num}}" data-new="{{.Right.Num}}">+</button>{{end}}</td>
           <td class="code {{.Right.Kind}}">{{.Right.HTML}}</td>
         </tr>
-        {{range .Comments}}
-        <tr class="inline-comment"><td colspan="2" class="ln"></td><td colspan="4">{{template "diffcomment" (commentrow . $c)}}</td></tr>
+        {{range .Threads}}
+        <tr class="inline-comment"><td colspan="2" class="ln"></td><td colspan="4">{{template "diffthread" (threadrow . $c)}}</td></tr>
         {{end}}
         {{end}}
         {{end}}
@@ -76,8 +76,8 @@
           <td class="gutter">{{if .CanComment}}<button type="button" class="add-comment" title="add a comment on this line">+</button>{{end}}</td>
           <td class="code">{{.HTML}}</td>
         </tr>
-        {{range .Comments}}
-        <tr class="inline-comment"><td colspan="3" class="ln"></td><td>{{template "diffcomment" (commentrow . $c)}}</td></tr>
+        {{range .Threads}}
+        <tr class="inline-comment"><td colspan="3" class="ln"></td><td>{{template "diffthread" (threadrow . $c)}}</td></tr>
         {{end}}
         {{end}}
         {{end}}
@@ -120,6 +120,19 @@
   </details>
 </li>
 {{end}}
+{{end}}
+
+{{define "diffthread"}}
+{{$content := .Content}}
+<details class="thread{{if .T.Resolved}} resolved{{end}}"{{if not .T.Resolved}} open{{end}}>
+  <summary>
+    <span class="who">💬 {{with .T.First}}{{if .Pending}}yours{{else}}{{.Author}}{{end}}{{end}}</span>
+    {{if gt (len .T.Comments) 1}}<span class="subtle">· {{len .T.Comments}} comments</span>{{end}}
+    {{with .T.First}}{{if not .When.IsZero}}<span class="subtle">· {{reltime .When}}</span>{{end}}{{end}}
+    {{if .T.Resolved}}<span class="badge resolved">resolved</span>{{end}}
+  </summary>
+  {{range .T.Comments}}{{template "diffcomment" (commentrow . $content)}}{{end}}
+</details>
 {{end}}
 
 {{define "diffcomment"}}

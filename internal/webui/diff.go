@@ -31,12 +31,22 @@ type inlineComment struct {
 	Pending bool
 }
 
+// inlineThread is one collapsible discussion under a diff line: a GitLab
+// discussion's notes, or a single pending manual comment.
+type inlineThread struct {
+	Resolved bool
+	Comments []inlineComment
+}
+
+// First is the thread's opening comment, shown in the collapsed summary.
+func (t inlineThread) First() inlineComment { return t.Comments[0] }
+
 // diffLine is one rendered row of a unified diff.
 type diffLine struct {
 	Kind     string // add | del | ctx | hunk
 	Old, New int    // 1-based; 0 when not applicable
 	HTML     template.HTML
-	Comments []inlineComment
+	Threads  []inlineThread
 }
 
 // CanComment reports whether a manual comment can anchor on this line.
@@ -148,7 +158,9 @@ func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, 
 		}
 		f.Lines = parseDiffLines(fd, anchored)
 		for _, l := range f.Lines {
-			f.Comments += len(l.Comments)
+			for _, t := range l.Threads {
+				f.Comments += len(t.Comments)
+			}
 		}
 		if split {
 			f.Rows = splitLines(f.Lines)
@@ -171,9 +183,11 @@ func fileStatus(fd gitlabx.FileDiff) string {
 	}
 }
 
-// anchorComments indexes discussions and pending comments by file line.
-func anchorComments(discussions []gitlabx.Discussion, pending []review.Finding) map[string][]inlineComment {
-	out := map[string][]inlineComment{}
+// anchorComments indexes discussion threads and pending comments by file
+// line. Each GitLab discussion becomes one thread, resolved when all of its
+// notes are; each pending manual comment is its own (unresolved) thread.
+func anchorComments(discussions []gitlabx.Discussion, pending []review.Finding) map[string][]inlineThread {
+	out := map[string][]inlineThread{}
 	for _, d := range discussions {
 		pos := d.Anchor()
 		if pos == nil {
@@ -188,12 +202,18 @@ func anchorComments(discussions []gitlabx.Discussion, pending []review.Finding) 
 		default:
 			continue
 		}
+		t := inlineThread{Resolved: true}
 		for _, n := range d.Notes {
 			if n.System {
 				continue
 			}
-			out[key] = append(out[key], inlineComment{Author: n.Author, Body: n.Body, When: n.CreatedAt})
+			t.Comments = append(t.Comments, inlineComment{Author: n.Author, Body: n.Body, When: n.CreatedAt})
+			t.Resolved = t.Resolved && n.Resolved
 		}
+		if len(t.Comments) == 0 {
+			continue
+		}
+		out[key] = append(out[key], t)
 	}
 	for _, f := range pending {
 		if f.File == "" {
@@ -208,14 +228,15 @@ func anchorComments(discussions []gitlabx.Discussion, pending []review.Finding) 
 		default:
 			continue
 		}
-		out[key] = append(out[key], inlineComment{ID: f.ID, Body: f.Body, State: f.State.String(), Pending: true})
+		c := inlineComment{ID: f.ID, Body: f.Body, State: f.State.String(), Pending: true}
+		out[key] = append(out[key], inlineThread{Comments: []inlineComment{c}})
 	}
 	return out
 }
 
 // parseDiffLines walks one unified diff, tracking old/new line numbers the
 // same way the TUI and position resolution do.
-func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineComment) []diffLine {
+func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineThread) []diffLine {
 	if strings.TrimSpace(fd.Diff) == "" {
 		return nil
 	}
@@ -231,19 +252,19 @@ func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineComment) []
 			lines = append(lines, diffLine{Kind: "hunk", HTML: template.HTML(template.HTMLEscapeString(raw))}) //nolint:gosec // escaped
 		case strings.HasPrefix(raw, "+"):
 			l := diffLine{Kind: "add", New: newLine, HTML: h.line(raw[1:])}
-			l.Comments = anchored[commentKey(fd.NewPath, "new", newLine)]
+			l.Threads = anchored[commentKey(fd.NewPath, "new", newLine)]
 			lines = append(lines, l)
 			newLine++
 		case strings.HasPrefix(raw, "-"):
 			l := diffLine{Kind: "del", Old: oldLine, HTML: h.line(strings.TrimPrefix(raw, "-"))}
-			l.Comments = anchored[commentKey(fd.OldPath, "old", oldLine)]
+			l.Threads = anchored[commentKey(fd.OldPath, "old", oldLine)]
 			lines = append(lines, l)
 			oldLine++
 		case strings.HasPrefix(raw, `\`):
 			lines = append(lines, diffLine{Kind: "hunk", HTML: template.HTML(template.HTMLEscapeString(raw))}) //nolint:gosec // escaped
 		default:
 			l := diffLine{Kind: "ctx", Old: oldLine, New: newLine, HTML: h.line(strings.TrimPrefix(raw, " "))}
-			l.Comments = anchored[commentKey(fd.NewPath, "new", newLine)]
+			l.Threads = anchored[commentKey(fd.NewPath, "new", newLine)]
 			lines = append(lines, l)
 			oldLine++
 			newLine++
@@ -255,10 +276,10 @@ func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineComment) []
 // splitCell is one side of a side-by-side diff row; Kind "" renders as the
 // empty filler opposite an unpaired addition or deletion.
 type splitCell struct {
-	Kind     string // add | del | ctx | ""
-	Num      int    // old line on the left, new line on the right
-	HTML     template.HTML
-	Comments []inlineComment
+	Kind    string // add | del | ctx | ""
+	Num     int    // old line on the left, new line on the right
+	HTML    template.HTML
+	Threads []inlineThread
 }
 
 // splitRow is one row of the side-by-side layout: a hunk header spanning
@@ -268,12 +289,12 @@ type splitRow struct {
 	Left, Right splitCell
 }
 
-// Comments merges both sides' threads; they render full-width underneath.
-func (r splitRow) Comments() []inlineComment {
-	if len(r.Left.Comments) == 0 {
-		return r.Right.Comments
+// Threads merges both sides' threads; they render full-width underneath.
+func (r splitRow) Threads() []inlineThread {
+	if len(r.Left.Threads) == 0 {
+		return r.Right.Threads
 	}
-	return append(append([]inlineComment{}, r.Left.Comments...), r.Right.Comments...)
+	return append(append([]inlineThread{}, r.Left.Threads...), r.Right.Threads...)
 }
 
 // splitLines pairs a unified diff's lines side by side: context on both
@@ -289,7 +310,7 @@ func splitLines(lines []diffLine) []splitRow {
 		case "ctx":
 			rows = append(rows, splitRow{
 				Left:  splitCell{Kind: "ctx", Num: l.Old, HTML: l.HTML},
-				Right: splitCell{Kind: "ctx", Num: l.New, HTML: l.HTML, Comments: l.Comments},
+				Right: splitCell{Kind: "ctx", Num: l.New, HTML: l.HTML, Threads: l.Threads},
 			})
 			i++
 		default:
@@ -303,10 +324,10 @@ func splitLines(lines []diffLine) []splitRow {
 			for j := range max(len(dels), len(adds)) {
 				var row splitRow
 				if j < len(dels) {
-					row.Left = splitCell{Kind: "del", Num: dels[j].Old, HTML: dels[j].HTML, Comments: dels[j].Comments}
+					row.Left = splitCell{Kind: "del", Num: dels[j].Old, HTML: dels[j].HTML, Threads: dels[j].Threads}
 				}
 				if j < len(adds) {
-					row.Right = splitCell{Kind: "add", Num: adds[j].New, HTML: adds[j].HTML, Comments: adds[j].Comments}
+					row.Right = splitCell{Kind: "add", Num: adds[j].New, HTML: adds[j].HTML, Threads: adds[j].Threads}
 				}
 				rows = append(rows, row)
 			}

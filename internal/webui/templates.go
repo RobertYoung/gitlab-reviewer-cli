@@ -28,6 +28,9 @@ var tmplFuncs = template.FuncMap{
 	"commentrow": func(c inlineComment, content diffContent) map[string]any {
 		return map[string]any{"C": c, "Nav": content.Nav, "BackURL": content.BackURL}
 	},
+	"threadrow": func(t inlineThread, content diffContent) map[string]any {
+		return map[string]any{"T": t, "Content": content}
+	},
 	"ftitle":   findingTitle,
 	"floc":     findingLocation,
 	"fstate":   func(s review.FindingState) string { return s.String() },
