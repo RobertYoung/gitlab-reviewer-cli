@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -12,6 +13,9 @@ import (
 	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+	"github.com/yuin/goldmark/renderer/html"
 )
 
 // pageData wraps every rendered page: shared chrome plus the page content.
@@ -32,6 +36,7 @@ var tmplFuncs = template.FuncMap{
 	"floc":     findingLocation,
 	"fstate":   func(s review.FindingState) string { return s.String() },
 	"reltime":  relTime,
+	"markdown": renderMarkdown,
 	"join":     strings.Join,
 	"datetime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 	"query":    url.QueryEscape,
@@ -83,6 +88,25 @@ func (s *Server) renderError(w http.ResponseWriter, status int, err error) {
 		Title:   "error",
 		Content: err.Error(),
 	})
+}
+
+// mdRenderer approximates GitLab-flavored markdown: GFM tables, strikethrough,
+// task lists, autolinks, plus GitLab's single-newline line breaks. Raw HTML is
+// omitted and dangerous URL schemes dropped (goldmark's safe defaults), so the
+// output can be trusted as template.HTML.
+var mdRenderer = goldmark.New(
+	goldmark.WithExtensions(extension.GFM),
+	goldmark.WithRendererOptions(html.WithHardWraps()),
+)
+
+// renderMarkdown converts untrusted markdown to HTML, falling back to
+// escaped plain text if conversion fails.
+func renderMarkdown(src string) template.HTML {
+	var buf bytes.Buffer
+	if err := mdRenderer.Convert([]byte(src), &buf); err != nil {
+		return template.HTML("<pre class=\"prose\">" + template.HTMLEscapeString(src) + "</pre>") //nolint:gosec // escaped above
+	}
+	return template.HTML(buf.String()) //nolint:gosec // goldmark runs with raw HTML disabled
 }
 
 // findingTitle is the list label for a finding: its title, or the first

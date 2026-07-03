@@ -5,6 +5,8 @@ package gitlabx
 
 import (
 	"fmt"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -74,6 +76,41 @@ func (m MRSummary) Project() any {
 // Ref returns a human-readable reference like group/app!42.
 func (m MRSummary) Ref() string {
 	return fmt.Sprintf("%s!%d", m.ProjectPath, m.IID)
+}
+
+// ProjectWebURL is the project's web URL, derived from the MR's WebURL
+// (…/group/app/-/merge_requests/42 → …/group/app). Empty when unknown.
+func (m MRSummary) ProjectWebURL() string {
+	if i := strings.Index(m.WebURL, "/-/"); i >= 0 {
+		return m.WebURL[:i]
+	}
+	return ""
+}
+
+// AuthorWebURL is the author's profile page on the MR's instance, or empty
+// when either part is unknown.
+func (m MRSummary) AuthorWebURL() string {
+	u, err := url.Parse(m.WebURL)
+	if err != nil || u.Host == "" || m.Author == "" {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + "/" + m.Author
+}
+
+// BranchWebURL is the tree view of a branch on the MR's project, or empty
+// when the project URL is unknown. Branches on a fork are not resolvable
+// from the summary, so source-branch links assume same-project MRs.
+func (m MRSummary) BranchWebURL(branch string) string {
+	p := m.ProjectWebURL()
+	if p == "" || branch == "" {
+		return ""
+	}
+	// escape per segment: slashes in branch names stay literal in tree URLs
+	segs := strings.Split(branch, "/")
+	for i, s := range segs {
+		segs[i] = url.PathEscape(s)
+	}
+	return p + "/-/tree/" + strings.Join(segs, "/")
 }
 
 // DiffRefs are the three SHAs GitLab requires on every positioned comment.

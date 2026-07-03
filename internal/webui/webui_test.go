@@ -52,6 +52,7 @@ type fakeService struct {
 	groups         []gitlabx.GroupInfo
 	groupProjects  map[string][]gitlabx.ProjectInfo
 	memberProjects []gitlabx.ProjectInfo
+	mr             *gitlabx.MRDetail  // nil serves sampleMR()
 	diffs          []gitlabx.FileDiff // nil serves sampleDiffs()
 	inline         []string
 	notes          []string
@@ -79,6 +80,9 @@ func (f *fakeService) ListMemberProjects(context.Context, string, gitlabx.Page) 
 
 func (f *fakeService) GetMergeRequest(context.Context, any, int64) (*gitlabx.MRDetail, error) {
 	mr := sampleMR()
+	if f.mr != nil {
+		mr = *f.mr
+	}
 	return &mr, nil
 }
 
@@ -346,6 +350,39 @@ func TestMRListAndDetail(t *testing.T) {
 	code, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
 	if code != http.StatusOK || !strings.Contains(body, "Imports fmt.") || !strings.Contains(body, "Run AI review") {
 		t.Fatalf("MR detail: %d\n%s", code, body)
+	}
+}
+
+func TestMRHeaderLinksAndMarkdownDescription(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	mr := sampleMR()
+	mr.Description = "Imports **fmt** for printing.\n\n<script>alert(1)</script>"
+	env.svc.mr = &mr
+
+	// Both the overview and the diff page show the metadata line with each
+	// part linked to GitLab, and the description rendered from markdown.
+	for _, page := range []string{
+		"/i/default/mr?project=group%2Fapp&iid=5",
+		"/i/default/mr/diff?project=group%2Fapp&iid=5",
+	} {
+		code, body := env.get(page)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", page, code)
+		}
+		for _, want := range []string{
+			"<strong>fmt</strong>",
+			`href="https://gitlab.example.com/group/app/-/merge_requests/5" target="_blank" rel="noopener">group/app!5</a>`,
+			`href="https://gitlab.example.com/alice" target="_blank" rel="noopener">alice</a>`,
+			`href="https://gitlab.example.com/group/app/-/tree/feature" target="_blank" rel="noopener">feature</a>`,
+			`href="https://gitlab.example.com/group/app/-/tree/main" target="_blank" rel="noopener">main</a>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing %q:\n%s", page, want, body)
+			}
+		}
+		if strings.Contains(body, "<script>alert") {
+			t.Fatalf("%s renders raw HTML from the description:\n%s", page, body)
+		}
 	}
 }
 
