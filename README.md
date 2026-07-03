@@ -245,6 +245,7 @@ silent fallback to the shared token.
 | `review.bare` | `GITLAB_REVIEWER_REVIEW_BARE` | `--bare` | `false` |
 | `review.use_agents` | `GITLAB_REVIEWER_REVIEW_USE_AGENTS` | `--use-agents` | `false` |
 | `review.env` | — (file only, map) | `--review-env KEY=VALUE` (repeatable) | `{}` |
+| `review.mcp_servers` | — (file only, map) | — | `{}` — see [MCP servers](#mcp-servers) |
 
 `review.instructions` (and/or the contents of `review.instructions_file`)
 are appended to the built-in review prompt — use them for team conventions
@@ -337,6 +338,50 @@ runner still merges the repo's agents from the checkout at run time.
 Findings carry the agent that produced them: the findings screens show it
 alongside severity and category, and `publish.template` can reference it as
 `{{.agent}}`.
+
+#### MCP servers
+
+`review.mcp_servers` grants the review session [MCP](https://modelcontextprotocol.io)
+servers — for reference material the reviewer should consult live rather
+than guess at. The motivating example: a repo managing AWS IAM roles, where
+agents cross-check policies against the AWS documentation MCP server:
+
+```yaml
+projects:
+  mygroup/iam-roles:
+    review:
+      mcp_servers:
+        aws-documentation:
+          command: uvx
+          args: [awslabs.aws-documentation-mcp-server@latest]
+          env:
+            AWS_DOCUMENTATION_PARTITION: aws
+          tools: [search_documentation, read_documentation, recommend]
+```
+
+Entries mirror Claude Code's `.mcp.json`: `command`/`args`/`env` for a
+local stdio server, or `type: http` (or `sse`) with `url`/`headers` for a
+remote one. The optional `tools` list narrows the grant to the named tools
+of that server; omitting it allows them all. There is no flag or
+environment form — the grant lives in your settings file only, and a
+per-project section (as above) keeps it scoped to the repos that need it.
+
+**Read the [review sandbox](#the-review-sandbox) section before adding a
+server.** Reviews process untrusted MR content, and the sandbox's network
+denial is what makes prompt injection harmless; an MCP server with network
+access reopens that channel to wherever the server can reach. Prefer
+servers with narrow, well-known egress (the AWS documentation server only
+talks to AWS's own documentation endpoints), keep grants per-project, and
+pair them with an OS/proxy-level egress allowlist if you need defence in
+depth. Configured servers are loaded with `--strict-mcp-config` still in
+force, so ambient `.mcp.json` files — including one shipped in the reviewed
+repo — are never picked up; server definitions cannot carry GitLab
+credentials (`GITLAB*` env keys are rejected at config validation), and
+remote-server `headers` are redacted from `config show`. In MCP-enabled
+runs the read-only guarantee is enforced through permission rules (an
+extended deny list plus `dontAsk` denying everything not read-only or
+granted) rather than the built-in tool allowlist, whose `--tools` flag
+would strip MCP tools — see ADR-0008 for the details.
 
 #### MR hygiene checks
 
@@ -572,6 +617,17 @@ relaxing the sandbox to let the model make its own calls. If you ever need
 the subprocess to reach the network, do it with an egress allowlist at the
 OS/proxy layer (permit only your GitLab host and the model endpoint), not by
 removing tools from the deny list.
+
+The one deliberate, opt-in exception is [`review.mcp_servers`](#mcp-servers):
+a server you grant there runs inside the review subprocess with whatever
+reach *it* has, so every granted server is a conscious relaxation of the
+paragraph above. `--strict-mcp-config` remains in force (nothing loads
+beyond your explicit grant, and never from the reviewed repo), `WebFetch`/
+`WebSearch` stay denied, and the GitLab token still never enters the
+subprocess — but the exfiltration analysis is now only as good as the
+granted server's egress. Choose servers whose destinations are narrow and
+trusted, scope grants per-project, and back them with an OS/proxy egress
+allowlist when the stakes warrant it.
 
 ## Using AWS Bedrock
 

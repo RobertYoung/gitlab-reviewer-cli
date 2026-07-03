@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -298,6 +299,56 @@ func TestBuildArgsToolPolicy(t *testing.T) {
 		}
 		if got := find(args, "--max-budget-usd"); got != "2.5" {
 			t.Errorf("budget = %q", got)
+		}
+	})
+
+	t.Run("no mcp flags without configured servers", func(t *testing.T) {
+		args := (&Backend{}).buildArgs(req)
+		if got := find(args, "--mcp-config"); got != "" {
+			t.Errorf("unexpected --mcp-config %q", got)
+		}
+		if got := find(args, "--allowedTools"); got != "" {
+			t.Errorf("unexpected --allowedTools %q", got)
+		}
+	})
+
+	t.Run("mcp servers are granted explicitly and stay strict", func(t *testing.T) {
+		b := &Backend{MCPServers: map[string]config.MCPServer{
+			"aws-documentation": {Command: "uvx", Args: []string{"awslabs.aws-documentation-mcp-server@latest"}, Env: map[string]string{"AWS_DOCUMENTATION_PARTITION": "aws"}},
+			"narrowed":          {Type: "http", URL: "https://docs.corp.example/mcp", Tools: []string{"search", "read"}},
+		}}
+		args := b.buildArgs(req)
+
+		cfg := find(args, "--mcp-config")
+		for _, want := range []string{
+			`"aws-documentation":{"type":"stdio","command":"uvx"`,
+			`"args":["awslabs.aws-documentation-mcp-server@latest"]`,
+			`"env":{"AWS_DOCUMENTATION_PARTITION":"aws"}`,
+			`"narrowed":{"type":"http","url":"https://docs.corp.example/mcp"}`,
+		} {
+			if !strings.Contains(cfg, want) {
+				t.Errorf("--mcp-config missing %s: %s", want, cfg)
+			}
+		}
+		// dontAsk denies MCP tools without an allow rule: whole server by
+		// default, individual tools when the definition narrows them
+		if got := find(args, "--allowedTools"); got != "mcp__aws-documentation,mcp__narrowed__search,mcp__narrowed__read" {
+			t.Errorf("allowedTools = %q", got)
+		}
+		// strictness is unchanged
+		if !slices.Contains(args, "--strict-mcp-config") {
+			t.Error("--strict-mcp-config dropped")
+		}
+		// --tools would strip the MCP tools (claude 2.1.199), so it must be
+		// omitted and read-only enforced via a hardened deny list instead
+		if got := find(args, "--tools"); got != "" {
+			t.Errorf("--tools must be omitted with MCP servers, got %q", got)
+		}
+		disallowed := find(args, "--disallowedTools")
+		for _, want := range []string{"Bash", "Edit", "Write", "WebFetch", "WebSearch", "Task", "SlashCommand", "Skill"} {
+			if !strings.Contains(disallowed, want) {
+				t.Errorf("disallowed missing %s: %q", want, disallowed)
+			}
 		}
 	})
 
