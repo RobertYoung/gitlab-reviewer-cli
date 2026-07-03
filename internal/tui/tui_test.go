@@ -356,6 +356,70 @@ func TestMRDetailNavigation(t *testing.T) {
 	}
 }
 
+func TestMRDetailOverviewToggle(t *testing.T) {
+	mr := sampleMRs()[0]
+	mr.Description = "Fixes the parser crash on empty input."
+	svc := &fakeService{
+		detail:  &gitlabx.MRDetail{MRSummary: mr},
+		diffs:   []gitlabx.FileDiff{{NewPath: "a.go", Diff: "@@ -1,1 +1,1 @@\n-old\n+new\n"}},
+		commits: []gitlabx.Commit{{ShortID: "abc1234", Title: "fix parser"}},
+	}
+	s := newMRDetail(testDeps(svc), mr)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg, mrCommitsLoadedMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+
+	screen, _ = screen.Update(key("d"))
+	view := screen.View()
+	if !strings.Contains(view, "Fixes the parser crash") || !strings.Contains(view, "abc1234") {
+		t.Errorf("overview missing description or commits:\n%s", view)
+	}
+	if !strings.Contains(s.Hints(), "back to diff") {
+		t.Errorf("overview hints wrong: %s", s.Hints())
+	}
+
+	// d again returns to the diff.
+	screen, _ = screen.Update(key("d"))
+	if view := screen.View(); strings.Contains(view, "Fixes the parser crash") || !strings.Contains(view, "new") {
+		t.Errorf("diff not restored after leaving the overview:\n%s", view)
+	}
+
+	// esc closes the overview without popping the screen.
+	screen, _ = screen.Update(key("d"))
+	_, cmd := screen.Update(key("esc"))
+	if msgs := runCmd(cmd); len(msgs) != 0 {
+		t.Errorf("esc in overview should not pop: %v", msgs)
+	}
+	if s.overview {
+		t.Error("overview still open after esc")
+	}
+}
+
+func TestMRDetailShowsRebaseWarning(t *testing.T) {
+	mr := sampleMRs()[0]
+	svc := &fakeService{
+		detail: &gitlabx.MRDetail{MRSummary: mr, DivergedCommits: 3},
+		diffs:  []gitlabx.FileDiff{{NewPath: "a.go", Diff: "@@ -1,1 +1,1 @@\n-old\n+new\n"}},
+	}
+	s := newMRDetail(testDeps(svc), mr)
+	var screen Screen = s
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	for _, msg := range runCmd(screen.Init()) {
+		switch msg.(type) {
+		case mrDetailLoadedMsg, mrDiffsLoadedMsg:
+			screen, _ = screen.Update(msg)
+		}
+	}
+	if !strings.Contains(screen.View(), "needs rebase") {
+		t.Errorf("header missing rebase warning:\n%s", screen.View())
+	}
+}
+
 func TestMRListOpensBrowser(t *testing.T) {
 	svc := &fakeService{mrs: sampleMRs()}
 	deps := testDeps(svc)

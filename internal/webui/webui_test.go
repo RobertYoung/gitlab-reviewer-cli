@@ -34,6 +34,7 @@ func sampleMR() gitlabx.MRDetail {
 			Author:       "alice",
 			SourceBranch: "feature",
 			TargetBranch: "main",
+			HeadSHA:      "head",
 			WebURL:       "https://gitlab.example.com/group/app/-/merge_requests/5",
 			UpdatedAt:    time.Now(),
 		},
@@ -51,10 +52,13 @@ type fakeService struct {
 	groups         []gitlabx.GroupInfo
 	groupProjects  map[string][]gitlabx.ProjectInfo
 	memberProjects []gitlabx.ProjectInfo
+	diffs          []gitlabx.FileDiff // nil serves sampleDiffs()
 	inline         []string
 	notes          []string
 	drafts         []string
 	publishedAll   bool
+	approved       bool
+	approvedSHA    string
 }
 
 func (f *fakeService) ListOpenMergeRequests(context.Context, gitlabx.MRFilter, gitlabx.Page) ([]gitlabx.MRSummary, bool, error) {
@@ -79,6 +83,9 @@ func (f *fakeService) GetMergeRequest(context.Context, any, int64) (*gitlabx.MRD
 }
 
 func (f *fakeService) ListDiffs(context.Context, any, int64) ([]gitlabx.FileDiff, error) {
+	if f.diffs != nil {
+		return f.diffs, nil
+	}
 	return sampleDiffs(), nil
 }
 
@@ -119,10 +126,28 @@ func (f *fakeService) PublishAllDraftNotes(context.Context, any, int64) error {
 }
 
 func (f *fakeService) GetApprovals(context.Context, any, int64) (*gitlabx.Approvals, error) {
-	return &gitlabx.Approvals{UserCanApprove: true}, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	a := &gitlabx.Approvals{UserCanApprove: true, UserHasApproved: f.approved}
+	if f.approved {
+		a.ApprovedBy = []string{"you"}
+	}
+	return a, nil
 }
-func (f *fakeService) Approve(context.Context, any, int64, string) error { return nil }
-func (f *fakeService) Unapprove(context.Context, any, int64) error       { return nil }
+
+func (f *fakeService) Approve(_ context.Context, _ any, _ int64, sha string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.approved, f.approvedSHA = true, sha
+	return nil
+}
+
+func (f *fakeService) Unapprove(context.Context, any, int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.approved = false
+	return nil
+}
 
 type fakeReviewer struct{ result *review.Result }
 
@@ -399,6 +424,119 @@ func TestDiffPageRendersLinesAndComments(t *testing.T) {
 	env.post("/i/default/mr/comment/delete", mrForm(url.Values{"id": {pending[0].ID}}))
 	if left := env.srv.comments.list(mrKey("default", "group/app", 5)); len(left) != 0 {
 		t.Fatalf("comment not deleted: %+v", left)
+	}
+}
+
+func TestApproveAndUnapprove(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	// The detail page offers approval while the user has not approved.
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK || !strings.Contains(body, ">✓ Approve<") {
+		t.Fatalf("detail before approving: %d\n%s", code, body)
+	}
+
+	// Approving records the MR's head SHA and flips the page to unapprove.
+	code, body = env.post("/i/default/mr/approve", mrForm(url.Values{"sha": {"head"}}))
+	if code != http.StatusOK {
+		t.Fatalf("approve: %d", code)
+	}
+	if !env.svc.approved || env.svc.approvedSHA != "head" {
+		t.Fatalf("approval not recorded: approved=%v sha=%q", env.svc.approved, env.svc.approvedSHA)
+	}
+	if !strings.Contains(body, "Approved by you") || !strings.Contains(body, ">Unapprove<") {
+		t.Fatalf("detail after approving:\n%s", body)
+	}
+
+	code, _ = env.post("/i/default/mr/approve", mrForm(url.Values{"action": {"unapprove"}}))
+	if code != http.StatusOK || env.svc.approved {
+		t.Fatalf("unapprove: %d approved=%v", code, env.svc.approved)
+	}
+}
+
+func TestSplitDiffView(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	code, body := env.get("/i/default/mr/diff?project=group%2Fapp&iid=5&view=split")
+	if code != http.StatusOK || !strings.Contains(body, `class="diff split"`) {
+		t.Fatalf("split diff: %d\n%s", code, body)
+	}
+	// The added line sits on the right with its own anchor button.
+	if !strings.Contains(body, `data-new="2"`) || !strings.Contains(body, `class="code add"`) {
+		t.Fatalf("split diff missing the added line's cell:\n%s", body)
+	}
+	// The unified page offers the split toggle and vice versa.
+	if !strings.Contains(body, "view=unified") {
+		t.Fatalf("split page missing unified toggle:\n%s", body)
+	}
+	_, body = env.get("/i/default/mr/diff?project=group%2Fapp&iid=5")
+	if !strings.Contains(body, "view=split") || strings.Contains(body, `class="diff split"`) {
+		t.Fatalf("unified page toggle wrong:\n%s", body)
+	}
+}
+
+func TestSplitLinesPairing(t *testing.T) {
+	diff := "@@ -1,3 +1,3 @@\n ctx1\n-old1\n-old2\n+new1\n ctx2\n"
+	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil)
+	rows := splitLines(lines)
+	if len(rows) != 5 {
+		t.Fatalf("got %d rows, want 5: %+v", len(rows), rows)
+	}
+	if rows[0].Hunk == "" {
+		t.Fatalf("first row should be the hunk header: %+v", rows[0])
+	}
+	if rows[1].Left.Kind != "ctx" || rows[1].Left.Num != 1 || rows[1].Right.Num != 1 {
+		t.Fatalf("context row wrong: %+v", rows[1])
+	}
+	if rows[2].Left.Kind != "del" || rows[2].Left.Num != 2 || rows[2].Right.Kind != "add" || rows[2].Right.Num != 2 {
+		t.Fatalf("paired del/add row wrong: %+v", rows[2])
+	}
+	if rows[3].Left.Kind != "del" || rows[3].Left.Num != 3 || rows[3].Right.Kind != "" {
+		t.Fatalf("unpaired deletion should face an empty cell: %+v", rows[3])
+	}
+	if rows[4].Left.Kind != "ctx" || rows[4].Right.Num != 3 {
+		t.Fatalf("trailing context row wrong: %+v", rows[4])
+	}
+}
+
+func TestBuildExplorerTree(t *testing.T) {
+	files := buildDiffFiles([]gitlabx.FileDiff{
+		{NewPath: "internal/tui/app.go", Diff: sampleDiff},
+		{NewPath: "README.md", Diff: sampleDiff},
+		{NewPath: "internal/config/load.go", Diff: sampleDiff},
+	}, nil, nil, false)
+	tree := buildExplorer(files)
+
+	// Directories sort before files, alphabetically within each level.
+	if len(tree) != 2 || tree[0].Name != "internal" || tree[0].File != nil || tree[1].Name != "README.md" {
+		t.Fatalf("root wrong: %+v", tree)
+	}
+	sub := tree[0].Children
+	if len(sub) != 2 || sub[0].Name != "config" || sub[1].Name != "tui" {
+		t.Fatalf("internal/ children wrong: %+v", sub)
+	}
+	leaf := sub[0].Children
+	if len(leaf) != 1 || leaf[0].Name != "load.go" || leaf[0].File == nil || leaf[0].File.Index != 2 {
+		t.Fatalf("config/ leaf wrong: %+v", leaf)
+	}
+}
+
+func TestDiffExplorerRendersCollapsibleTree(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.diffs = []gitlabx.FileDiff{
+		{OldPath: "internal/tui/app.go", NewPath: "internal/tui/app.go", Diff: sampleDiff},
+		{OldPath: "README.md", NewPath: "README.md", Diff: sampleDiff},
+	}
+
+	code, body := env.get("/i/default/mr/diff?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("diff: %d", code)
+	}
+	// Nested directories become open, toggleable folders; files link by name.
+	for _, want := range []string{"<details open", ">internal/", ">tui/", `class="fname">app.go<`, `class="fname">README.md<`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("explorer missing %q:\n%s", want, body)
+		}
 	}
 }
 

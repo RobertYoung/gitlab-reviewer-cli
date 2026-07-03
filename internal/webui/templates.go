@@ -24,11 +24,15 @@ type pageData struct {
 }
 
 var tmplFuncs = template.FuncMap{
-	"navargs":  func(nav mrNav, webURL string) map[string]any { return map[string]any{"Nav": nav, "WebURL": webURL} },
+	"navargs": func(nav mrNav, webURL string) map[string]any { return map[string]any{"Nav": nav, "WebURL": webURL} },
+	"commentrow": func(c inlineComment, content diffContent) map[string]any {
+		return map[string]any{"C": c, "Nav": content.Nav, "BackURL": content.BackURL}
+	},
 	"ftitle":   findingTitle,
 	"floc":     findingLocation,
 	"fstate":   func(s review.FindingState) string { return s.String() },
 	"reltime":  relTime,
+	"join":     strings.Join,
 	"datetime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 	"query":    url.QueryEscape,
 	"pathesc":  url.PathEscape,

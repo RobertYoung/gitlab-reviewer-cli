@@ -3,6 +3,7 @@ package webui
 import (
 	"fmt"
 	"html/template"
+	"sort"
 	"strings"
 	"time"
 
@@ -48,7 +49,8 @@ type diffFile struct {
 	NewPath  string
 	Status   string // added | deleted | renamed | modified
 	Lines    []diffLine
-	Comments int // anchored comment count, for the file explorer badge
+	Rows     []splitRow // side-by-side pairing; only built for the split layout
+	Comments int        // anchored comment count, for the file explorer badge
 	TooLarge bool
 }
 
@@ -66,6 +68,63 @@ func (f diffFile) Letter() string {
 	}
 }
 
+// explorerNode is one entry of the file explorer tree: a directory with
+// children, or a changed file. Directories render as <details> elements,
+// so folding needs no script.
+type explorerNode struct {
+	Name     string
+	File     *diffFile // nil for directories
+	Children []*explorerNode
+}
+
+// buildExplorer groups the changed files into a directory tree, sorted the
+// way the TUI's explorer is: directories first, then names.
+func buildExplorer(files []diffFile) []*explorerNode {
+	root := &explorerNode{}
+	for i := range files {
+		path := files[i].NewPath
+		if path == "" {
+			path = files[i].Path
+		}
+		parts := strings.Split(path, "/")
+		node := root
+		for _, dir := range parts[:len(parts)-1] {
+			node = node.childDir(dir)
+		}
+		node.Children = append(node.Children, &explorerNode{Name: parts[len(parts)-1], File: &files[i]})
+	}
+	sortExplorer(root)
+	return root.Children
+}
+
+// childDir returns the existing directory child called name, creating it on
+// first use so sibling files share one node.
+func (n *explorerNode) childDir(name string) *explorerNode {
+	for _, c := range n.Children {
+		if c.File == nil && c.Name == name {
+			return c
+		}
+	}
+	c := &explorerNode{Name: name}
+	n.Children = append(n.Children, c)
+	return c
+}
+
+func sortExplorer(n *explorerNode) {
+	sort.SliceStable(n.Children, func(i, j int) bool {
+		a, b := n.Children[i], n.Children[j]
+		if (a.File == nil) != (b.File == nil) {
+			return a.File == nil
+		}
+		return a.Name < b.Name
+	})
+	for _, c := range n.Children {
+		if c.File == nil {
+			sortExplorer(c)
+		}
+	}
+}
+
 // commentKey addresses a diff line for anchoring comments: side is "new"
 // for added/context lines and "old" for removed ones, matching how
 // positions resolve when publishing.
@@ -75,7 +134,8 @@ func commentKey(path, side string, line int) string {
 
 // buildDiffFiles parses and highlights every file diff and attaches the
 // anchored GitLab discussions plus this session's pending manual comments.
-func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, pending []review.Finding) []diffFile {
+// With split set, each file also gets its side-by-side row pairing.
+func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, pending []review.Finding, split bool) []diffFile {
 	anchored := anchorComments(discussions, pending)
 	files := make([]diffFile, 0, len(diffs))
 	for i, fd := range diffs {
@@ -89,6 +149,9 @@ func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, 
 		f.Lines = parseDiffLines(fd, anchored)
 		for _, l := range f.Lines {
 			f.Comments += len(l.Comments)
+		}
+		if split {
+			f.Rows = splitLines(f.Lines)
 		}
 		files = append(files, f)
 	}
@@ -187,6 +250,69 @@ func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineComment) []
 		}
 	}
 	return lines
+}
+
+// splitCell is one side of a side-by-side diff row; Kind "" renders as the
+// empty filler opposite an unpaired addition or deletion.
+type splitCell struct {
+	Kind     string // add | del | ctx | ""
+	Num      int    // old line on the left, new line on the right
+	HTML     template.HTML
+	Comments []inlineComment
+}
+
+// splitRow is one row of the side-by-side layout: a hunk header spanning
+// both sides, or an old/new cell pair.
+type splitRow struct {
+	Hunk        template.HTML // non-empty: header row, Left/Right unused
+	Left, Right splitCell
+}
+
+// Comments merges both sides' threads; they render full-width underneath.
+func (r splitRow) Comments() []inlineComment {
+	if len(r.Left.Comments) == 0 {
+		return r.Right.Comments
+	}
+	return append(append([]inlineComment{}, r.Left.Comments...), r.Right.Comments...)
+}
+
+// splitLines pairs a unified diff's lines side by side: context on both
+// sides, and each run of deletions aligned row-by-row against the run of
+// additions that follows it, the shorter side padded with empty cells.
+func splitLines(lines []diffLine) []splitRow {
+	var rows []splitRow
+	for i := 0; i < len(lines); {
+		switch l := lines[i]; l.Kind {
+		case "hunk":
+			rows = append(rows, splitRow{Hunk: l.HTML})
+			i++
+		case "ctx":
+			rows = append(rows, splitRow{
+				Left:  splitCell{Kind: "ctx", Num: l.Old, HTML: l.HTML},
+				Right: splitCell{Kind: "ctx", Num: l.New, HTML: l.HTML, Comments: l.Comments},
+			})
+			i++
+		default:
+			var dels, adds []diffLine
+			for ; i < len(lines) && lines[i].Kind == "del"; i++ {
+				dels = append(dels, lines[i])
+			}
+			for ; i < len(lines) && lines[i].Kind == "add"; i++ {
+				adds = append(adds, lines[i])
+			}
+			for j := range max(len(dels), len(adds)) {
+				var row splitRow
+				if j < len(dels) {
+					row.Left = splitCell{Kind: "del", Num: dels[j].Old, HTML: dels[j].HTML, Comments: dels[j].Comments}
+				}
+				if j < len(adds) {
+					row.Right = splitCell{Kind: "add", Num: adds[j].New, HTML: adds[j].HTML, Comments: adds[j].Comments}
+				}
+				rows = append(rows, row)
+			}
+		}
+	}
+	return rows
 }
 
 // parseHunkHeader extracts starting line numbers from "@@ -a,b +c,d @@".

@@ -174,7 +174,20 @@ pre.prose.summary { border-left: 3px solid var(--accent); padding-left: 0.75rem;
   font-size: 13px;
 }
 .filetree li a:hover { background: var(--bg-hover); text-decoration: none; }
-.filetree .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; flex: 1; }
+.filetree .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.filetree ul ul { padding-left: 0.8rem; }
+.filetree summary {
+  cursor: pointer;
+  color: var(--fg-subtle);
+  font-size: 13px;
+  padding: 0.1rem 0.25rem;
+  border-radius: 4px;
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filetree summary:hover { background: var(--bg-hover); }
 
 .fstatus { font-family: var(--mono); font-weight: 700; }
 .fstatus-added { color: var(--ok); }
@@ -221,6 +234,16 @@ table.diff tr.add { background: var(--add-bg); }
 table.diff tr.del { background: var(--del-bg); }
 table.diff tr.hunk { background: var(--hunk-bg); color: var(--accent); }
 table.diff.excerpt { margin: 0.5rem 0; border: 1px solid var(--border); border-radius: 6px; }
+
+/* split (side-by-side) layout: colouring is per cell, not per row */
+table.diff.split { table-layout: fixed; }
+table.diff.split td.code { width: 49%; }
+table.diff.split td.add { background: var(--add-bg); }
+table.diff.split td.del { background: var(--del-bg); }
+table.diff.split td.ln { min-width: 2.5em; width: 3em; }
+table.diff.split tr.line td:nth-child(3) { border-right: 1px solid var(--border); }
+
+.view-toggle { font-size: 13px; margin: 0.75rem 0 0; }
 
 .add-comment {
   visibility: hidden;

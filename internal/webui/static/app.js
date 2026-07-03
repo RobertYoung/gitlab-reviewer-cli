@@ -60,9 +60,16 @@
       const frag = tmpl.content.cloneNode(true);
       const tr = frag.querySelector("tr");
       const form = frag.querySelector("form");
-      form.querySelector('[name="file"]').value = row.dataset.file || "";
-      form.querySelector('[name="old"]').value = row.dataset.old || "";
-      form.querySelector('[name="new"]').value = row.dataset.new || "";
+      // Split-view buttons carry their own side's anchor; unified rows
+      // carry it on the row.
+      const src = btn.dataset.file !== undefined ? btn.dataset : row.dataset;
+      form.querySelector('[name="file"]').value = src.file || "";
+      form.querySelector('[name="old"]').value = src.old || "";
+      form.querySelector('[name="new"]').value = src.new || "";
+      // The form spans the code columns whatever the table layout.
+      const tds = tr.querySelectorAll("td");
+      tds[0].colSpan = row.cells.length === 6 ? 2 : 3;
+      tds[1].colSpan = row.cells.length === 6 ? 4 : 1;
       row.after(tr);
       open = tr;
       tr.querySelector("textarea").focus();

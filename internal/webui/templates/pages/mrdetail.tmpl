@@ -6,6 +6,10 @@
   <p class="subtle">{{$c.Detail.Ref}} · {{$c.Detail.Author}} · {{$c.Detail.SourceBranch}} → {{$c.Detail.TargetBranch}} · updated {{reltime $c.Detail.UpdatedAt}} · {{$c.Detail.State}}</p>
 
   {{if $c.RebaseWarning}}<p class="warning">⚠ {{$c.RebaseWarning}}</p>{{end}}
+  {{with $c.Approvals}}
+    {{if .ApprovedBy}}<p class="ok">✓ Approved by {{join .ApprovedBy ", "}}</p>
+    {{else if .ApprovalsRequired}}<p class="subtle">{{.ApprovalsLeft}} of {{.ApprovalsRequired}} required approval(s) outstanding</p>{{end}}
+  {{end}}
 
   <div class="actions">
     <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
@@ -16,6 +20,20 @@
     </form>
     <a class="button" href="{{$c.Nav.HistoryURL}}">Past reviews</a>
     {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
+    {{if and $c.Approvals $c.Approvals.UserCanApprove}}
+    <form method="post" action="{{$c.Nav.ApproveURL}}">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
+      {{if $c.Approvals.UserHasApproved}}
+      <input type="hidden" name="action" value="unapprove">
+      <button type="submit" class="button">Unapprove</button>
+      {{else}}
+      <input type="hidden" name="sha" value="{{$c.Detail.HeadSHA}}">
+      <button type="submit" class="button ok">✓ Approve</button>
+      {{end}}
+    </form>
+    {{end}}
   </div>
 
   {{if $c.Detail.Description}}
