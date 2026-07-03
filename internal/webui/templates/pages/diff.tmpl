@@ -40,6 +40,12 @@
       {{$file := .}}
       {{if $c.Split}}
       <table class="diff split">
+        {{/* fixed layout sizes columns from the first row, which is usually a
+             colspan'd hunk header — pin the widths with cols instead */}}
+        <colgroup>
+          <col class="c-ln"><col class="c-gutter"><col class="c-code">
+          <col class="c-ln"><col class="c-gutter"><col class="c-code">
+        </colgroup>
         {{range .Rows}}
         {{if .Hunk}}
         <tr class="hunk"><td class="ln"></td><td class="gutter"></td><td class="code" colspan="4">{{.Hunk}}</td></tr>
