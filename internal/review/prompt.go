@@ -90,28 +90,68 @@ func BuildUserPrompt(req Request) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\nThe diff under review follows. Each hunk header shows old and new line\nnumbers; report line numbers consistent with these headers.\n")
-	for _, d := range req.Diffs {
-		fmt.Fprintf(&b, "\n--- a/%s\n+++ b/%s\n", d.OldPath, d.NewPath)
-		b.WriteString(strings.TrimSuffix(d.Diff, "\n"))
-		b.WriteString("\n")
+	if len(req.Diffs) > 0 {
+		b.WriteString("\nThe diff under review follows. Each hunk header shows old and new line\nnumbers; report line numbers consistent with these headers.\n")
+		for _, d := range req.Diffs {
+			fmt.Fprintf(&b, "\n--- a/%s\n+++ b/%s\n", d.OldPath, d.NewPath)
+			b.WriteString(strings.TrimSuffix(d.Diff, "\n"))
+			b.WriteString("\n")
+		}
 	}
 
-	if len(req.Truncated) > 0 {
-		b.WriteString("\nThe following changed files were NOT included in the diff above (excluded or over the size budget). Read them directly if relevant:\n")
-		for _, f := range req.Truncated {
+	if len(req.DiffFiles) > 0 {
+		b.WriteString("\nThe diffs for the following changed files were too large to include inline.\nEach full diff has been written to a file inside the checkout; Read the diff\nfile and review these changes with the same rules as the inline diff:\n")
+		for _, f := range req.DiffFiles {
+			fmt.Fprintf(&b, "- %s: diff at %s\n", f.Path, f.DiffPath)
+		}
+	}
+
+	if len(req.Unavailable) > 0 {
+		b.WriteString("\nThe following files also changed in this MR, but GitLab could not provide\ntheir diffs (too large). The checkout is at the MR head commit; Read them\ndirectly if relevant:\n")
+		for _, f := range req.Unavailable {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
+
+	if len(req.Excluded) > 0 {
+		b.WriteString("\nThe following changed files are excluded from review by configuration\n(lockfiles, vendored or generated code). Ignore them unless other changes\ndepend on them:\n")
+		for _, f := range req.Excluded {
 			fmt.Fprintf(&b, "- %s\n", f)
 		}
 	}
 	return b.String()
 }
 
+// SkipReason says why a changed file was left out of the inline diff.
+type SkipReason int
+
+const (
+	// SkipExcluded: matched a review.exclude glob or GitLab marked the file
+	// as generated. Deliberate filtering, not information loss.
+	SkipExcluded SkipReason = iota
+	// SkipOverBudget: the file's diff alone exceeds the whole max_diff_kb
+	// budget. The diff content is available and can be provided on disk.
+	SkipOverBudget
+	// SkipUnavailable: GitLab returned no diff content (too_large); only the
+	// head state of the file is visible to the reviewer.
+	SkipUnavailable
+)
+
+// SkippedDiff is one changed file left out of the inline diff.
+type SkippedDiff struct {
+	Path    string
+	OldPath string
+	Reason  SkipReason
+	Diff    string // populated for SkipOverBudget so the diff can go on disk
+}
+
 // ChunkDiffs filters the diffs sent to the model and splits them into
-// review passes: excluded and generated files are dropped entirely, and the
-// rest is packed (in original order) into chunks of at most maxKB each so
-// oversized MRs become several passes instead of a truncated one. Files
-// individually larger than the whole budget are skipped.
-func ChunkDiffs(diffs []gitlabx.FileDiff, exclude []string, maxKB int) (chunks [][]gitlabx.FileDiff, skipped []string) {
+// review passes: excluded and generated files are dropped, and the rest is
+// packed (in original order) into chunks of at most maxKB each so oversized
+// MRs become several passes instead of a truncated one. Files individually
+// larger than the whole budget are returned as SkipOverBudget with their
+// diff content, so the caller can supply them out of band.
+func ChunkDiffs(diffs []gitlabx.FileDiff, exclude []string, maxKB int) (chunks [][]gitlabx.FileDiff, skipped []SkippedDiff) {
 	budget := maxKB * 1024
 
 	var current []gitlabx.FileDiff
@@ -124,15 +164,18 @@ func ChunkDiffs(diffs []gitlabx.FileDiff, exclude []string, maxKB int) (chunks [
 		}
 	}
 	for _, d := range diffs {
-		if d.GeneratedFile || d.TooLarge || excluded(d.NewPath, exclude) {
-			skipped = append(skipped, d.NewPath)
+		switch {
+		case d.GeneratedFile || excluded(d.NewPath, exclude):
+			skipped = append(skipped, SkippedDiff{Path: d.NewPath, OldPath: d.OldPath, Reason: SkipExcluded})
+			continue
+		case d.TooLarge:
+			skipped = append(skipped, SkippedDiff{Path: d.NewPath, OldPath: d.OldPath, Reason: SkipUnavailable})
+			continue
+		case len(d.Diff) > budget:
+			skipped = append(skipped, SkippedDiff{Path: d.NewPath, OldPath: d.OldPath, Reason: SkipOverBudget, Diff: d.Diff})
 			continue
 		}
 		size := len(d.Diff)
-		if size > budget {
-			skipped = append(skipped, d.NewPath)
-			continue
-		}
 		if spent+size > budget {
 			flush()
 		}

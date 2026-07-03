@@ -34,9 +34,28 @@ func TestChunkDiffs(t *testing.T) {
 	if len(chunks[1]) != 1 || chunks[1][0].NewPath != "c.go" {
 		t.Errorf("chunk 1: %v", paths(chunks[1]))
 	}
-	want := []string{"vendor/dep.go", "gen.go", "huge.bin"}
+	want := []SkippedDiff{
+		{Path: "vendor/dep.go", Reason: SkipExcluded},
+		{Path: "gen.go", Reason: SkipExcluded},
+		{Path: "huge.bin", Reason: SkipOverBudget},
+	}
 	if len(skipped) != len(want) {
-		t.Errorf("skipped = %v, want %v", skipped, want)
+		t.Fatalf("skipped = %v, want %v", skipped, want)
+	}
+	for i, w := range want {
+		if skipped[i].Path != w.Path || skipped[i].Reason != w.Reason {
+			t.Errorf("skipped[%d] = {%s %d}, want {%s %d}", i, skipped[i].Path, skipped[i].Reason, w.Path, w.Reason)
+		}
+	}
+	if skipped[2].Diff == "" {
+		t.Error("over-budget skip must carry its diff content")
+	}
+}
+
+func TestChunkDiffsUnavailable(t *testing.T) {
+	_, skipped := ChunkDiffs([]gitlabx.FileDiff{{NewPath: "big.go", TooLarge: true}, diffOfSize("a.go", 1)}, nil, 256)
+	if len(skipped) != 1 || skipped[0].Reason != SkipUnavailable {
+		t.Errorf("skipped = %v, want big.go as SkipUnavailable", skipped)
 	}
 }
 
@@ -100,7 +119,9 @@ func TestBuildUserPromptShape(t *testing.T) {
 		Diffs:        []gitlabx.FileDiff{{OldPath: "c.go", NewPath: "c.go", Diff: line}},
 		Commits:      []gitlabx.Commit{{ShortID: "abc1234", Title: "feat: cache", Message: "feat: cache\n\nAvoids recompute."}},
 		Template:     "## What\n<!-- describe the change -->",
-		Truncated:    []string{"vendor/big.go"},
+		Excluded:     []string{"vendor/big.go"},
+		DiffFiles:    []DiffFile{{Path: "huge.go", DiffPath: ".review-diffs/001-huge.go.diff"}},
+		Unavailable:  []string{"massive.sql"},
 		Instructions: "Focus on concurrency.",
 		Categories:   []Category{"bug", "security"},
 	}
@@ -114,7 +135,9 @@ func TestBuildUserPromptShape(t *testing.T) {
 		"- bug:", "- security:",
 		"Focus on concurrency.",
 		"--- a/c.go", "+++ b/c.go",
-		"vendor/big.go",
+		"vendor/big.go", "excluded from review by configuration",
+		"huge.go: diff at .review-diffs/001-huge.go.diff",
+		"massive.sql", "could not provide",
 	} {
 		if !strings.Contains(p, want) {
 			t.Errorf("prompt missing %q", want)
