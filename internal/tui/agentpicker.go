@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
@@ -17,8 +18,9 @@ import (
 // agentPicker is the multi-select screen shown before a review run: which
 // review agents should this scan use. Enter swaps it for the run screen;
 // the selection is remembered per project. Agents shipped in the repo's
-// .gitlab-reviewer/agents/ are fetched over the API in the background and
-// merged in when they arrive.
+// .gitlab-reviewer/agents/ are loaded in the background — from the local
+// clone in path/root checkout modes (covering untracked definitions),
+// otherwise fetched over the API — and merged in when they arrive.
 type agentPicker struct {
 	deps    Deps
 	detail  gitlabx.MRDetail
@@ -43,6 +45,9 @@ type agentPicker struct {
 	initial      []string
 	allByDefault bool
 	fetching     bool
+	// localRepo is the user's local clone (path/root checkout modes); when
+	// set, repo agents are read from it instead of the API.
+	localRepo string
 }
 
 // projectAgentsMsg delivers the catalog extended with repo-fetched agents,
@@ -70,11 +75,14 @@ func newAgentPicker(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff
 		checked:      map[string]bool{},
 	}
 
+	cfg := deps.cfgFor(detail.ProjectPath)
+	p.localRepo, _ = checkout.LocalRepoDir(cfg.Checkout, cfg.GitLab.BaseURL, detail.ProjectPath)
+
 	// Initial checks: last selection for this project, then the configured
 	// default (which the categories alias already folds into).
 	p.initial = deps.Selection.Load(detail.ProjectPath)
 	if len(p.initial) == 0 {
-		p.initial = deps.cfgFor(detail.ProjectPath).Review.Agents
+		p.initial = cfg.Review.Agents
 	}
 	known := map[string]bool{}
 	for _, a := range p.agents {
@@ -103,17 +111,22 @@ func (p *agentPicker) Hints() string {
 }
 
 func (p *agentPicker) Init() tea.Cmd {
-	if p.detail.HeadSHA == "" {
+	if p.localRepo == "" && p.detail.HeadSHA == "" {
 		return nil
 	}
 	p.fetching = true
 	return p.fetchProjectAgents
 }
 
-// fetchProjectAgents pulls .gitlab-reviewer/agents/ from the repository at
-// the MR head over the API, so repo-shipped agents are toggleable before
-// any checkout exists. Cached per (project, sha) in deps.ProjectAgents.
+// fetchProjectAgents loads .gitlab-reviewer/agents/ so repo-shipped agents
+// are toggleable before any checkout exists: straight from the local clone
+// in path/root checkout modes (which also covers definitions kept
+// untracked), otherwise over the API at the MR head, cached per
+// (project, sha) in deps.ProjectAgents.
 func (p *agentPicker) fetchProjectAgents() tea.Msg {
+	if p.localRepo != "" {
+		return projectAgentsMsg{catalog: p.base.WithProject(p.localRepo)}
+	}
 	cat, err := p.deps.ProjectAgents.Extend(p.base, p.detail.ProjectPath, p.detail.HeadSHA, func() ([]agents.File, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
