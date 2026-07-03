@@ -104,8 +104,10 @@ unset is an **error**, not a silent fallback to the shared token.
 
 Notes:
 
-- **`review.models`** feeds the `gitlab-reviewer models` command and shell
-  completion of `--model`: when unset, a curated list of common Claude
+- **`review.models`** feeds the `gitlab-reviewer models` command, shell
+  completion of `--model`, and the TUI picker's per-agent model chooser
+  (press `m` — see [Review Agents](Review-Agents.md#per-agent-model)):
+  when unset, a curated list of common Claude
   models for the selected provider is offered (aliases like
   `opus`/`sonnet`/`haiku` plus full IDs for `anthropic`; cross-region
   inference-profile IDs for `bedrock`). It is suggestions, not

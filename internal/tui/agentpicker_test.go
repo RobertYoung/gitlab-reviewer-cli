@@ -79,6 +79,70 @@ func TestAgentPickerTogglesAndStarts(t *testing.T) {
 	}
 }
 
+func TestAgentPickerModelChooser(t *testing.T) {
+	detail, diffs, _ := reviewFixture()
+	deps := pickerDeps(t)
+	deps.Cfg.Review.Agents = []string{"bug", "security"}
+	// A short, known model list so we can navigate to a specific entry.
+	deps.Cfg.Review.Models = []string{"opus", "sonnet"}
+
+	var screen Screen = newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	p := screen.(*agentPicker)
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+
+	// Cursor is on "bug". Open the chooser: choices are "" then the models.
+	screen, _ = screen.Update(key("m"))
+	if !p.choosing {
+		t.Fatal("m must open the model chooser")
+	}
+	if !strings.Contains(p.View(), "model for bug") {
+		t.Errorf("chooser view missing header:\n%s", p.View())
+	}
+	// Step to "sonnet" (index 2: "", opus, sonnet) and choose it.
+	screen, _ = screen.Update(key("j"))
+	screen, _ = screen.Update(key("j"))
+	screen, _ = screen.Update(key("enter"))
+	if p.choosing {
+		t.Fatal("enter must close the chooser")
+	}
+	if p.models["bug"] != "sonnet" {
+		t.Fatalf("bug model = %q, want sonnet", p.models["bug"])
+	}
+	// The row now shows the chosen model.
+	if !strings.Contains(p.View(), "sonnet") {
+		t.Errorf("view missing chosen model:\n%s", p.View())
+	}
+
+	// Start the review: the choice reaches the run and is remembered.
+	_, cmd := screen.Update(key("enter"))
+	msg, ok := cmd().(popScreenMsg)
+	if !ok {
+		t.Fatalf("enter must swap screens, got %T", cmd())
+	}
+	run := msg.replacement.(*reviewRun)
+	if run.agentModels["bug"] != "sonnet" {
+		t.Fatalf("run models: %v", run.agentModels)
+	}
+	if got := deps.Selection.LoadModels(detail.ProjectPath); got["bug"] != "sonnet" {
+		t.Fatalf("models not remembered: %v", got)
+	}
+
+	// Reopening on the same agent clears the pick via the "(default)" entry.
+	p2 := newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	if p2.models["bug"] != "sonnet" {
+		t.Fatalf("remembered model not seeded: %v", p2.models)
+	}
+	var s2 Screen = p2
+	s2, _ = s2.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	s2, _ = s2.Update(key("m")) // opens with cursor on the current pick
+	s2, _ = s2.Update(key("k")) // up toward the "(default)" entry
+	s2, _ = s2.Update(key("k"))
+	_, _ = s2.Update(key("enter"))
+	if _, ok := p2.models["bug"]; ok {
+		t.Fatalf("default entry must clear the override: %v", p2.models)
+	}
+}
+
 func TestAgentPickerPrefersRememberedSelection(t *testing.T) {
 	detail, diffs, _ := reviewFixture()
 	deps := pickerDeps(t)

@@ -41,6 +41,11 @@ type Runner struct {
 	// AgentNames is the agent selection for this run (from the picker or
 	// --agents); empty falls back to cfg.Review.Agents.
 	AgentNames []string
+	// AgentModels overrides the review model per agent (agent name → model
+	// ID), from the picker. It takes precedence over an agent's frontmatter
+	// model and cfg.Review.Model; agents absent from the map keep those
+	// defaults. Nil applies no overrides.
+	AgentModels map[string]string
 	// Logs stores the run's progress log; nil disables storing.
 	Logs *runlog.Store
 	// Results stores the run's result record; nil disables storing.
@@ -160,6 +165,9 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 			req.AgentName = a.Name
 			req.AgentPrompt = agentPrompt(a)
 			req.Categories = append([]review.Category(nil), a.Categories...)
+			if m := r.modelFor(a); m != "" {
+				req.Model = m
+			}
 			tasks = append(tasks, task{agent: a, req: req, pass: i + 1})
 		}
 	}
@@ -295,6 +303,17 @@ func (r Runner) resolveAgents(detail gitlabx.MRDetail, repoPath string, emit fun
 		}
 	}
 	return selected, nil
+}
+
+// modelFor resolves the review model an agent runs with: the per-agent
+// override from AgentModels (picker choice) first, then the agent's
+// frontmatter model. Empty means neither applies, leaving req.Model at the
+// cfg.Review.Model default BuildRequests set.
+func (r Runner) modelFor(a agents.Agent) string {
+	if m := r.AgentModels[a.Name]; m != "" {
+		return m
+	}
+	return a.Model
 }
 
 // agentPrompt renders the agent's focus prompt, folding in the optional

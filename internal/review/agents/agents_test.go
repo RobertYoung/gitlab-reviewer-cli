@@ -2,6 +2,7 @@ package agents
 
 import (
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -55,6 +56,7 @@ name: sql-migrations
 description: Reviews schema migrations for lock hazards
 categories: [bug, performance]
 severity: major
+model: opus
 ---
 Look for long-running locks in migrations.
 `)
@@ -70,6 +72,9 @@ Look for long-running locks in migrations.
 	}
 	if a.Severity != review.SeverityMajor {
 		t.Errorf("severity: %v", a.Severity)
+	}
+	if a.Model != "opus" {
+		t.Errorf("model: %q", a.Model)
 	}
 	if a.Prompt != "Look for long-running locks in migrations." {
 		t.Errorf("prompt: %q", a.Prompt)
@@ -231,6 +236,64 @@ func TestSelectionStoreRoundTrip(t *testing.T) {
 	nilStore.Save("x", []string{"bug"}) // must not panic
 	if got := nilStore.Load("x"); got != nil {
 		t.Fatalf("nil store load: %v", got)
+	}
+}
+
+func TestSelectionStoreModels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "agent-selection.json")
+	s := NewSelectionStore(path)
+
+	// Names and models coexist per project without clobbering each other.
+	s.Save("group/proj", []string{"bug", "security"})
+	s.SaveModels("group/proj", map[string]string{"security": "opus"})
+	if got := s.Load("group/proj"); !slices.Equal(got, []string{"bug", "security"}) {
+		t.Fatalf("names lost after SaveModels: %v", got)
+	}
+	if got := s.LoadModels("group/proj"); !maps.Equal(got, map[string]string{"security": "opus"}) {
+		t.Fatalf("models: %v", got)
+	}
+
+	// Re-saving names preserves the stored models.
+	s.Save("group/proj", []string{"bug"})
+	if got := s.LoadModels("group/proj"); !maps.Equal(got, map[string]string{"security": "opus"}) {
+		t.Fatalf("models lost after Save: %v", got)
+	}
+
+	// Empty entries are dropped, and an empty map clears the overrides.
+	s.SaveModels("group/proj", map[string]string{"bug": "", "docs": "haiku"})
+	if got := s.LoadModels("group/proj"); !maps.Equal(got, map[string]string{"docs": "haiku"}) {
+		t.Fatalf("empty model not dropped: %v", got)
+	}
+	s.SaveModels("group/proj", nil)
+	if got := s.LoadModels("group/proj"); got != nil {
+		t.Fatalf("models not cleared: %v", got)
+	}
+
+	var nilStore *SelectionStore
+	nilStore.SaveModels("x", map[string]string{"bug": "opus"}) // must not panic
+	if got := nilStore.LoadModels("x"); got != nil {
+		t.Fatalf("nil store load models: %v", got)
+	}
+}
+
+// TestSelectionStoreLegacyFormat reads a state file written before per-agent
+// models existed, when a project mapped straight to an array of names.
+func TestSelectionStoreLegacyFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sel.json")
+	if err := os.WriteFile(path, []byte(`{"group/proj": ["bug", "docs"]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := NewSelectionStore(path)
+	if got := s.Load("group/proj"); !slices.Equal(got, []string{"bug", "docs"}) {
+		t.Fatalf("legacy names: %v", got)
+	}
+	if got := s.LoadModels("group/proj"); got != nil {
+		t.Fatalf("legacy models: %v", got)
+	}
+	// Adding a model migrates the record to the new form transparently.
+	s.SaveModels("group/proj", map[string]string{"bug": "opus"})
+	if got := s.Load("group/proj"); !slices.Equal(got, []string{"bug", "docs"}) {
+		t.Fatalf("names after migration: %v", got)
 	}
 }
 

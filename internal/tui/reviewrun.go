@@ -50,6 +50,9 @@ type reviewRun struct {
 	// agentNames is the agent selection from the picker; empty falls back
 	// to the configured default inside the runner.
 	agentNames []string
+	// agentModels overrides the review model per agent (agent name → model
+	// ID), from the picker; nil applies no overrides.
+	agentModels map[string]string
 
 	ch      chan tea.Msg
 	cancel  context.CancelFunc
@@ -63,7 +66,7 @@ type reviewRun struct {
 	height  int
 }
 
-func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState), agentNames []string) *reviewRun {
+func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState), agentNames []string, agentModels map[string]string) *reviewRun {
 	return &reviewRun{
 		deps:         deps,
 		detail:       detail,
@@ -72,6 +75,7 @@ func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, 
 		manual:       manual,
 		manualReport: manualReport,
 		agentNames:   agentNames,
+		agentModels:  agentModels,
 		cfg:          deps.cfgFor(detail.ProjectPath),
 		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
@@ -112,14 +116,15 @@ func (s *reviewRun) wait() tea.Cmd {
 func (s *reviewRun) run(ctx context.Context) {
 	iid := s.detail.IID
 	r := runner.Runner{
-		Cfg:        s.cfg,
-		Svc:        s.deps.Svc,
-		Reviewer:   s.deps.Reviewer,
-		Checkout:   s.deps.Checkout,
-		Catalog:    s.deps.Agents,
-		AgentNames: s.agentNames,
-		Logs:       s.deps.Logs,
-		Results:    s.deps.Results,
+		Cfg:         s.cfg,
+		Svc:         s.deps.Svc,
+		Reviewer:    s.deps.Reviewer,
+		Checkout:    s.deps.Checkout,
+		Catalog:     s.deps.Agents,
+		AgentNames:  s.agentNames,
+		AgentModels: s.agentModels,
+		Logs:        s.deps.Logs,
+		Results:     s.deps.Results,
 	}
 	out := r.Run(ctx, s.detail, s.diffs, s.commits, func(text string) {
 		s.ch <- reviewEventMsg{iid: iid, text: text}
