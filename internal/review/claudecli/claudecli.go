@@ -10,10 +10,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -38,8 +40,12 @@ type Backend struct {
 	// UseAgents grants the Task tool so the reviewer can delegate to
 	// Claude Code subagents; write/exec tools stay denied throughout.
 	UseAgents bool
-	Bedrock   config.Bedrock
-	ExtraEnv  map[string]string
+	// MCPServers are passed to claude as an inline --mcp-config and
+	// allow-listed by name; --strict-mcp-config stays on so nothing
+	// beyond this explicit grant is ever loaded.
+	MCPServers map[string]config.MCPServer
+	Bedrock    config.Bedrock
+	ExtraEnv   map[string]string
 	// DumpDir receives raw stream transcripts for debugging; empty disables.
 	DumpDir string
 	// LookupEnv defaults to os.LookupEnv; injectable for tests.
@@ -54,6 +60,7 @@ func New(cfg config.Config, dumpDir string) *Backend {
 		Model:      cfg.Review.Model,
 		Bare:       cfg.Review.Bare,
 		UseAgents:  cfg.Review.UseAgents,
+		MCPServers: cfg.Review.MCPServers,
 		Bedrock:    cfg.Bedrock,
 		ExtraEnv:   cfg.Review.Env,
 		DumpDir:    dumpDir,
@@ -256,7 +263,16 @@ func (b *Backend) toolArgs() (tools, disallowed string) {
 	return "Read,Grep,Glob", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Agent"
 }
 
-// buildArgs assembles the headless review invocation.
+// buildArgs assembles the headless review invocation. Configured MCP
+// servers are the one deliberate network exception to the read-only
+// sandbox: loaded from an inline --mcp-config and allow-listed explicitly
+// (dontAsk mode denies MCP tools that lack an allow rule).
+//
+// An explicit --tools list strips MCP tools no matter how they are named
+// in it (verified against claude 2.1.199), so MCP-enabled runs omit the
+// flag and enforce read-only purely through permissions: an extended deny
+// list, plus dontAsk denying every remaining tool that is not read-only
+// or MCP-allow-listed.
 func (b *Backend) buildArgs(req review.Request) []string {
 	tools, disallowed := b.toolArgs()
 	args := []string{
@@ -264,12 +280,24 @@ func (b *Backend) buildArgs(req review.Request) []string {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--json-schema", review.OutputSchema,
-		"--tools", tools,
+	}
+	if len(b.MCPServers) > 0 {
+		// No --tools: the full built-in set loads, so deny the tools that
+		// --tools used to leave out and that carry any capability.
+		disallowed += ",SlashCommand,Skill"
+		args = append(args,
+			"--mcp-config", mcpConfigJSON(b.MCPServers),
+			"--allowedTools", strings.Join(mcpAllowRules(b.MCPServers), ","),
+		)
+	} else {
+		args = append(args, "--tools", tools)
+	}
+	args = append(args,
 		"--permission-mode", "dontAsk",
 		"--disallowedTools", disallowed,
 		"--strict-mcp-config",
 		"--append-system-prompt", review.FullSystemPrompt(req),
-	}
+	)
 	if b.Model != "" {
 		args = append(args, "--model", b.Model)
 	}
@@ -284,7 +312,8 @@ func (b *Backend) buildArgs(req review.Request) []string {
 
 // buildChatArgs assembles the headless chat invocation: same read-only
 // sandbox as reviews, conversational persona instead of the finding schema,
-// and session resume on follow-up turns.
+// and session resume on follow-up turns. Chats never get MCP servers —
+// review.mcp_servers is a grant to the review session only.
 func (b *Backend) buildChatArgs(req review.ChatRequest) []string {
 	tools, disallowed := b.toolArgs()
 	args := []string{
@@ -307,6 +336,53 @@ func (b *Backend) buildChatArgs(req review.ChatRequest) []string {
 		args = append(args, "--bare")
 	}
 	return args
+}
+
+// mcpConfigJSON renders the configured servers in claude's .mcp.json shape
+// for the inline --mcp-config argument.
+func mcpConfigJSON(servers map[string]config.MCPServer) string {
+	type serverJSON struct {
+		Type    string            `json:"type"`
+		Command string            `json:"command,omitempty"`
+		Args    []string          `json:"args,omitempty"`
+		Env     map[string]string `json:"env,omitempty"`
+		URL     string            `json:"url,omitempty"`
+		Headers map[string]string `json:"headers,omitempty"`
+	}
+	out := make(map[string]serverJSON, len(servers))
+	for name, s := range servers {
+		typ := s.Type
+		if typ == "" {
+			typ = "stdio"
+			if s.URL != "" {
+				typ = "http"
+			}
+		}
+		out[name] = serverJSON{
+			Type: typ, Command: s.Command, Args: s.Args, Env: s.Env,
+			URL: s.URL, Headers: s.Headers,
+		}
+	}
+	data, _ := json.Marshal(map[string]any{"mcpServers": out}) // static struct: cannot fail
+	return string(data)
+}
+
+// mcpAllowRules builds the permission allow rules for the configured
+// servers: the whole server by default, or just its named tools when the
+// definition narrows them.
+func mcpAllowRules(servers map[string]config.MCPServer) []string {
+	var rules []string
+	for _, name := range slices.Sorted(maps.Keys(servers)) {
+		s := servers[name]
+		if len(s.Tools) == 0 {
+			rules = append(rules, "mcp__"+name)
+			continue
+		}
+		for _, tool := range s.Tools {
+			rules = append(rules, "mcp__"+name+"__"+tool)
+		}
+	}
+	return rules
 }
 
 // parseFinal extracts findings from the result event, degrading gracefully:

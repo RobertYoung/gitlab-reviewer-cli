@@ -339,5 +339,34 @@ func (r *Result) Redacted() map[string]any {
 			}
 		}
 	}
+	redactMCPHeaders(raw)
 	return raw
+}
+
+// redactMCPHeaders masks MCP server header values everywhere they can
+// appear (review.mcp_servers and per-project projects.*.review.mcp_servers):
+// remote-server headers routinely carry bearer tokens.
+func redactMCPHeaders(raw map[string]any) {
+	var walk func(node map[string]any)
+	walk = func(node map[string]any) {
+		if servers, ok := node["mcp_servers"].(map[string]any); ok {
+			for _, s := range servers {
+				sm, ok := s.(map[string]any)
+				if !ok {
+					continue
+				}
+				if headers, ok := sm["headers"].(map[string]any); ok {
+					for k := range headers {
+						headers[k] = "[redacted]"
+					}
+				}
+			}
+		}
+		for _, v := range node {
+			if m, ok := v.(map[string]any); ok {
+				walk(m)
+			}
+		}
+	}
+	walk(raw)
 }

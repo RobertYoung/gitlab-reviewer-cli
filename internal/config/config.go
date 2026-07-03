@@ -4,7 +4,9 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 	"text/template"
@@ -83,6 +85,32 @@ type Review struct {
 	// stay denied for the whole session, subagents included.
 	UseAgents bool              `koanf:"use_agents"`
 	Env       map[string]string `koanf:"env"`
+	// MCPServers grants the review session named MCP servers, keyed by
+	// server name (settings file only — no flag or env form; per-project
+	// sections may add servers for just that project). Off by default:
+	// a server that reaches the network reopens the exfiltration channel
+	// the review sandbox exists to close, so grant only servers whose
+	// egress you trust and keep the grant per-project where possible.
+	MCPServers map[string]MCPServer `koanf:"mcp_servers"`
+}
+
+// MCPServer is one MCP server definition in review.mcp_servers, mirroring
+// Claude Code's .mcp.json entries: a local stdio server (command/args/env)
+// or a remote http/sse one (url/headers).
+type MCPServer struct {
+	// Type is stdio, http, or sse; empty infers stdio when command is set
+	// and http when url is set.
+	Type    string            `koanf:"type"`
+	Command string            `koanf:"command"`
+	Args    []string          `koanf:"args"`
+	Env     map[string]string `koanf:"env"`
+	URL     string            `koanf:"url"`
+	// Headers are sent with every request to a remote server; values are
+	// treated as secrets and redacted from `config show`.
+	Headers map[string]string `koanf:"headers"`
+	// Tools narrows the allowed tools of this server to the named ones;
+	// empty allows all of the server's tools.
+	Tools []string `koanf:"tools"`
 }
 
 type Bedrock struct {
@@ -242,6 +270,7 @@ func (c Config) Validate() error {
 	if c.Review.Provider == "bedrock" && c.Bedrock.Region == "" {
 		errs = append(errs, fmt.Errorf("bedrock.region: required when review.provider is bedrock (or set AWS_REGION)"))
 	}
+	errs = append(errs, validateMCPServers(c.Review.MCPServers)...)
 
 	if err := oneOf("checkout.mode", c.Checkout.Mode, "clone", "path", "root"); err != nil {
 		errs = append(errs, err)
@@ -287,6 +316,55 @@ func (c Config) Validate() error {
 		msgs[i] = "  - " + e.Error()
 	}
 	return fmt.Errorf("invalid configuration:\n%s", strings.Join(msgs, "\n"))
+}
+
+// mcpNameRe restricts server names: they become tool-name prefixes
+// (mcp__<name>__<tool>) and permission rules, so no separators or spaces.
+var mcpNameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+func validateMCPServers(servers map[string]MCPServer) []error {
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(servers)) {
+		s := servers[name]
+		field := "review.mcp_servers." + name
+		if !mcpNameRe.MatchString(name) {
+			errs = append(errs, fmt.Errorf("review.mcp_servers: name %q must contain only letters, digits, - and _", name))
+		}
+		hasCmd, hasURL := s.Command != "", s.URL != ""
+		switch {
+		case !hasCmd && !hasURL:
+			errs = append(errs, fmt.Errorf("%s: needs command (stdio server) or url (remote server)", field))
+		case hasCmd && hasURL:
+			errs = append(errs, fmt.Errorf("%s: command and url are mutually exclusive", field))
+		}
+		switch s.Type {
+		case "":
+			// inferred from command/url
+		case "stdio":
+			if !hasCmd {
+				errs = append(errs, fmt.Errorf("%s: type stdio requires command", field))
+			}
+		case "http", "sse":
+			if !hasURL {
+				errs = append(errs, fmt.Errorf("%s: type %s requires url", field, s.Type))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("%s.type: %q is not one of stdio|http|sse", field, s.Type))
+		}
+		if hasURL {
+			if u, err := url.Parse(s.URL); err != nil || u.Scheme == "" || u.Host == "" {
+				errs = append(errs, fmt.Errorf("%s.url: %q is not a valid URL", field, s.URL))
+			}
+		}
+		for _, k := range slices.Sorted(maps.Keys(s.Env)) {
+			// Same rule as review.env: GitLab credentials never reach the
+			// model subprocess, and MCP servers run inside it.
+			if strings.HasPrefix(k, "GITLAB") {
+				errs = append(errs, fmt.Errorf("%s.env: %s is not allowed (GitLab credentials must not reach the review subprocess)", field, k))
+			}
+		}
+	}
+	return errs
 }
 
 // ValidateGitLab checks settings required to talk to GitLab at all. An
