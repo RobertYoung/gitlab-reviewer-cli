@@ -46,6 +46,8 @@ code { font-family: var(--mono); }
 .topbar .version { color: var(--fg-subtle); font-size: 12px; }
 
 main { padding: 1rem; max-width: 1400px; margin: 0 auto; }
+/* the diff page gets the full window width — split mode needs it */
+main:has(.diff-layout) { max-width: none; }
 
 .panel {
   background: var(--bg-panel);
@@ -229,18 +231,24 @@ table.diff td.ln {
   border-right: 1px solid var(--border);
 }
 table.diff td.gutter { width: 1.4em; padding: 0; text-align: center; user-select: none; }
-table.diff td.code { white-space: pre-wrap; word-break: break-all; width: 99%; }
+table.diff td.code { white-space: pre-wrap; overflow-wrap: anywhere; width: 99%; }
 table.diff tr.add { background: var(--add-bg); }
 table.diff tr.del { background: var(--del-bg); }
 table.diff tr.hunk { background: var(--hunk-bg); color: var(--accent); }
 table.diff.excerpt { margin: 0.5rem 0; border: 1px solid var(--border); border-radius: 6px; }
 
-/* split (side-by-side) layout: colouring is per cell, not per row */
+/* split (side-by-side) layout: colouring is per cell, not per row.
+   Column widths come from the <colgroup> — with table-layout: fixed they
+   would otherwise be derived from the first row, usually a colspan'd hunk
+   header, which collapses the code columns. */
 table.diff.split { table-layout: fixed; }
-table.diff.split td.code { width: 49%; }
+table.diff.split col.c-ln { width: 3.5em; }
+table.diff.split col.c-gutter { width: 1.6em; }
+table.diff.split td.code { width: auto; }
 table.diff.split td.add { background: var(--add-bg); }
 table.diff.split td.del { background: var(--del-bg); }
-table.diff.split td.ln { min-width: 2.5em; width: 3em; }
+/* filler cell opposite an unpaired add/del */
+table.diff.split tr.line td.code:not(.add):not(.del):not(.ctx) { background: rgba(110, 118, 129, 0.08); }
 table.diff.split tr.line td:nth-child(3) { border-right: 1px solid var(--border); }
 
 .view-toggle { font-size: 13px; margin: 0.75rem 0 0; }
