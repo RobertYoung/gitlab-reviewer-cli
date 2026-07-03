@@ -37,6 +37,12 @@ type Service interface {
 	// template (including group-inherited ones), or "" if none is set.
 	GetMergeRequestTemplate(ctx context.Context, project any) (string, error)
 
+	// ListDirectoryFiles returns the files directly under dir in the
+	// project repository at ref, with contents. A missing directory is not
+	// an error: it returns nil. Used to offer repo-shipped review agents in
+	// the pickers before any checkout exists.
+	ListDirectoryFiles(ctx context.Context, project any, dir, ref string) ([]RepoFile, error)
+
 	// ListDiscussions returns every discussion thread on the MR
 	// (paginating internally).
 	ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error)

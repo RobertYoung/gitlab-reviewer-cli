@@ -57,14 +57,51 @@ func loadDir(dir string, source Source) (agents []Agent, warnings []string) {
 	return agents, warnings
 }
 
-// loadFile parses one agent definition: optional YAML frontmatter between
-// --- lines, then the prompt body. Without frontmatter the whole file is
-// the prompt and the name comes from the file stem.
+// File is one agent definition fetched from a repository (e.g. over the
+// GitLab API), named by its base file name within the agents directory.
+type File struct {
+	Name    string
+	Content []byte
+}
+
+// LoadProjectFiles parses fetched project agent definitions with the same
+// skip-and-warn and duplicate handling as loadDir. Non-.md files are
+// ignored, matching the on-disk loader.
+func LoadProjectFiles(files []File) (agents []Agent, warnings []string) {
+	seen := map[string]string{} // name → file, for duplicate detection
+	for _, f := range files {
+		if !strings.HasSuffix(f.Name, ".md") {
+			continue
+		}
+		ref := ProjectAgentsDir + "/" + f.Name
+		a, err := parse(f.Content, ref, SourceProject)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("agents: skipping %s: %v", ref, err))
+			continue
+		}
+		if prev, dup := seen[a.Name]; dup {
+			warnings = append(warnings, fmt.Sprintf("agents: skipping %s: duplicate name %q (already defined by %s)", ref, a.Name, prev))
+			continue
+		}
+		seen[a.Name] = ref
+		agents = append(agents, a)
+	}
+	return agents, warnings
+}
+
+// loadFile parses one agent definition file from disk.
 func loadFile(path string, source Source) (Agent, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // path comes from listing the configured agents directories
 	if err != nil {
 		return Agent{}, err
 	}
+	return parse(raw, path, source)
+}
+
+// parse builds an Agent from one definition: optional YAML frontmatter
+// between --- lines, then the prompt body. Without frontmatter the whole
+// file is the prompt and the name comes from the file stem of path.
+func parse(raw []byte, path string, source Source) (Agent, error) {
 	fm, body, err := splitFrontmatter(string(raw))
 	if err != nil {
 		return Agent{}, err

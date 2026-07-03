@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 )
 
@@ -97,5 +98,87 @@ func TestAgentPickerView(t *testing.T) {
 		if !strings.Contains(v, want) {
 			t.Errorf("view missing %q:\n%s", want, v)
 		}
+	}
+}
+
+// repoAgentFixture is a picker whose MR head ships one repo agent named
+// "sql-migrations"; deliver() runs the Init fetch and applies its message.
+func repoAgentPicker(t *testing.T, deps Deps) (*agentPicker, func()) {
+	t.Helper()
+	detail, diffs, _ := reviewFixture()
+	detail.HeadSHA = "h"
+	p := newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	cmd := p.Init()
+	if cmd == nil {
+		t.Fatal("Init must fetch repo agents when the MR has a head SHA")
+	}
+	return p, func() {
+		t.Helper()
+		msg, ok := cmd().(projectAgentsMsg)
+		if !ok {
+			t.Fatalf("fetch must yield projectAgentsMsg")
+		}
+		if _, c := p.Update(msg); c != nil {
+			t.Fatalf("merge must not emit commands")
+		}
+	}
+}
+
+func repoAgentService() *fakeService {
+	return &fakeService{repoFiles: []gitlabx.RepoFile{{
+		Name:    "sql.md",
+		Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
+	}}}
+}
+
+func TestAgentPickerMergesRepoAgents(t *testing.T) {
+	deps := testDeps(repoAgentService())
+	deps.Agents = agents.NewCatalog("")
+	deps.Selection = agents.NewSelectionStore(filepath.Join(t.TempDir(), "sel.json"))
+
+	p, deliver := repoAgentPicker(t, deps)
+	before := len(p.agents)
+	deliver()
+
+	if len(p.agents) != before+1 || p.agents[len(p.agents)-1].Name != "sql-migrations" {
+		t.Fatalf("repo agent not merged: %v", p.selected())
+	}
+	// With no remembered selection everything is checked, repo agents too.
+	if !p.checked["sql-migrations"] {
+		t.Errorf("repo agent not checked by default: %v", p.selected())
+	}
+	p.width = 100
+	if !strings.Contains(p.View(), "(project)") {
+		t.Errorf("view missing the project badge:\n%s", p.View())
+	}
+}
+
+func TestAgentPickerRepoAgentsRespectRememberedSelection(t *testing.T) {
+	deps := testDeps(repoAgentService())
+	deps.Agents = agents.NewCatalog("")
+	deps.Selection = agents.NewSelectionStore(filepath.Join(t.TempDir(), "sel.json"))
+	deps.Selection.Save("group/app", []string{"docs"})
+
+	p, deliver := repoAgentPicker(t, deps)
+	deliver()
+
+	if got := p.selected(); !slices.Equal(got, []string{"docs"}) {
+		t.Fatalf("selection: %v", got)
+	}
+
+	// A remembered selection naming the repo agent checks it on arrival.
+	deps.Selection.Save("group/app", []string{"docs", "sql-migrations"})
+	p, deliver = repoAgentPicker(t, deps)
+	deliver()
+	if got := p.selected(); !slices.Equal(got, []string{"docs", "sql-migrations"}) {
+		t.Fatalf("selection: %v", got)
+	}
+}
+
+func TestAgentPickerSkipsFetchWithoutHeadSHA(t *testing.T) {
+	detail, diffs, _ := reviewFixture()
+	p := newAgentPicker(pickerDeps(t), *detail, diffs, nil, nil, nil)
+	if cmd := p.Init(); cmd != nil {
+		t.Fatal("no head SHA must skip the repo agents fetch")
 	}
 }
