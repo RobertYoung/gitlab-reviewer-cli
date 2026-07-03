@@ -182,6 +182,32 @@ func (r *fakeReviewer) Review(_ context.Context, _ review.Request, onEvent func(
 	return &res, nil
 }
 
+// recordingReviewer behaves like fakeReviewer but captures every request,
+// so tests can assert what the runner passed (e.g. the per-agent model).
+type recordingReviewer struct {
+	result *review.Result
+	mu     sync.Mutex
+	reqs   []review.Request
+}
+
+func (r *recordingReviewer) Name() string                         { return "fake" }
+func (r *recordingReviewer) CheckAvailable(context.Context) error { return nil }
+func (r *recordingReviewer) Review(_ context.Context, req review.Request, onEvent func(review.Event)) (*review.Result, error) {
+	r.mu.Lock()
+	r.reqs = append(r.reqs, req)
+	r.mu.Unlock()
+	onEvent(review.Event{Kind: review.EventStatus, Text: "thinking…"})
+	res := *r.result
+	res.Findings = append([]review.Finding(nil), r.result.Findings...)
+	return &res, nil
+}
+
+func (r *recordingReviewer) requests() []review.Request {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]review.Request(nil), r.reqs...)
+}
+
 func intp(n int) *int { return &n }
 
 func defaultResult() *review.Result {
@@ -223,12 +249,13 @@ func newTestEnv(t *testing.T, rev review.Reviewer, cfgOpts ...func(*config.Confi
 		MakeDeps: func(string) (*Deps, error) {
 			chatter, _ := rev.(review.Chatter)
 			return &Deps{
-				Cfg:      cfg,
-				Svc:      svc,
-				Reviewer: rev,
-				Chatter:  chatter,
-				Logs:     runlog.NewStore(dir),
-				Results:  resultstore.NewStore(dir),
+				Cfg:       cfg,
+				Svc:       svc,
+				Reviewer:  rev,
+				Chatter:   chatter,
+				Selection: agents.NewSelectionStore(filepath.Join(dir, "selection.json")),
+				Logs:      runlog.NewStore(dir),
+				Results:   resultstore.NewStore(dir),
 				Checkout: func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
 					return t.TempDir(), func(context.Context) error { return nil }, nil
 				},
@@ -657,6 +684,53 @@ func waitRun(t *testing.T, s *Server) *reviewRun {
 	}
 	t.Fatal("review run did not finish")
 	return nil
+}
+
+func TestParseAgentModels(t *testing.T) {
+	form := url.Values{
+		"agents":         {"bug", "security"},
+		"model:bug":      {"opus"},
+		"model:security": {""},      // "(default)" — dropped
+		"model:docs":     {"haiku"}, // not selected — ignored
+		"project":        {"group/app"},
+	}
+	got := parseAgentModels(form, []string{"bug", "security"})
+	if len(got) != 1 || got["bug"] != "opus" {
+		t.Fatalf("parseAgentModels: %v", got)
+	}
+}
+
+func TestReviewPerAgentModel(t *testing.T) {
+	rev := &recordingReviewer{result: defaultResult()}
+	env := newTestEnv(t, rev)
+
+	// The detail page renders a per-agent model dropdown.
+	_, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if !strings.Contains(body, `name="model:bug"`) {
+		t.Fatalf("no per-agent model dropdown:\n%s", body)
+	}
+
+	// Start a review choosing opus for the bug agent (the model for the
+	// unchecked security agent is ignored).
+	code, _ := env.post("/i/default/mr/review", mrForm(url.Values{
+		"agents": {"bug"}, "model:bug": {"opus"}, "model:security": {"sonnet"},
+	}))
+	if code != http.StatusOK {
+		t.Fatalf("review start: %d", code)
+	}
+	waitRun(t, env.srv)
+
+	// The choice reached the reviewer as the request model.
+	reqs := rev.requests()
+	if len(reqs) != 1 || reqs[0].Model != "opus" {
+		t.Fatalf("agent model not applied: %+v", reqs)
+	}
+
+	// It is remembered: reopening the form pre-selects it.
+	_, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if !strings.Contains(body, `<option value="opus" selected>opus</option>`) {
+		t.Fatalf("remembered model not pre-selected:\n%s", body)
+	}
 }
 
 func TestReviewRunToFindingsToPublish(t *testing.T) {

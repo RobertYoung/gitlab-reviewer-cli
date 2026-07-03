@@ -220,20 +220,36 @@ type agentOption struct {
 	Description string
 	Source      string // "" for builtins; "user"/"project" shown as a badge
 	Checked     bool
+	// Models is the per-agent model dropdown: a "(default)" entry (empty
+	// value) followed by the configured model list, with the current pick
+	// pre-selected. Mirrors the TUI picker's "m" chooser.
+	Models []agentModelOption
 }
 
-// agentOptions builds the review form's agent checkboxes: the catalog
-// (including any repo-fetched project agents) in display order, pre-checked
-// from the remembered selection or the configured default.
+// agentModelOption is one entry in an agent's model dropdown.
+type agentModelOption struct {
+	Value    string // model ID; "" is the "(default)" entry
+	Label    string
+	Selected bool
+}
+
+// agentOptions builds the review form's agent checkboxes and per-agent model
+// dropdowns: the catalog (including any repo-fetched project agents) in
+// display order, pre-checked and pre-selected from the remembered selection
+// and model picks, or the configured default.
 func agentOptions(d *Deps, cat *agents.Catalog, projectPath string) []agentOption {
+	cfg := d.cfgFor(projectPath)
 	selected := d.Selection.Load(projectPath)
 	if len(selected) == 0 {
-		selected = d.cfgFor(projectPath).Review.Agents
+		selected = cfg.Review.Agents
 	}
 	checked := map[string]bool{}
 	for _, name := range selected {
 		checked[name] = true
 	}
+	models := d.Selection.LoadModels(projectPath)
+	modelChoices := cfg.ModelOptions()
+
 	all := cat.All()
 	opts := make([]agentOption, 0, len(all))
 	anyChecked := false
@@ -242,6 +258,7 @@ func agentOptions(d *Deps, cat *agents.Catalog, projectPath string) []agentOptio
 		if a.Source != agents.SourceBuiltin {
 			opt.Source = string(a.Source)
 		}
+		opt.Models = modelMenu(modelChoices, models[a.Name], a.Model)
 		anyChecked = anyChecked || opt.Checked
 		opts = append(opts, opt)
 	}
@@ -251,6 +268,27 @@ func agentOptions(d *Deps, cat *agents.Catalog, projectPath string) []agentOptio
 		}
 	}
 	return opts
+}
+
+// modelMenu builds one agent's model dropdown. The "(default)" entry falls
+// back to the agent's frontmatter model (surfaced in its label when set),
+// then review.model; pick is the remembered override, pre-selected and kept
+// as an entry even when it is not in the configured list.
+func modelMenu(choices []string, pick, frontmatter string) []agentModelOption {
+	defaultLabel := "(default)"
+	if frontmatter != "" {
+		defaultLabel = "default (" + frontmatter + ")"
+	}
+	menu := []agentModelOption{{Value: "", Label: defaultLabel, Selected: pick == ""}}
+	found := false
+	for _, m := range choices {
+		menu = append(menu, agentModelOption{Value: m, Label: m, Selected: m == pick})
+		found = found || m == pick
+	}
+	if pick != "" && !found {
+		menu = append(menu, agentModelOption{Value: pick, Label: pick, Selected: true})
+	}
+	return menu
 }
 
 // handleMRDetail shows one MR: metadata, description, commits, pending

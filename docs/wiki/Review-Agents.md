@@ -31,12 +31,17 @@ deprecated `review.categories` key still works as an alias.
 
 ### Per-agent model
 
-Each agent can run on a different model. In the TUI picker, press `m` on
-the highlighted agent to choose one from the configured list
+Each agent can run on a different model, chosen from the configured list
 ([`review.models`](Configuration-Reference.md#review), or the built-in
-suggestions — the same list `gitlab-reviewer models` prints). The chosen
-model shows on the agent's row and is remembered per project alongside the
-selection; the `(default)` entry clears the override.
+suggestions — the same list `gitlab-reviewer models` prints):
+
+- In the **TUI** picker, press `m` on the highlighted agent; the chosen
+  model shows on the agent's row, and the `(default)` entry clears it.
+- In the **GUI**, the *Run AI review* form shows a model dropdown next to
+  each agent.
+
+Either way the pick is remembered per project alongside the agent
+selection, and both frontends share it.
 
 The model an agent runs with resolves in this order:
 

@@ -144,7 +144,7 @@ func (g *runRegistry) get(id string) *reviewRun {
 // screen: run through the shared runner, then fold the diff view's pending
 // manual comments and the auto-accept threshold into the stored record so
 // the findings page opens with the same curation state the TUI would show.
-func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, agentNames []string) *reviewRun {
+func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, agentNames []string, agentModels map[string]string) *reviewRun {
 	s.runs.mu.Lock()
 	s.runs.seq++
 	run := &reviewRun{
@@ -170,14 +170,15 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 	go func() {
 		defer cancel()
 		r := runner.Runner{
-			Cfg:        cfg,
-			Svc:        d.Svc,
-			Reviewer:   d.Reviewer,
-			Checkout:   d.Checkout,
-			Catalog:    d.Agents,
-			AgentNames: agentNames,
-			Logs:       d.Logs,
-			Results:    d.Results,
+			Cfg:         cfg,
+			Svc:         d.Svc,
+			Reviewer:    d.Reviewer,
+			Checkout:    d.Checkout,
+			Catalog:     d.Agents,
+			AgentNames:  agentNames,
+			AgentModels: agentModels,
+			Logs:        d.Logs,
+			Results:     d.Results,
 		}
 		out := r.Run(ctx, detail, diffs, commits, run.append)
 
