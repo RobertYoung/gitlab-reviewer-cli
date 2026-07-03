@@ -352,3 +352,54 @@ func TestRunSeverityHintInPrompt(t *testing.T) {
 		t.Errorf("prompt = %q", got)
 	}
 }
+
+func TestRunLocalCloneAgents(t *testing.T) {
+	rev := &fakeReviewer{}
+	root := t.TempDir()
+	localDir := filepath.Join(root, "gitlab.example.com", "group", "app", ".gitlab-reviewer", "agents")
+	if err := os.MkdirAll(localDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// An untracked local-only agent, plus a local version of an agent that
+	// is also committed at the MR head.
+	if err := os.WriteFile(filepath.Join(localDir, "local-only.md"), []byte("Untracked local agent.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localDir, "shared.md"), []byte("Stale local prompt.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	worktree := t.TempDir()
+	wtDir := filepath.Join(worktree, ".gitlab-reviewer", "agents")
+	if err := os.MkdirAll(wtDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtDir, "shared.md"), []byte("Committed prompt.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := fanOutRunner(t, rev, nil)
+	r.Cfg.Checkout.Mode = "root"
+	r.Cfg.Checkout.Root = root
+	r.Cfg.GitLab.BaseURL = "https://gitlab.example.com"
+	r.AgentNames = []string{"local-only", "shared"}
+	r.Checkout = func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
+		return worktree, func(context.Context) error { return nil }, nil
+	}
+
+	detail := gitlabx.MRDetail{MRSummary: gitlabx.MRSummary{ProjectPath: "group/app"}}
+	out := r.Run(context.Background(), detail, smallDiffs(), nil, nil)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	prompts := map[string]string{}
+	for _, req := range rev.reqs {
+		prompts[req.AgentName] = req.AgentPrompt
+	}
+	if !strings.Contains(prompts["local-only"], "Untracked local agent.") {
+		t.Errorf("local-only prompt: %q", prompts["local-only"])
+	}
+	// The committed definition at the MR head shadows the local one.
+	if !strings.Contains(prompts["shared"], "Committed prompt.") {
+		t.Errorf("shared prompt: %q", prompts["shared"])
+	}
+}

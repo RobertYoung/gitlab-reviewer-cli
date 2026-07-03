@@ -20,11 +20,13 @@ What a scan checks is decided by **review agents**
 plus user (`~/.config/gitlab-reviewer/agents/`) and repo
 (`.gitlab-reviewer/agents/`) definitions, merged into a catalog with
 repo > user > builtin shadowing. Each frontend shows a per-scan agent
-picker; repo definitions are fetched over the GitLab API at the MR head
-SHA (cached per project + sha in `agents.RemoteCache`), so they are
-toggleable before any checkout exists. The runner turns the selection into
-one reviewer invocation per agent per diff chunk, run under a concurrency
-cap, and stamps each finding with the agent that produced it.
+picker; repo definitions are read from the user's local clone in path/root
+checkout modes (covering untracked definitions), or fetched over the
+GitLab API at the MR head SHA in clone mode (cached per project + sha in
+`agents.RemoteCache`) — either way they are toggleable before any checkout
+exists. The runner turns the selection into one reviewer invocation per
+agent per diff chunk, run under a concurrency cap, and stamps each finding
+with the agent that produced it.
 
 ## Component diagram
 

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -180,5 +181,42 @@ func TestAgentPickerSkipsFetchWithoutHeadSHA(t *testing.T) {
 	p := newAgentPicker(pickerDeps(t), *detail, diffs, nil, nil, nil)
 	if cmd := p.Init(); cmd != nil {
 		t.Fatal("no head SHA must skip the repo agents fetch")
+	}
+}
+
+func TestAgentPickerReadsLocalClone(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "gitlab.example.com", "group", "app", ".gitlab-reviewer", "agents")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local-only.md"), []byte("Untracked local agent.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	deps := pickerDeps(t)
+	deps.Cfg.Checkout.Mode = "root"
+	deps.Cfg.Checkout.Root = root
+	deps.Cfg.GitLab.BaseURL = "https://gitlab.example.com"
+
+	// No head SHA needed: the local clone is read from disk.
+	detail, diffs, _ := reviewFixture()
+	p := newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	cmd := p.Init()
+	if cmd == nil {
+		t.Fatal("Init must load agents from the local clone")
+	}
+	msg, ok := cmd().(projectAgentsMsg)
+	if !ok || msg.err != nil {
+		t.Fatalf("local load: %T %v", msg, msg.err)
+	}
+	if _, c := p.Update(msg); c != nil {
+		t.Fatal("merge must not emit commands")
+	}
+	if p.agents[len(p.agents)-1].Name != "local-only" {
+		t.Fatalf("local agent not merged: %v", p.selected())
+	}
+	if !p.checked["local-only"] {
+		t.Errorf("local agent not checked by default: %v", p.selected())
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -862,5 +864,35 @@ func TestMRDetailSurvivesRepoAgentFetchFailure(t *testing.T) {
 	}
 	if !strings.Contains(body, "could not fetch repo agents") {
 		t.Fatalf("fetch failure must surface as a warning:\n%s", body)
+	}
+}
+
+func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "gitlab.example.com", "group", "app", ".gitlab-reviewer", "agents")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local-only.md"), []byte("Untracked local agent.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.Checkout.Mode = "root"
+		c.Checkout.Root = root
+		c.GitLab.BaseURL = "https://gitlab.example.com"
+	})
+	// The API must not be consulted in root mode.
+	env.svc.repoFilesErr = errors.New("API must not be used")
+
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	if !strings.Contains(body, `name="agents" value="local-only"`) {
+		t.Fatalf("form missing the local clone agent:\n%s", body)
+	}
+	if strings.Contains(body, "could not fetch repo agents") {
+		t.Fatalf("root mode must not hit the API:\n%s", body)
 	}
 }
