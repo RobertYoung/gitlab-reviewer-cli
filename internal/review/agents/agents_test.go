@@ -1,0 +1,207 @@
+package agents
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+)
+
+func TestBuiltinsCoverAllCategories(t *testing.T) {
+	b := Builtins()
+	if len(b) != len(review.AllCategories) {
+		t.Fatalf("got %d builtins, want %d", len(b), len(review.AllCategories))
+	}
+	for i, c := range review.AllCategories {
+		a := b[i]
+		if a.Name != string(c) {
+			t.Errorf("builtin %d: name %q, want %q", i, a.Name, c)
+		}
+		if a.Source != SourceBuiltin {
+			t.Errorf("builtin %q: source %q", a.Name, a.Source)
+		}
+		if !slices.Equal(a.Categories, []review.Category{c}) {
+			t.Errorf("builtin %q: categories %v", a.Name, a.Categories)
+		}
+		if a.Prompt == "" || a.Description == "" {
+			t.Errorf("builtin %q: empty prompt or description", a.Name)
+		}
+		if !strings.Contains(a.Prompt, builtinGuidance[c]) {
+			t.Errorf("builtin %q: prompt missing guidance text", a.Name)
+		}
+	}
+}
+
+func writeAgent(t *testing.T, dir, name, content string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestLoadFileFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	path := writeAgent(t, dir, "migrations.md", `---
+name: sql-migrations
+description: Reviews schema migrations for lock hazards
+categories: [bug, performance]
+severity: major
+---
+Look for long-running locks in migrations.
+`)
+	a, err := loadFile(path, SourceUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Name != "sql-migrations" || a.Description == "" {
+		t.Errorf("unexpected agent: %+v", a)
+	}
+	if !slices.Equal(a.Categories, []review.Category{"bug", "performance"}) {
+		t.Errorf("categories: %v", a.Categories)
+	}
+	if a.Severity != review.SeverityMajor {
+		t.Errorf("severity: %v", a.Severity)
+	}
+	if a.Prompt != "Look for long-running locks in migrations." {
+		t.Errorf("prompt: %q", a.Prompt)
+	}
+}
+
+func TestLoadFileNoFrontmatter(t *testing.T) {
+	dir := t.TempDir()
+	path := writeAgent(t, dir, "api-compat.md", "Flag breaking API changes.\n")
+	a, err := loadFile(path, SourceProject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Name != "api-compat" {
+		t.Errorf("name from stem: %q", a.Name)
+	}
+	if !slices.Equal(a.Categories, review.AllCategories) {
+		t.Errorf("default categories: %v", a.Categories)
+	}
+}
+
+func TestLoadFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"empty.md":    "---\nname: empty\n---\n",
+		"badcat.md":   "---\ncategories: [nonsense]\n---\nprompt\n",
+		"badsev.md":   "---\nseverity: fatal\n---\nprompt\n",
+		"Bad Name.md": "prompt\n",
+		"unterm.md":   "---\nname: unterm\nprompt\n",
+	}
+	for file, content := range cases {
+		path := writeAgent(t, dir, file, content)
+		if _, err := loadFile(path, SourceUser); err == nil {
+			t.Errorf("%s: expected error", file)
+		}
+	}
+}
+
+func TestLoadDirSkipsInvalidWithWarnings(t *testing.T) {
+	dir := t.TempDir()
+	writeAgent(t, dir, "good.md", "A valid prompt.\n")
+	writeAgent(t, dir, "bad.md", "---\ncategories: [nope]\n---\nprompt\n")
+	writeAgent(t, dir, "notes.txt", "ignored\n")
+	agents, warns := loadDir(dir, SourceUser)
+	if len(agents) != 1 || agents[0].Name != "good" {
+		t.Fatalf("agents: %+v", agents)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "bad.md") {
+		t.Fatalf("warnings: %v", warns)
+	}
+}
+
+func TestLoadDirDuplicateName(t *testing.T) {
+	dir := t.TempDir()
+	writeAgent(t, dir, "a.md", "---\nname: same\n---\nfirst\n")
+	writeAgent(t, dir, "b.md", "---\nname: same\n---\nsecond\n")
+	agents, warns := loadDir(dir, SourceUser)
+	if len(agents) != 1 {
+		t.Fatalf("agents: %+v", agents)
+	}
+	if len(warns) != 1 || !strings.Contains(warns[0], "duplicate") {
+		t.Fatalf("warnings: %v", warns)
+	}
+}
+
+func TestLoadDirMissingIsNotError(t *testing.T) {
+	agents, warns := loadDir(filepath.Join(t.TempDir(), "nope"), SourceUser)
+	if len(agents) != 0 || len(warns) != 0 {
+		t.Fatalf("agents=%v warns=%v", agents, warns)
+	}
+}
+
+func TestCatalogShadowing(t *testing.T) {
+	userDir := t.TempDir()
+	// User agent shadows the builtin "security" and adds a new one.
+	writeAgent(t, userDir, "security.md", "---\ndescription: custom security\ncategories: [security]\n---\nMy security prompt.\n")
+	writeAgent(t, userDir, "extra.md", "Extra prompt.\n")
+
+	c := NewCatalog(userDir)
+	all := c.All()
+	// Order: builtins in place, then user extras.
+	if all[1].Name != "security" || all[1].Source != SourceUser {
+		t.Errorf("security slot: %+v", all[1])
+	}
+	if all[len(all)-1].Name != "extra" {
+		t.Errorf("last agent: %+v", all[len(all)-1])
+	}
+
+	// Project shadows user.
+	repo := t.TempDir()
+	writeAgent(t, filepath.Join(repo, ".gitlab-reviewer", "agents"), "security.md", "Project security prompt.\n")
+	pc := c.WithProject(repo)
+	if got := pc.All()[1]; got.Source != SourceProject {
+		t.Errorf("project shadowing: %+v", got)
+	}
+	// Original catalog untouched.
+	if got := c.All()[1]; got.Source != SourceUser {
+		t.Errorf("catalog mutated by WithProject: %+v", got)
+	}
+}
+
+func TestCatalogResolve(t *testing.T) {
+	c := NewCatalog("")
+	got, err := c.Resolve([]string{"security", "bug"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Catalog order, not selection order.
+	if len(got) != 2 || got[0].Name != "bug" || got[1].Name != "security" {
+		t.Fatalf("resolved: %+v", got)
+	}
+	if _, err := c.Resolve([]string{"bug", "nonsense"}); err == nil || !strings.Contains(err.Error(), "nonsense") {
+		t.Fatalf("expected unknown-agent error, got %v", err)
+	}
+	if _, err := c.Resolve(nil); err == nil {
+		t.Fatal("expected error for empty selection")
+	}
+}
+
+func TestSelectionStoreRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "agent-selection.json")
+	s := NewSelectionStore(path)
+	if got := s.Load("group/proj"); got != nil {
+		t.Fatalf("expected nil, got %v", got)
+	}
+	s.Save("group/proj", []string{"bug", "security"})
+	s.Save("other/proj", []string{"docs"})
+	if got := s.Load("group/proj"); !slices.Equal(got, []string{"bug", "security"}) {
+		t.Fatalf("got %v", got)
+	}
+	var nilStore *SelectionStore
+	nilStore.Save("x", []string{"bug"}) // must not panic
+	if got := nilStore.Load("x"); got != nil {
+		t.Fatalf("nil store load: %v", got)
+	}
+}

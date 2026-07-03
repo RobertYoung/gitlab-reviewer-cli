@@ -12,7 +12,8 @@ import (
 const AttributionFooter = "\n\n---\n*🤖 suggested by [gitlab-reviewer](https://github.com/RobertYoung/gitlab-reviewer-cli), reviewed and posted by a human*"
 
 // DefaultBodyTemplate is the built-in comment layout (publish.template).
-// Fields available to templates: severity, category, title, body, file.
+// Fields available to templates: severity, category, agent, title, body,
+// file.
 const DefaultBodyTemplate = "**[{{.severity}} · {{.category}}] {{.title}}**\n\n{{.body}}"
 
 var defaultBodyTmpl = template.Must(newBodyTemplate(DefaultBodyTemplate))
@@ -42,6 +43,7 @@ func (f Finding) templateData() map[string]any {
 	return map[string]any{
 		"severity": string(f.Severity),
 		"category": string(f.Category),
+		"agent":    f.Agent,
 		"title":    f.Title,
 		"body":     f.Body,
 		"file":     f.File,

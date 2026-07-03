@@ -58,17 +58,26 @@ type Instance struct {
 }
 
 type Review struct {
-	Provider         string        `koanf:"provider"` // anthropic | bedrock
-	Model            string        `koanf:"model"`
-	ClaudePath       string        `koanf:"claude_path"`
-	Timeout          time.Duration `koanf:"timeout"`
-	MaxBudgetUSD     float64       `koanf:"max_budget_usd"`
-	Categories       []string      `koanf:"categories"`
-	Instructions     string        `koanf:"instructions"`
-	InstructionsFile string        `koanf:"instructions_file"`
-	MaxDiffKB        int           `koanf:"max_diff_kb"`
-	Exclude          []string      `koanf:"exclude"`
-	Bare             bool          `koanf:"bare"`
+	Provider     string        `koanf:"provider"` // anthropic | bedrock
+	Model        string        `koanf:"model"`
+	ClaudePath   string        `koanf:"claude_path"`
+	Timeout      time.Duration `koanf:"timeout"`
+	MaxBudgetUSD float64       `koanf:"max_budget_usd"`
+	// Agents is the default agent selection for a review: builtin agent
+	// names (the category names) plus any custom agents by name. Empty
+	// falls back to the deprecated categories key, which defaults to all
+	// builtins.
+	Agents []string `koanf:"agents"`
+	// AgentConcurrency caps how many agent passes run at once.
+	AgentConcurrency int `koanf:"agent_concurrency"`
+	// Categories is deprecated: builtin agents subsumed it. It is kept as
+	// an alias for agents (each category name is a builtin agent).
+	Categories       []string `koanf:"categories"`
+	Instructions     string   `koanf:"instructions"`
+	InstructionsFile string   `koanf:"instructions_file"`
+	MaxDiffKB        int      `koanf:"max_diff_kb"`
+	Exclude          []string `koanf:"exclude"`
+	Bare             bool     `koanf:"bare"`
 	// UseAgents lets the reviewer delegate to Claude Code subagents
 	// (project .claude/agents plus user-level ones). Write/exec tools
 	// stay denied for the whole session, subagents included.
@@ -134,8 +143,12 @@ func Default() Config {
 			Provider:   "anthropic",
 			ClaudePath: "claude",
 			Timeout:    10 * time.Minute,
-			Categories: slices.Clone(Categories),
-			MaxDiffKB:  256,
+			// Agents deliberately has no default: the load-time finalize
+			// step falls back to categories, making the deprecated key a
+			// working alias without tracking which layer set it.
+			AgentConcurrency: 3,
+			Categories:       slices.Clone(Categories),
+			MaxDiffKB:        256,
 			Exclude: []string{
 				"**/go.sum", "**/package-lock.json", "**/yarn.lock", "**/pnpm-lock.yaml",
 				"**/Cargo.lock", "**/poetry.lock", "**/uv.lock", "**/Gemfile.lock",
@@ -219,6 +232,12 @@ func (c Config) Validate() error {
 		if err := oneOf("review.categories", cat, Categories...); err != nil {
 			errs = append(errs, err)
 		}
+	}
+	// review.agents entries are not validated here: custom agents are only
+	// discoverable once their definition files are loaded. Selection is
+	// validated when the agent catalog resolves it.
+	if c.Review.AgentConcurrency < 1 {
+		errs = append(errs, fmt.Errorf("review.agent_concurrency: must be at least 1, got %d", c.Review.AgentConcurrency))
 	}
 	if c.Review.Provider == "bedrock" && c.Bedrock.Region == "" {
 		errs = append(errs, fmt.Errorf("bedrock.region: required when review.provider is bedrock (or set AWS_REGION)"))

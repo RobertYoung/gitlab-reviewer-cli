@@ -14,6 +14,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
@@ -55,6 +56,8 @@ func newGUICmd(st *state) *cobra.Command {
 			}
 			logs := runlog.NewStore(reviewsDir)
 			results := resultstore.NewStore(reviewsDir)
+			catalog := agents.NewCatalog(config.DefaultAgentsDir())
+			selection := agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json"))
 
 			// Enforce the clone-cache budget in the background; the server
 			// must not wait on a filesystem walk.
@@ -89,11 +92,13 @@ func newGUICmd(st *state) *cobra.Command {
 						return nil, st.redactor.RedactError(err)
 					}
 					deps := &webui.Deps{
-						Cfg:      icfg,
-						Svc:      svc,
-						Reviewer: reviewer,
-						Logs:     logs,
-						Results:  results,
+						Cfg:       icfg,
+						Svc:       svc,
+						Reviewer:  reviewer,
+						Agents:    catalog,
+						Selection: selection,
+						Logs:      logs,
+						Results:   results,
 						Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 							co, err := manager.Ensure(ctx, mr, progress)
 							if err != nil {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
 )
 
@@ -207,6 +208,47 @@ type mrDetailContent struct {
 	Approvals     *gitlabx.Approvals // nil when the instance exposes none
 	RebaseWarning string
 	HasAccepted   bool
+	AgentOptions  []agentOption
+	AgentWarnings []string
+}
+
+// agentOption is one review agent offered on the run-review form.
+type agentOption struct {
+	Name        string
+	Description string
+	Source      string // "" for builtins; "user"/"project" shown as a badge
+	Checked     bool
+}
+
+// agentOptions builds the review form's agent checkboxes: the catalog in
+// display order, pre-checked from the remembered selection or the
+// configured default.
+func agentOptions(d *Deps, projectPath string) []agentOption {
+	selected := d.Selection.Load(projectPath)
+	if len(selected) == 0 {
+		selected = d.cfgFor(projectPath).Review.Agents
+	}
+	checked := map[string]bool{}
+	for _, name := range selected {
+		checked[name] = true
+	}
+	all := d.catalog().All()
+	opts := make([]agentOption, 0, len(all))
+	anyChecked := false
+	for _, a := range all {
+		opt := agentOption{Name: a.Name, Description: a.Description, Checked: checked[a.Name]}
+		if a.Source != agents.SourceBuiltin {
+			opt.Source = string(a.Source)
+		}
+		anyChecked = anyChecked || opt.Checked
+		opts = append(opts, opt)
+	}
+	if !anyChecked {
+		for i := range opts {
+			opts[i].Checked = true
+		}
+	}
+	return opts
 }
 
 // handleMRDetail shows one MR: metadata, description, commits, pending
@@ -228,11 +270,13 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 	pending := s.comments.list(mrKey(inst, project, iid))
 
 	content := mrDetailContent{
-		Nav:       newMRNav(inst, project, iid),
-		Detail:    detail,
-		Commits:   commits,
-		Pending:   pending,
-		Approvals: approvals,
+		Nav:           newMRNav(inst, project, iid),
+		Detail:        detail,
+		Commits:       commits,
+		Pending:       pending,
+		Approvals:     approvals,
+		AgentOptions:  agentOptions(d, detail.ProjectPath),
+		AgentWarnings: d.catalog().Warnings(),
 	}
 	for _, f := range pending {
 		if f.State == review.StateAccepted {

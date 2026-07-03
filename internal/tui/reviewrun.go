@@ -47,6 +47,9 @@ type reviewRun struct {
 	// manualReport keeps the diff view's copies in sync by ID.
 	manual       []review.Finding
 	manualReport func(id string, state review.FindingState)
+	// agentNames is the agent selection from the picker; empty falls back
+	// to the configured default inside the runner.
+	agentNames []string
 
 	ch      chan tea.Msg
 	cancel  context.CancelFunc
@@ -60,7 +63,7 @@ type reviewRun struct {
 	height  int
 }
 
-func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState)) *reviewRun {
+func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState), agentNames []string) *reviewRun {
 	return &reviewRun{
 		deps:         deps,
 		detail:       detail,
@@ -68,6 +71,7 @@ func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, 
 		commits:      commits,
 		manual:       manual,
 		manualReport: manualReport,
+		agentNames:   agentNames,
 		cfg:          deps.cfgFor(detail.ProjectPath),
 		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
@@ -108,12 +112,14 @@ func (s *reviewRun) wait() tea.Cmd {
 func (s *reviewRun) run(ctx context.Context) {
 	iid := s.detail.IID
 	r := runner.Runner{
-		Cfg:      s.cfg,
-		Svc:      s.deps.Svc,
-		Reviewer: s.deps.Reviewer,
-		Checkout: s.deps.Checkout,
-		Logs:     s.deps.Logs,
-		Results:  s.deps.Results,
+		Cfg:        s.cfg,
+		Svc:        s.deps.Svc,
+		Reviewer:   s.deps.Reviewer,
+		Checkout:   s.deps.Checkout,
+		Catalog:    s.deps.Agents,
+		AgentNames: s.agentNames,
+		Logs:       s.deps.Logs,
+		Results:    s.deps.Results,
 	}
 	out := r.Run(ctx, s.detail, s.diffs, s.commits, func(text string) {
 		s.ch <- reviewEventMsg{iid: iid, text: text}

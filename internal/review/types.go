@@ -100,12 +100,16 @@ type LineRef struct {
 // Finding is one suggested review comment. The json tags define the stored
 // form used by review/resultstore.
 type Finding struct {
-	ID         string       `json:"id"`
-	File       string       `json:"file,omitempty"`     // new path, repo-relative; empty on MR-level manual comments
-	OldFile    string       `json:"old_file,omitempty"` // as reported by the model for renames; advisory only
-	Line       LineRef      `json:"line,omitzero"`
-	Severity   Severity     `json:"severity,omitempty"`
-	Category   Category     `json:"category,omitempty"`
+	ID       string   `json:"id"`
+	File     string   `json:"file,omitempty"`     // new path, repo-relative; empty on MR-level manual comments
+	OldFile  string   `json:"old_file,omitempty"` // as reported by the model for renames; advisory only
+	Line     LineRef  `json:"line,omitzero"`
+	Severity Severity `json:"severity,omitempty"`
+	Category Category `json:"category,omitempty"`
+	// Agent names the review agent that produced the finding. Stamped by the
+	// runner, never reported by the model; empty on records from before
+	// agents existed and on manual comments.
+	Agent      string       `json:"agent,omitempty"`
 	Title      string       `json:"title,omitempty"`
 	Body       string       `json:"body"`                 // markdown, user-editable
 	Suggestion string       `json:"suggestion,omitempty"` // optional replacement for the flagged line
@@ -149,8 +153,14 @@ type Request struct {
 	Unavailable []string
 	// Instructions is extra prompt text: global then per-project.
 	Instructions string
-	// Categories to report on.
+	// Categories the running agent may label findings with.
 	Categories []Category
+	// AgentName identifies the review agent this request runs as; it is set
+	// by the runner when specialising a chunk request per selected agent.
+	AgentName string
+	// AgentPrompt is the agent's persona/focus text, appended to the shared
+	// system prompt by the backend.
+	AgentPrompt string
 
 	Model        string
 	Timeout      time.Duration
@@ -172,6 +182,9 @@ const (
 type Event struct {
 	Kind EventKind
 	Text string
+	// Agent is the review agent the event belongs to; empty for run-level
+	// events.
+	Agent string
 }
 
 // Result is a completed review.
@@ -182,6 +195,8 @@ type Result struct {
 	SessionID string
 	CostUSD   float64
 	Raw       []byte // raw output for drift debugging; persisted by the caller
+	// Agent names the review agent that produced this result, before merging.
+	Agent string
 }
 
 // Reviewer runs reviews. Implementations must be safe to reuse serially;

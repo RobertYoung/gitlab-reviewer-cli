@@ -152,6 +152,12 @@ pre.prose.summary { border-left: 3px solid var(--accent); padding-left: 0.75rem;
 .new-comment summary { cursor: pointer; color: var(--accent); }
 .new-comment form { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
 
+/* agent selection on the review form */
+.review-form { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.agent-select summary { cursor: pointer; color: var(--accent); font-size: 0.9rem; }
+.agent-select fieldset { border: 1px solid var(--border); border-radius: 6px; margin: 0.4rem 0 0; padding: 0.5rem 0.75rem; display: flex; flex-direction: column; gap: 0.25rem; }
+.agent-select label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; }
+
 /* diff view */
 .diff-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
 .filetree {

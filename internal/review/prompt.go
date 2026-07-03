@@ -40,16 +40,16 @@ Severity rubric:
   tests)
 - info: observations and polish (naming, docs, style)`
 
-var categoryGuidance = map[Category]string{
-	"bug":         "logic errors, race conditions, unhandled failure paths, off-by-one errors, broken edge cases",
-	"security":    "injection, authn/authz gaps, secrets in code, unsafe deserialisation, SSRF, path traversal",
-	"performance": "algorithmic complexity, N+1 queries, unbounded memory, missing caching where it clearly matters",
-	"docs":        "missing or stale documentation and comments for non-obvious public behaviour",
-	"style":       "readability, naming, idiomatic usage, dead code — only where it genuinely hurts maintainability",
-	"design":      "API shape, layering violations, error-handling strategy, extensibility problems",
+// FullSystemPrompt is the system prompt for one agent's pass: the shared
+// reviewer contract above, then the agent's own persona/focus text.
+func FullSystemPrompt(req Request) string {
+	if strings.TrimSpace(req.AgentPrompt) == "" {
+		return SystemPrompt
+	}
+	return SystemPrompt + "\n\n" + strings.TrimSpace(req.AgentPrompt)
 }
 
-// BuildUserPrompt renders the review request: MR metadata, category scope,
+// BuildUserPrompt renders the review request: MR metadata, agent scope,
 // custom instructions, then the bounded diff with annotated line numbers.
 func BuildUserPrompt(req Request) string {
 	var b strings.Builder
@@ -79,9 +79,15 @@ func BuildUserPrompt(req Request) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("\nReport findings only in these categories:\n")
-	for _, c := range req.Categories {
-		fmt.Fprintf(&b, "- %s: %s\n", c, categoryGuidance[c])
+	if req.AgentName != "" {
+		fmt.Fprintf(&b, "\nYou are running as the %q review agent.", req.AgentName)
+	}
+	if len(req.Categories) > 0 {
+		cats := make([]string, len(req.Categories))
+		for i, c := range req.Categories {
+			cats[i] = string(c)
+		}
+		fmt.Fprintf(&b, "\nLabel findings only with these categories: %s\n", strings.Join(cats, ", "))
 	}
 
 	if inst := strings.TrimSpace(req.Instructions); inst != "" {

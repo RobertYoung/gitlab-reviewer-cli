@@ -7,7 +7,7 @@
 </nav>
 {{end}}
 
-{{define "sevbadge"}}{{if .Manual}}<span class="badge manual">manual</span>{{else}}<span class="badge sev-{{.Severity}}">{{.Severity}}{{if .Category}} · {{.Category}}{{end}}</span>{{end}}{{end}}
+{{define "sevbadge"}}{{if .Manual}}<span class="badge manual">manual</span>{{else}}<span class="badge sev-{{.Severity}}">{{.Severity}}{{if .Category}} · {{.Category}}{{end}}{{if and .Agent (ne .Agent (printf "%s" .Category))}} · {{.Agent}}{{end}}</span>{{end}}{{end}}
 
 {{define "statebadge"}}<span class="badge state-{{fstate .}}">{{fstate .}}</span>{{end}}
 

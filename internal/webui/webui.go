@@ -30,6 +30,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
@@ -46,8 +47,22 @@ type Deps struct {
 	Reviewer review.Reviewer
 	Checkout runner.CheckoutFunc
 	CfgFor   func(projectPath string) config.Config
-	Logs     *runlog.Store
-	Results  *resultstore.Store
+	// Agents is the catalog of available review agents (builtins + user
+	// agents); nil means builtins only.
+	Agents *agents.Catalog
+	// Selection remembers the last agent selection per project; nil is a
+	// no-op store.
+	Selection *agents.SelectionStore
+	Logs      *runlog.Store
+	Results   *resultstore.Store
+}
+
+// catalog returns the agent catalog, defaulting to builtins only.
+func (d *Deps) catalog() *agents.Catalog {
+	if d.Agents == nil {
+		return agents.NewCatalog("")
+	}
+	return d.Agents
 }
 
 func (d *Deps) cfgFor(projectPath string) config.Config {

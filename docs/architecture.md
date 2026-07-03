@@ -10,10 +10,19 @@ There are two frontends over the same core: the TUI (`internal/tui`,
 Bubble Tea, the root command) and the browser GUI (`internal/webui`, a
 loopback-only HTTP server behind `gitlab-reviewer gui`). Both drive the
 review pipeline through `internal/review/runner` (checkout → prompt →
-reviewer passes → merge → stored record) and publish through
+concurrent agent passes → merge → stored record) and publish through
 `internal/review/publisher` (position resolution, draft/immediate posting,
 note fallback), so a review started in one frontend can be reopened in the
 other.
+
+What a scan checks is decided by **review agents**
+(`internal/review/agents`): six built-ins mirroring the finding categories
+plus user (`~/.config/gitlab-reviewer/agents/`) and repo
+(`.gitlab-reviewer/agents/`) definitions, merged into a catalog with
+repo > user > builtin shadowing. Each frontend shows a per-scan agent
+picker; the runner turns the selection into one reviewer invocation per
+agent per diff chunk, run under a concurrency cap, and stamps each finding
+with the agent that produced it.
 
 ## Component diagram
 
@@ -37,7 +46,8 @@ graph TD
     POSITION[internal/gitlabx/position<br/>diff parsing + position mapping]
     CHECKOUT[internal/checkout<br/>clone / path / root → worktree]
     REVIEW[internal/review<br/>Reviewer interface, prompt, schema]
-    RUNNER[internal/review/runner<br/>run orchestration + persistence]
+    AGENTS[internal/review/agents<br/>builtin + user/repo agent catalog]
+    RUNNER[internal/review/runner<br/>agent fan-out + persistence]
     PUBLISHER[internal/review/publisher<br/>posting: inline / draft / fallback]
     CLAUDECLI[internal/review/claudecli<br/>claude -p subprocess]
     SECRET[internal/secret<br/>token redaction]
@@ -55,6 +65,7 @@ graph TD
     SSE --> RUNNER
     RUNNER --> CHECKOUT
     RUNNER --> REVIEW
+    RUNNER --> AGENTS
     PUBLISH --> PUBLISHER
     HANDLERS --> PUBLISHER
     PUBLISHER --> POSITION
@@ -79,15 +90,20 @@ sequenceDiagram
     participant P as position resolver
 
     U->>T: select MR, press r
+    T->>U: agent picker (builtin + custom agents)
+    U->>T: choose agents, enter
     T->>G: GetMergeRequest (DiffRefs) + ListDiffs
     T->>C: Ensure(MR)
     C->>C: clone/fetch cache, worktree at head SHA
     C-->>T: worktree path
-    T->>R: Review(request) — bounded diff on stdin
-    activate R
-    R-->>T: stream: init / tool use / retries (progress)
-    R-->>T: ReviewResult (validated structured_output)
-    deactivate R
+    loop one pass per selected agent × diff chunk (concurrent, capped)
+        T->>R: Review(request + agent prompt) — bounded diff on stdin
+        activate R
+        R-->>T: stream: init / tool use / retries (agent-prefixed progress)
+        R-->>T: ReviewResult (validated structured_output)
+        deactivate R
+    end
+    T->>T: merge results, stamp findings with their agent
     T->>U: findings list (edit / accept / reject)
     U->>T: accept findings, publish
     T->>P: Resolve(finding, parsed diffs, DiffRefs)
@@ -104,9 +120,11 @@ sequenceDiagram
 
 ## Data flow summary
 
-config → MR list → MR detail (diffs + existing discussions) → worktree at
-head SHA → prompt (metadata + custom instructions + bounded diff) → `claude
--p` with read-only tools in the worktree (one pass per diff chunk for large
-MRs, results merged) → schema-validated findings → user curation → position
-mapping against parsed diff hunks → inline discussions or draft review
-(with note fallback) on the MR.
+config → MR list → MR detail (diffs + existing discussions) → agent
+selection (picker / `--agents` / config) → worktree at head SHA → prompt
+(metadata + custom instructions + bounded diff + agent focus) → `claude -p`
+with read-only tools in the worktree (one pass per selected agent per diff
+chunk, run concurrently, results merged with agent attribution) →
+schema-validated findings → user curation → position mapping against parsed
+diff hunks → inline discussions or draft review (with note fallback) on the
+MR.
