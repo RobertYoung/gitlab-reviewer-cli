@@ -46,7 +46,7 @@ other modality (keyboard-driven vs browser-native).
 |---|:-:|:-:|---|
 | Manual line-anchored comments | ✅ | ✅ | TUI: line cursor + `c`; GUI: click `+` on a line (both layouts) |
 | Manual MR-level comments | ✅ | ✅ | TUI: `C` |
-| Delete a pending comment | ✅ | ✅ | |
+| Delete a pending comment | ❌ | ✅ | Parity gap: the TUI can only publish pending comments or reject them during findings triage |
 | Publish pending comments on their own | ✅ | ✅ | TUI: `P` |
 | Pending comments ride along with a review run | ✅ | ✅ | |
 
@@ -59,7 +59,7 @@ other modality (keyboard-driven vs browser-native).
 | Multi-turn conversation with full repo context | ✅ | ✅ | Runs in a checkout of the MR head; the backend session resumes across turns |
 | Progress streamed while the reply is written | ✅ | ✅ | GUI streams over server-sent events |
 | Cancel the reply being written | ✅ | ✅ | TUI: `esc`; GUI: cancel button. The conversation continues |
-| Ephemeral: nothing posted to GitLab or stored | ✅ | ✅ | The checkout is released when the chat ends |
+| Ephemeral: nothing posted to GitLab | ✅ | ✅ | The checkout is released when the chat ends; the conversation itself is not stored, though a raw debug transcript (`chat-*.jsonl`) lands in the state dir like review transcripts do |
 
 ## Review
 
@@ -72,6 +72,7 @@ other modality (keyboard-driven vs browser-native).
 | Cancel a running review | ✅ | ✅ | |
 | Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | |
 | Publish immediately or as a draft review | ✅ | ✅ | |
+| Auto-publish with `publish.auto_comment` | ✅ | ❌ | Parity gap: the TUI publishes qualifying findings on entering the findings screen; the GUI pre-accepts them but still requires a manual publish |
 | Position fallback to a general note | ✅ | ✅ | Shared publisher |
 | Past reviews: reopen findings with curation state | ✅ | ✅ | Shared result store — cross-frontend |
 | View a run's progress log later | ✅ | ✅ | |

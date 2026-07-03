@@ -83,6 +83,12 @@ func (s *helpScreen) View() string {
 			{"a", "approve / remove your approval"},
 			{"o", "open in browser"},
 		}},
+		{"agent picker (r on the MR detail)", [][2]string{
+			{"↑/↓ j/k", "move"},
+			{"space", "toggle agent"},
+			{"a / n", "select all / none"},
+			{"enter", "start the review"},
+		}},
 		{"past reviews (L on the MR detail)", [][2]string{
 			{"↑/↓ j/k", "move"},
 			{"enter", "reopen the review's findings, curation states included"},
