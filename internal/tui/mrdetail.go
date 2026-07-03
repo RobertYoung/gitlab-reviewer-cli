@@ -712,7 +712,7 @@ func (s *mrDetail) header() string {
 		state += " · " + draftStyle.Render("draft")
 	}
 	fmt.Fprintf(&b, "%s  %s\n", headerStyle.Render(truncate(s.mr.Title, max(s.mainWidth()-20, 20))), subtleStyle.Render(state))
-	fmt.Fprintf(&b, "%s → %s · @%s", s.mr.SourceBranch, s.mr.TargetBranch, s.mr.Author)
+	fmt.Fprintf(&b, "%s → %s · %s", s.mr.SourceBranch, s.mr.TargetBranch, s.mr.AuthorDisplay())
 	if s.detail != nil && s.detail.HasConflicts {
 		b.WriteString(" · " + errorStyle.Render("has conflicts"))
 	} else if s.detail != nil && s.detail.NeedsRebase() {

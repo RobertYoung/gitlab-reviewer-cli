@@ -299,7 +299,7 @@ func TestGetApprovals(t *testing.T) {
 			"approved": true, "approvals_required": 2, "approvals_left": 1,
 			"user_has_approved": true, "user_can_approve": false,
 			"approved_by": []map[string]any{
-				{"user": map[string]any{"username": "alice"}},
+				{"user": map[string]any{"username": "alice", "name": "Alice Smith"}},
 				{"user": map[string]any{"username": "bob"}},
 			},
 		})
@@ -312,7 +312,7 @@ func TestGetApprovals(t *testing.T) {
 	if !a.Approved || a.ApprovalsRequired != 2 || a.ApprovalsLeft != 1 || !a.UserHasApproved || a.UserCanApprove {
 		t.Errorf("approvals mapping: %+v", a)
 	}
-	if len(a.ApprovedBy) != 2 || a.ApprovedBy[0] != "alice" || a.ApprovedBy[1] != "bob" {
+	if len(a.ApprovedBy) != 2 || a.ApprovedBy[0] != "Alice Smith (@alice)" || a.ApprovedBy[1] != "@bob" {
 		t.Errorf("approved_by mapping: %v", a.ApprovedBy)
 	}
 }

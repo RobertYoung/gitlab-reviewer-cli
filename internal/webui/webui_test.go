@@ -36,6 +36,7 @@ func sampleMR() gitlabx.MRDetail {
 			Description:  "Imports fmt.",
 			State:        "opened",
 			Author:       "alice",
+			AuthorName:   "Alice Smith",
 			SourceBranch: "feature",
 			TargetBranch: "main",
 			HeadSHA:      "head",
@@ -391,7 +392,7 @@ func TestMRHeaderLinksAndMarkdownDescription(t *testing.T) {
 		for _, want := range []string{
 			"<strong>fmt</strong>",
 			`href="https://gitlab.example.com/group/app/-/merge_requests/5" target="_blank" rel="noopener">group/app!5</a>`,
-			`href="https://gitlab.example.com/alice" target="_blank" rel="noopener">alice</a>`,
+			`href="https://gitlab.example.com/alice" target="_blank" rel="noopener">Alice Smith (@alice)</a>`,
 			`href="https://gitlab.example.com/group/app/-/tree/feature" target="_blank" rel="noopener">feature</a>`,
 			`href="https://gitlab.example.com/group/app/-/tree/main" target="_blank" rel="noopener">main</a>`,
 		} {

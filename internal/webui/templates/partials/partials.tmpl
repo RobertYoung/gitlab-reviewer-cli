@@ -13,7 +13,7 @@
 {{$src := .BranchWebURL .SourceBranch}}{{$tgt := .BranchWebURL .TargetBranch}}
 <p class="subtle mrhead">
   {{if .WebURL}}<a href="{{.WebURL}}" target="_blank" rel="noopener">{{.Ref}}</a>{{else}}{{.Ref}}{{end}}
-  · {{if .AuthorWebURL}}<a href="{{.AuthorWebURL}}" target="_blank" rel="noopener">{{.Author}}</a>{{else}}{{.Author}}{{end}}
+  · {{if .AuthorWebURL}}<a href="{{.AuthorWebURL}}" target="_blank" rel="noopener">{{.AuthorDisplay}}</a>{{else}}{{.AuthorDisplay}}{{end}}
   · {{if $src}}<a href="{{$src}}" target="_blank" rel="noopener">{{.SourceBranch}}</a>{{else}}{{.SourceBranch}}{{end}}
   → {{if $tgt}}<a href="{{$tgt}}" target="_blank" rel="noopener">{{.TargetBranch}}</a>{{else}}{{.TargetBranch}}{{end}}
   · updated {{reltime .UpdatedAt}} · {{.State}}
