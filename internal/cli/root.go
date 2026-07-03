@@ -104,13 +104,14 @@ func newRoot(st *state) *cobra.Command {
 			}()
 
 			deps := tui.Deps{
-				Cfg:       cfg,
-				Svc:       svc,
-				Reviewer:  reviewer,
-				Agents:    agents.NewCatalog(config.DefaultAgentsDir()),
-				Selection: agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json")),
-				Logs:      runlog.NewStore(reviewsDir),
-				Results:   resultstore.NewStore(reviewsDir),
+				Cfg:           cfg,
+				Svc:           svc,
+				Reviewer:      reviewer,
+				Agents:        agents.NewCatalog(config.DefaultAgentsDir()),
+				Selection:     agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json")),
+				ProjectAgents: agents.NewRemoteCache(),
+				Logs:          runlog.NewStore(reviewsDir),
+				Results:       resultstore.NewStore(reviewsDir),
 				Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 					co, err := manager.Ensure(ctx, mr, progress)
 					if err != nil {

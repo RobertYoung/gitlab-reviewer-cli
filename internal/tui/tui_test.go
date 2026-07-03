@@ -34,6 +34,7 @@ type fakeService struct {
 	diffs           []gitlabx.FileDiff
 	commits         []gitlabx.Commit
 	template        string
+	repoFiles       []gitlabx.RepoFile
 	discussions     []gitlabx.Discussion
 	posted          []published
 	drafts          []published
@@ -72,6 +73,10 @@ func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit
 
 func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) {
 	return f.template, nil
+}
+
+func (f *fakeService) ListDirectoryFiles(context.Context, any, string, string) ([]gitlabx.RepoFile, error) {
+	return f.repoFiles, nil
 }
 
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {

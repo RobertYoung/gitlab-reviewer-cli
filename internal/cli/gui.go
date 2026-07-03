@@ -97,8 +97,11 @@ func newGUICmd(st *state) *cobra.Command {
 						Reviewer:  reviewer,
 						Agents:    catalog,
 						Selection: selection,
-						Logs:      logs,
-						Results:   results,
+						// Per-instance cache: the (project, sha) key is only
+						// unique within one GitLab instance.
+						ProjectAgents: agents.NewRemoteCache(),
+						Logs:          logs,
+						Results:       results,
 						Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
 							co, err := manager.Ensure(ctx, mr, progress)
 							if err != nil {

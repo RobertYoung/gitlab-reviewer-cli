@@ -220,10 +220,10 @@ type agentOption struct {
 	Checked     bool
 }
 
-// agentOptions builds the review form's agent checkboxes: the catalog in
-// display order, pre-checked from the remembered selection or the
-// configured default.
-func agentOptions(d *Deps, projectPath string) []agentOption {
+// agentOptions builds the review form's agent checkboxes: the catalog
+// (including any repo-fetched project agents) in display order, pre-checked
+// from the remembered selection or the configured default.
+func agentOptions(d *Deps, cat *agents.Catalog, projectPath string) []agentOption {
 	selected := d.Selection.Load(projectPath)
 	if len(selected) == 0 {
 		selected = d.cfgFor(projectPath).Review.Agents
@@ -232,7 +232,7 @@ func agentOptions(d *Deps, projectPath string) []agentOption {
 	for _, name := range selected {
 		checked[name] = true
 	}
-	all := d.catalog().All()
+	all := cat.All()
 	opts := make([]agentOption, 0, len(all))
 	anyChecked := false
 	for _, a := range all {
@@ -268,6 +268,7 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), iid)    // best-effort
 	approvals, _ := d.Svc.GetApprovals(r.Context(), detail.Project(), iid) // decoration; page works without it
 	pending := s.comments.list(mrKey(inst, project, iid))
+	cat, fetchWarnings := d.projectCatalog(r.Context(), detail)
 
 	content := mrDetailContent{
 		Nav:           newMRNav(inst, project, iid),
@@ -275,8 +276,8 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 		Commits:       commits,
 		Pending:       pending,
 		Approvals:     approvals,
-		AgentOptions:  agentOptions(d, detail.ProjectPath),
-		AgentWarnings: d.catalog().Warnings(),
+		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
+		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
 	}
 	for _, f := range pending {
 		if f.State == review.StateAccepted {

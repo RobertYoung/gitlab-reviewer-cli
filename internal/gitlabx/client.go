@@ -2,6 +2,7 @@ package gitlabx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -340,6 +341,41 @@ func (c *Client) GetMergeRequestTemplate(ctx context.Context, project any) (stri
 		return "", fmt.Errorf("fetching MR template %q: %w", chosen.Name, err)
 	}
 	return full.Content, nil
+}
+
+// ListDirectoryFiles returns the files directly under dir at ref, fetching
+// each blob's raw content. A missing directory returns nil, not an error.
+func (c *Client) ListDirectoryFiles(ctx context.Context, project any, dir, ref string) ([]RepoFile, error) {
+	var out []RepoFile
+	opts := &gitlab.ListTreeOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+		Path:        gitlab.Ptr(dir),
+		Ref:         gitlab.Ptr(ref),
+	}
+	for page := 1; page <= maxDiffPages; page++ {
+		opts.Page = int64(page)
+		nodes, resp, err := c.gl.Repositories.ListTree(project, opts, gitlab.WithContext(ctx))
+		if err != nil {
+			if errors.Is(err, gitlab.ErrNotFound) {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("listing %s at %s: %w", dir, ref, err)
+		}
+		for _, n := range nodes {
+			if n.Type != "blob" {
+				continue
+			}
+			raw, _, err := c.gl.RepositoryFiles.GetRawFile(project, n.Path, &gitlab.GetRawFileOptions{Ref: gitlab.Ptr(ref)}, gitlab.WithContext(ctx))
+			if err != nil {
+				return nil, fmt.Errorf("fetching %s at %s: %w", n.Path, ref, err)
+			}
+			out = append(out, RepoFile{Name: n.Name, Content: raw})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+	}
+	return out, nil
 }
 
 func (c *Client) ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error) {
