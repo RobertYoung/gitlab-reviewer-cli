@@ -74,11 +74,11 @@ func (d *Deps) catalog() *agents.Catalog {
 }
 
 // projectCatalog extends the catalog with agents shipped in the MR's
-// repository under .gitlab-reviewer/agents/, so the review form can offer
-// them before any checkout exists: read from the local clone in path/root
-// checkout modes (covering definitions kept untracked), otherwise fetched
-// over the API at the MR head. Best-effort: on fetch failure the base
-// catalog is returned with a warning.
+// repository under .gitlab-reviewer/agents/ or .claude/agents/, so the
+// review form can offer them before any checkout exists: read from the
+// local clone in path/root checkout modes (covering definitions kept
+// untracked), otherwise fetched over the API at the MR head. Best-effort:
+// on fetch failure the base catalog is returned with a warning.
 func (d *Deps) projectCatalog(ctx context.Context, detail *gitlabx.MRDetail) (*agents.Catalog, []string) {
 	base := d.catalog()
 	cfg := d.cfgFor(detail.ProjectPath)
@@ -89,13 +89,15 @@ func (d *Deps) projectCatalog(ctx context.Context, detail *gitlabx.MRDetail) (*a
 		return base, nil
 	}
 	cat, err := d.ProjectAgents.Extend(base, detail.ProjectPath, detail.HeadSHA, func() ([]agents.File, error) {
-		repoFiles, err := d.Svc.ListDirectoryFiles(ctx, detail.Project(), agents.ProjectAgentsDir, detail.HeadSHA)
-		if err != nil {
-			return nil, err
-		}
-		files := make([]agents.File, len(repoFiles))
-		for i, f := range repoFiles {
-			files[i] = agents.File(f)
+		var files []agents.File
+		for _, dir := range agents.ProjectAgentDirs {
+			repoFiles, err := d.Svc.ListDirectoryFiles(ctx, detail.Project(), dir, detail.HeadSHA)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range repoFiles {
+				files = append(files, agents.File{Dir: dir, Name: f.Name, Content: f.Content})
+			}
 		}
 		return files, nil
 	})

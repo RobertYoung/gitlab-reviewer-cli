@@ -35,6 +35,7 @@ type fakeService struct {
 	commits         []gitlabx.Commit
 	template        string
 	repoFiles       []gitlabx.RepoFile
+	repoFilesByDir  map[string][]gitlabx.RepoFile
 	discussions     []gitlabx.Discussion
 	posted          []published
 	drafts          []published
@@ -75,7 +76,10 @@ func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, err
 	return f.template, nil
 }
 
-func (f *fakeService) ListDirectoryFiles(context.Context, any, string, string) ([]gitlabx.RepoFile, error) {
+func (f *fakeService) ListDirectoryFiles(_ context.Context, _ any, dir, _ string) ([]gitlabx.RepoFile, error) {
+	if f.repoFilesByDir != nil {
+		return f.repoFilesByDir[dir], nil
+	}
 	return f.repoFiles, nil
 }
 

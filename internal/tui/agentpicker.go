@@ -18,9 +18,10 @@ import (
 // agentPicker is the multi-select screen shown before a review run: which
 // review agents should this scan use. Enter swaps it for the run screen;
 // the selection is remembered per project. Agents shipped in the repo's
-// .gitlab-reviewer/agents/ are loaded in the background — from the local
-// clone in path/root checkout modes (covering untracked definitions),
-// otherwise fetched over the API — and merged in when they arrive.
+// .gitlab-reviewer/agents/ or .claude/agents/ are loaded in the background
+// — from the local clone in path/root checkout modes (covering untracked
+// definitions), otherwise fetched over the API — and merged in when they
+// arrive.
 type agentPicker struct {
 	deps    Deps
 	detail  gitlabx.MRDetail
@@ -118,11 +119,12 @@ func (p *agentPicker) Init() tea.Cmd {
 	return p.fetchProjectAgents
 }
 
-// fetchProjectAgents loads .gitlab-reviewer/agents/ so repo-shipped agents
-// are toggleable before any checkout exists: straight from the local clone
-// in path/root checkout modes (which also covers definitions kept
-// untracked), otherwise over the API at the MR head, cached per
-// (project, sha) in deps.ProjectAgents.
+// fetchProjectAgents loads the repo's agent directories (.claude/agents/
+// and .gitlab-reviewer/agents/) so repo-shipped agents are toggleable
+// before any checkout exists: straight from the local clone in path/root
+// checkout modes (which also covers definitions kept untracked), otherwise
+// over the API at the MR head, cached per (project, sha) in
+// deps.ProjectAgents.
 func (p *agentPicker) fetchProjectAgents() tea.Msg {
 	if p.localRepo != "" {
 		return projectAgentsMsg{catalog: p.base.WithProject(p.localRepo)}
@@ -130,13 +132,15 @@ func (p *agentPicker) fetchProjectAgents() tea.Msg {
 	cat, err := p.deps.ProjectAgents.Extend(p.base, p.detail.ProjectPath, p.detail.HeadSHA, func() ([]agents.File, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		repoFiles, err := p.deps.Svc.ListDirectoryFiles(ctx, p.detail.Project(), agents.ProjectAgentsDir, p.detail.HeadSHA)
-		if err != nil {
-			return nil, err
-		}
-		files := make([]agents.File, len(repoFiles))
-		for i, f := range repoFiles {
-			files[i] = agents.File(f)
+		var files []agents.File
+		for _, dir := range agents.ProjectAgentDirs {
+			repoFiles, err := p.deps.Svc.ListDirectoryFiles(ctx, p.detail.Project(), dir, p.detail.HeadSHA)
+			if err != nil {
+				return nil, err
+			}
+			for _, f := range repoFiles {
+				files = append(files, agents.File{Dir: dir, Name: f.Name, Content: f.Content})
+			}
 		}
 		return files, nil
 	})

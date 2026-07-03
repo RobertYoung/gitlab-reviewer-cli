@@ -19,6 +19,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
@@ -59,6 +60,7 @@ type fakeService struct {
 	diffs          []gitlabx.FileDiff // nil serves sampleDiffs()
 	discussions    []gitlabx.Discussion
 	repoFiles      []gitlabx.RepoFile
+	repoFilesByDir map[string][]gitlabx.RepoFile
 	repoFilesErr   error
 	inline         []string
 	notes          []string
@@ -105,7 +107,10 @@ func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit
 
 func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) { return "", nil }
 
-func (f *fakeService) ListDirectoryFiles(context.Context, any, string, string) ([]gitlabx.RepoFile, error) {
+func (f *fakeService) ListDirectoryFiles(_ context.Context, _ any, dir, _ string) ([]gitlabx.RepoFile, error) {
+	if f.repoFilesByDir != nil {
+		return f.repoFilesByDir[dir], f.repoFilesErr
+	}
 	return f.repoFiles, f.repoFilesErr
 }
 
@@ -877,17 +882,24 @@ func TestAgentSelectionDrivesRunAndBadge(t *testing.T) {
 
 func TestMRDetailOffersRepoAgents(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
-	env.svc.repoFiles = []gitlabx.RepoFile{{
-		Name:    "sql.md",
-		Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
-	}}
+	env.svc.repoFilesByDir = map[string][]gitlabx.RepoFile{
+		agents.ProjectAgentsDir: {{
+			Name:    "sql.md",
+			Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
+		}},
+		agents.ClaudeAgentsDir: {{
+			Name:    "conventions.md",
+			Content: []byte("---\ndescription: Team conventions\n---\nCheck team conventions.\n"),
+		}},
+	}
 
 	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
 	if code != http.StatusOK {
 		t.Fatalf("mr page: %d", code)
 	}
-	if !strings.Contains(body, `name="agents" value="sql-migrations"`) {
-		t.Fatalf("form missing the repo agent:\n%s", body)
+	// Agents from both repo directories are offered.
+	if !strings.Contains(body, `name="agents" value="sql-migrations"`) || !strings.Contains(body, `name="agents" value="conventions"`) {
+		t.Fatalf("form missing a repo agent:\n%s", body)
 	}
 	if !strings.Contains(body, `<span class="badge">project</span>`) {
 		t.Fatalf("repo agent missing its project badge:\n%s", body)
@@ -912,12 +924,17 @@ func TestMRDetailSurvivesRepoAgentFetchFailure(t *testing.T) {
 
 func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "gitlab.example.com", "group", "app", ".gitlab-reviewer", "agents")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "local-only.md"), []byte("Untracked local agent.\n"), 0o600); err != nil {
-		t.Fatal(err)
+	clone := filepath.Join(root, "gitlab.example.com", "group", "app")
+	for dir, name := range map[string]string{
+		filepath.Join(clone, ".gitlab-reviewer", "agents"): "local-only.md",
+		filepath.Join(clone, ".claude", "agents"):          "conventions.md",
+	} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("Untracked local agent.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
@@ -932,8 +949,8 @@ func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("mr page: %d", code)
 	}
-	if !strings.Contains(body, `name="agents" value="local-only"`) {
-		t.Fatalf("form missing the local clone agent:\n%s", body)
+	if !strings.Contains(body, `name="agents" value="local-only"`) || !strings.Contains(body, `name="agents" value="conventions"`) {
+		t.Fatalf("form missing a local clone agent:\n%s", body)
 	}
 	if strings.Contains(body, "could not fetch repo agents") {
 		t.Fatalf("root mode must not hit the API:\n%s", body)

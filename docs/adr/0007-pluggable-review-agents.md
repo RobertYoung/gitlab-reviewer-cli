@@ -35,9 +35,12 @@ own `claude -p` invocation with its own system prompt
 - **Bring-your-own agents** are Markdown files with optional YAML
   frontmatter (name, description, categories, severity hint) in
   `~/.config/gitlab-reviewer/agents/` and repo-local
-  `.gitlab-reviewer/agents/`. The catalog merges them over the builtins
-  with repo > user > builtin shadowing; invalid files are skipped with
-  warnings, and unknown selected names fail the run loudly.
+  `.gitlab-reviewer/agents/` or Claude Code's `.claude/agents/` (the
+  format is compatible; unknown frontmatter fields are ignored). The
+  catalog merges them over the builtins with repo > user > builtin
+  shadowing — and `.gitlab-reviewer/agents/` > `.claude/agents/` within a
+  repo; invalid files are skipped with warnings, and unknown selected
+  names fail the run loudly.
 - **Selection is per scan**: a multi-select picker in the TUI and agent
   checkboxes in the GUI, seeded from the last selection per project, then
   `review.agents`. `--agents` covers non-interactive use.
@@ -58,10 +61,10 @@ the new key.
 - Repo-shipped agent prompts steer the reviewer but run in the same
   read-only tool sandbox as every review; agent definitions cannot alter
   tool allowlists. In path/root checkout modes the pickers and the runner
-  read `.gitlab-reviewer/agents/` from the user's local clone, which covers
+  read both agent directories from the user's local clone, which covers
   definitions deliberately kept untracked (the local_overlay pattern);
   definitions committed at the MR head shadow same-named local ones. In
-  clone mode the pickers fetch the directory over the GitLab API at the MR
+  clone mode the pickers fetch the directories over the GitLab API at the MR
   head SHA (cached per project + sha), so repo agents are toggleable before
   any checkout exists — including agents the MR itself adds or edits, which
   also means different MRs of one project can legitimately show different
