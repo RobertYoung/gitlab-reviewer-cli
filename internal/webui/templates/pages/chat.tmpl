@@ -1,0 +1,51 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.WebURL)}}
+<section class="panel chatpage" data-events="{{$c.EventsURL}}"{{if not $c.State.Busy}} data-idle="1"{{end}}>
+  <h2>💬 Chat about {{if $c.FocusLabel}}<code>{{$c.FocusLabel}}</code>{{else}}{{$c.Ref}}{{end}}</h2>
+  <p class="subtle">{{$c.Title}} — Claude answers from a checkout of the MR branch and can read the
+  surrounding code. Nothing here is posted to GitLab.</p>
+
+  <div class="chatlog">
+    {{range $c.State.Messages}}
+    <div class="chat-msg {{if .You}}you{{else}}claude{{end}}">
+      <div class="meta">{{if .You}}you{{else}}claude{{end}}</div>
+      <pre class="prose">{{.Text}}</pre>
+    </div>
+    {{end}}
+    {{if and (not $c.State.Messages) (not $c.State.Busy)}}
+    <p class="note">No messages yet — ask a question below.</p>
+    {{end}}
+  </div>
+
+  {{if $c.State.Err}}<p class="error">{{$c.State.Err}}</p>{{end}}
+
+  {{if $c.State.Busy}}
+  <div class="chat-msg claude">
+    <div class="meta"><span class="spinner"></span> claude is working…</div>
+    <pre class="runlog chatstatus" id="chatstatus">{{range $c.State.Status}}{{.}}
+{{end}}</pre>
+  </div>
+  <form method="post" action="{{$c.CancelURL}}">
+    <button type="submit" class="button danger">Cancel reply</button>
+  </form>
+  {{else if $c.State.Closed}}
+  <p class="note">This chat has ended.</p>
+  {{else}}
+  <form method="post" action="{{$c.SendURL}}" class="chat-form">
+    <textarea name="message" rows="3" placeholder="ask about this change — ⌘/ctrl+enter sends — markdown supported" autofocus></textarea>
+    <button type="submit" class="button primary">Send</button>
+  </form>
+  {{end}}
+
+  <div class="actions">
+    {{if and (not $c.State.Closed) (not $c.State.Busy)}}
+    <form method="post" action="{{$c.EndURL}}">
+      <input type="hidden" name="back" value="{{$c.Nav.DiffURL}}">
+      <button type="submit" class="button">End chat</button>
+    </form>
+    {{end}}
+    <a class="button" href="{{$c.Nav.DiffURL}}">Back to diff</a>
+  </div>
+</section>
+{{end}}

@@ -62,6 +62,12 @@ func New(cfg config.Config, dumpDir string) *Backend {
 
 func (b *Backend) Name() string { return "claude-cli" }
 
+// The backend serves both the review pipeline and MR conversations.
+var (
+	_ review.Reviewer = (*Backend)(nil)
+	_ review.Chatter  = (*Backend)(nil)
+)
+
 var versionRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
 
 // CheckAvailable verifies the claude binary exists and is new enough.
@@ -87,28 +93,33 @@ func (b *Backend) CheckAvailable(ctx context.Context) error {
 	return nil
 }
 
-// Review runs one review in req.RepoPath and parses the structured output.
-func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(review.Event)) (*review.Result, error) {
-	if onEvent == nil {
-		onEvent = func(review.Event) {}
-	}
-	if req.AgentName != "" {
-		inner := onEvent
-		onEvent = func(e review.Event) {
-			e.Agent = req.AgentName
-			inner(e)
-		}
-	}
-	if req.Timeout > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
-		defer cancel()
-	}
+// invocation is the outcome of one claude subprocess run: the terminal
+// result event (nil when the stream ended without one), the captured
+// stderr, the transcript dump location, and the exit/stream errors.
+type invocation struct {
+	final     *streamEvent
+	stderr    string
+	dumpPath  string
+	waitErr   error
+	streamErr error
+}
 
-	cmd := exec.CommandContext(ctx, b.ClaudePath, b.buildArgs(req)...) //nolint:gosec // running the user-configured claude binary is the point
-	cmd.Dir = req.RepoPath
+// noResult builds the shared "stream ended without a result event" error.
+func (inv *invocation) noResult() error {
+	detail := strings.TrimSpace(inv.stderr)
+	if inv.streamErr != nil && detail == "" {
+		detail = inv.streamErr.Error()
+	}
+	return fmt.Errorf("claude produced no result event (%w): %s%s", errOrExit(inv.waitErr), detail, dumpSuffix(inv.dumpPath))
+}
+
+// invoke runs one claude subprocess in dir, feeding stdin and streaming
+// progress through onEvent. The transcript is dumped under dumpName.
+func (b *Backend) invoke(ctx context.Context, dir string, args []string, stdin string, onEvent func(review.Event), dumpName string) (*invocation, error) {
+	cmd := exec.CommandContext(ctx, b.ClaudePath, args...) //nolint:gosec // running the user-configured claude binary is the point
+	cmd.Dir = dir
 	cmd.Env = b.subprocessEnv()
-	cmd.Stdin = strings.NewReader(review.BuildUserPrompt(req))
+	cmd.Stdin = strings.NewReader(stdin)
 	// Kill the whole process group on cancel so MCP/tool children die too.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
@@ -130,7 +141,43 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 
 	final, transcript, streamErr := b.consumeStream(stdout, onEvent)
 	waitErr := cmd.Wait()
-	dumpPath := b.dump(transcript, req.MR.IID, req.AgentName)
+	return &invocation{
+		final:     final,
+		stderr:    stderr.String(),
+		dumpPath:  b.dump(transcript, dumpName),
+		waitErr:   waitErr,
+		streamErr: streamErr,
+	}, nil
+}
+
+// Review runs one review in req.RepoPath and parses the structured output.
+func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(review.Event)) (*review.Result, error) {
+	if onEvent == nil {
+		onEvent = func(review.Event) {}
+	}
+	if req.AgentName != "" {
+		inner := onEvent
+		onEvent = func(e review.Event) {
+			e.Agent = req.AgentName
+			inner(e)
+		}
+	}
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
+		defer cancel()
+	}
+
+	dumpName := fmt.Sprintf("review-%d", req.MR.IID)
+	if req.AgentName != "" {
+		// Concurrent agent passes dump in the same second; the agent name
+		// keeps their transcripts apart.
+		dumpName = fmt.Sprintf("review-%d-%s", req.MR.IID, req.AgentName)
+	}
+	inv, err := b.invoke(ctx, req.RepoPath, b.buildArgs(req), review.BuildUserPrompt(req), onEvent, dumpName)
+	if err != nil {
+		return nil, err
+	}
 
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -138,36 +185,80 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 		}
 		return nil, ctx.Err()
 	}
-	if final == nil {
-		detail := strings.TrimSpace(stderr.String())
-		if streamErr != nil && detail == "" {
-			detail = streamErr.Error()
-		}
-		return nil, fmt.Errorf("claude produced no result event (%w): %s%s", errOrExit(waitErr), detail, dumpSuffix(dumpPath))
+	if inv.final == nil {
+		return nil, inv.noResult()
 	}
-	if final.IsError {
-		return nil, fmt.Errorf("claude reported an error: %s%s", firstNonEmpty(final.Result, final.Error, stderr.String()), dumpSuffix(dumpPath))
+	if inv.final.IsError {
+		return nil, fmt.Errorf("claude reported an error: %s%s", firstNonEmpty(inv.final.Result, inv.final.Error, inv.stderr), dumpSuffix(inv.dumpPath))
 	}
 
-	res, err := b.parseFinal(final)
+	res, err := b.parseFinal(inv.final)
 	if err != nil {
-		return nil, fmt.Errorf("%w (session %s)%s", err, final.SessionID, dumpSuffix(dumpPath))
+		return nil, fmt.Errorf("%w (session %s)%s", err, inv.final.SessionID, dumpSuffix(inv.dumpPath))
 	}
-	res.SessionID = final.SessionID
-	res.CostUSD = final.TotalCostUSD
+	res.SessionID = inv.final.SessionID
+	res.CostUSD = inv.final.TotalCostUSD
 	return res, nil
 }
 
-// buildArgs assembles the headless invocation. The review session is
-// always read-only: mutating and network tools are denied as permission
-// rules, which cascade into subagents when UseAgents grants the Task tool.
-func (b *Backend) buildArgs(req review.Request) []string {
-	tools := "Read,Grep,Glob"
-	disallowed := "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Agent"
-	if b.UseAgents {
-		tools = "Read,Grep,Glob,Task"
-		disallowed = "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
+// Chat runs one conversation turn in req.RepoPath. The first turn sends the
+// full MR context; later turns resume the CLI session (which lives with the
+// checkout directory, so RepoPath must not change mid-conversation).
+func (b *Backend) Chat(ctx context.Context, req review.ChatRequest, onEvent func(review.Event)) (*review.ChatReply, error) {
+	if onEvent == nil {
+		onEvent = func(review.Event) {}
 	}
+	if req.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, req.Timeout)
+		defer cancel()
+	}
+
+	stdin := review.BuildChatPrompt(req)
+	if req.SessionID != "" {
+		stdin = req.Message
+	}
+	inv, err := b.invoke(ctx, req.RepoPath, b.buildChatArgs(req), stdin, onEvent, fmt.Sprintf("chat-%d", req.MR.IID))
+	if err != nil {
+		return nil, err
+	}
+
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, fmt.Errorf("chat turn timed out after %s", req.Timeout)
+		}
+		return nil, ctx.Err()
+	}
+	if inv.final == nil {
+		return nil, inv.noResult()
+	}
+	if inv.final.IsError {
+		return nil, fmt.Errorf("claude reported an error: %s%s", firstNonEmpty(inv.final.Result, inv.final.Error, inv.stderr), dumpSuffix(inv.dumpPath))
+	}
+	text := strings.TrimSpace(inv.final.Result)
+	if text == "" {
+		return nil, fmt.Errorf("claude returned an empty reply (session %s)%s", inv.final.SessionID, dumpSuffix(inv.dumpPath))
+	}
+	return &review.ChatReply{
+		Text:      text,
+		SessionID: inv.final.SessionID,
+		CostUSD:   inv.final.TotalCostUSD,
+	}, nil
+}
+
+// toolArgs returns the read-only tool grant shared by every session:
+// mutating and network tools are denied as permission rules, which cascade
+// into subagents when UseAgents grants the Task tool.
+func (b *Backend) toolArgs() (tools, disallowed string) {
+	if b.UseAgents {
+		return "Read,Grep,Glob,Task", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
+	}
+	return "Read,Grep,Glob", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Agent"
+}
+
+// buildArgs assembles the headless review invocation.
+func (b *Backend) buildArgs(req review.Request) []string {
+	tools, disallowed := b.toolArgs()
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -184,6 +275,33 @@ func (b *Backend) buildArgs(req review.Request) []string {
 	}
 	if req.MaxBudgetUSD > 0 {
 		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.MaxBudgetUSD, 'f', -1, 64))
+	}
+	if b.Bare {
+		args = append(args, "--bare")
+	}
+	return args
+}
+
+// buildChatArgs assembles the headless chat invocation: same read-only
+// sandbox as reviews, conversational persona instead of the finding schema,
+// and session resume on follow-up turns.
+func (b *Backend) buildChatArgs(req review.ChatRequest) []string {
+	tools, disallowed := b.toolArgs()
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--tools", tools,
+		"--permission-mode", "dontAsk",
+		"--disallowedTools", disallowed,
+		"--strict-mcp-config",
+		"--append-system-prompt", review.ChatSystemPrompt,
+	}
+	if req.SessionID != "" {
+		args = append(args, "--resume", req.SessionID)
+	}
+	if b.Model != "" {
+		args = append(args, "--model", b.Model)
 	}
 	if b.Bare {
 		args = append(args, "--bare")
@@ -367,20 +485,14 @@ func (b *Backend) subprocessEnv() []string {
 	return env
 }
 
-func (b *Backend) dump(transcript []byte, iid int64, agent string) string {
+func (b *Backend) dump(transcript []byte, name string) string {
 	if b.DumpDir == "" || len(transcript) == 0 {
 		return ""
 	}
 	if err := os.MkdirAll(b.DumpDir, 0o700); err != nil {
 		return ""
 	}
-	name := fmt.Sprintf("review-%d-%d.jsonl", iid, time.Now().Unix())
-	if agent != "" {
-		// Concurrent agent passes dump in the same second; the agent name
-		// keeps their transcripts apart.
-		name = fmt.Sprintf("review-%d-%s-%d.jsonl", iid, agent, time.Now().Unix())
-	}
-	path := filepath.Join(b.DumpDir, name)
+	path := filepath.Join(b.DumpDir, fmt.Sprintf("%s-%d.jsonl", name, time.Now().Unix()))
 	if err := os.WriteFile(path, transcript, 0o600); err != nil {
 		return ""
 	}

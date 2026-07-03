@@ -33,6 +33,40 @@
     };
   }
 
+  // --- chat page: stream the pending reply's progress, then re-render ---
+  const chatPage = document.querySelector(".chatpage");
+  if (chatPage) {
+    if (!chatPage.dataset.idle) {
+      const status = document.getElementById("chatstatus");
+      const es = new EventSource(chatPage.dataset.events);
+      // The stream replays the progress so far on every (re)connect; drop
+      // the server-rendered snapshot so lines are not duplicated.
+      es.onopen = () => {
+        if (status) status.textContent = "";
+      };
+      es.addEventListener("line", (ev) => {
+        if (!status) return;
+        status.textContent += JSON.parse(ev.data) + "\n";
+        status.scrollTop = status.scrollHeight;
+      });
+      es.addEventListener("done", () => {
+        es.close();
+        window.location.reload();
+      });
+      es.onerror = () => {
+        // Server gone (ctrl+c) — stop retrying, leave the page on screen.
+        if (es.readyState === EventSource.CLOSED) return;
+      };
+    }
+    document.addEventListener("keydown", (ev) => {
+      // ctrl/cmd+enter sends the message, like the TUI's ctrl+s.
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
+        const form = ev.target.closest("form.chat-form");
+        if (form) form.submit();
+      }
+    });
+  }
+
   // --- diff view: one floating comment form, moved to the clicked line ---
   const tmpl = document.getElementById("comment-form-template");
   if (tmpl) {

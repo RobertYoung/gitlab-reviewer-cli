@@ -50,6 +50,17 @@ other modality (keyboard-driven vs browser-native).
 | Publish pending comments on their own | ✅ | ✅ | TUI: `P` |
 | Pending comments ride along with a review run | ✅ | ✅ | |
 
+## Chat
+
+| Feature | TUI | GUI | Notes |
+|---|:-:|:-:|---|
+| Chat with Claude about the whole MR | ✅ | ✅ | TUI: `T`; GUI: "Chat with Claude" on the MR overview / diff sidebar |
+| Chat about a single diff line | ✅ | ✅ | TUI: line cursor + `t`; GUI: `+` on a line → "Ask Claude" (typed text becomes the first message) |
+| Multi-turn conversation with full repo context | ✅ | ✅ | Runs in a checkout of the MR head; the backend session resumes across turns |
+| Progress streamed while the reply is written | ✅ | ✅ | GUI streams over server-sent events |
+| Cancel the reply being written | ✅ | ✅ | TUI: `esc`; GUI: cancel button. The conversation continues |
+| Ephemeral: nothing posted to GitLab or stored | ✅ | ✅ | The checkout is released when the chat ends |
+
 ## Review
 
 | Feature | TUI | GUI | Notes |

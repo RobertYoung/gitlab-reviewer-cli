@@ -355,6 +355,19 @@ tr.inline-comment td { border-top: 1px solid var(--border); border-bottom: 1px s
   overflow-y: auto;
 }
 
+/* chat page */
+.chatlog { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.75rem 0; }
+.chat-msg {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+.chat-msg.you { border-left: 3px solid var(--manual); }
+.chat-msg.claude { border-left: 3px solid var(--accent); }
+.chat-msg .meta { font-size: 12px; color: var(--fg-subtle); margin-bottom: 0.2rem; }
+.chat-form { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+.chatstatus { max-height: 30vh; margin: 0.3rem 0 0; }
+
 .spinner {
   display: inline-block;
   width: 0.9em;

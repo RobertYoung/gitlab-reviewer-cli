@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"sess-empty","model":"claude-fable-5"}
+{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"sess-empty","total_cost_usd":0.01,"num_turns":1}
