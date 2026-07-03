@@ -1,0 +1,30 @@
+{{define "mrnav"}}
+<nav class="mrnav">
+  <a href="{{.Nav.DetailURL}}">overview</a>
+  <a href="{{.Nav.DiffURL}}">diff</a>
+  <a href="{{.Nav.HistoryURL}}">past reviews</a>
+  {{if .WebURL}}<a href="{{.WebURL}}" target="_blank" rel="noopener">open in GitLab ↗</a>{{end}}
+</nav>
+{{end}}
+
+{{define "sevbadge"}}{{if .Manual}}<span class="badge manual">manual</span>{{else}}<span class="badge sev-{{.Severity}}">{{.Severity}}{{if .Category}} · {{.Category}}{{end}}</span>{{end}}{{end}}
+
+{{define "statebadge"}}<span class="badge state-{{fstate .}}">{{fstate .}}</span>{{end}}
+
+{{define "excerpt"}}
+{{if .}}
+<table class="diff excerpt">
+{{range .}}
+  {{if eq .Kind "hunk"}}
+  <tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="code">{{.HTML}}</td></tr>
+  {{else}}
+  <tr class="line {{.Kind}}">
+    <td class="ln">{{if .Old}}{{.Old}}{{end}}</td>
+    <td class="ln">{{if .New}}{{.New}}{{end}}</td>
+    <td class="code">{{.HTML}}</td>
+  </tr>
+  {{end}}
+{{end}}
+</table>
+{{end}}
+{{end}}

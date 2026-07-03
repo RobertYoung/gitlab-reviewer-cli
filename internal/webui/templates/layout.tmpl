@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · gitlab-reviewer</title>
+<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/chroma.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">gitlab-reviewer</a>
+  {{if and .Instance .Instances}}<span class="crumb">{{.Instance}}</span>{{end}}
+  <span class="page-title">{{.Title}}</span>
+  <span class="spacer"></span>
+  {{if .Version}}<span class="version">{{.Version}}</span>{{end}}
+</header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>

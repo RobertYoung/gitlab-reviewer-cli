@@ -1,0 +1,70 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<section class="panel">
+  <h2>{{if $c.Detail.Draft}}<span class="badge draft">draft</span> {{end}}{{$c.Detail.Title}}</h2>
+  <p class="subtle">{{$c.Detail.Ref}} · {{$c.Detail.Author}} · {{$c.Detail.SourceBranch}} → {{$c.Detail.TargetBranch}} · updated {{reltime $c.Detail.UpdatedAt}} · {{$c.Detail.State}}</p>
+
+  {{if $c.RebaseWarning}}<p class="warning">⚠ {{$c.RebaseWarning}}</p>{{end}}
+
+  <div class="actions">
+    <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
+    <form method="post" action="{{$c.Nav.ReviewURL}}">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <button type="submit" class="button review">▶ Run AI review</button>
+    </form>
+    <a class="button" href="{{$c.Nav.HistoryURL}}">Past reviews</a>
+    {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
+  </div>
+
+  {{if $c.Detail.Description}}
+  <h3>Description</h3>
+  <pre class="prose">{{$c.Detail.Description}}</pre>
+  {{end}}
+
+  {{if $c.Commits}}
+  <h3>Commits</h3>
+  <ul class="commits">
+    {{range $c.Commits}}
+    <li><code>{{.ShortID}}</code> {{.Title}}</li>
+    {{end}}
+  </ul>
+  {{end}}
+
+  <h3>Your pending comments</h3>
+  {{if $c.Pending}}
+  <ul class="pending-comments">
+    {{range $c.Pending}}
+    <li id="c-{{.ID}}">
+      <span class="badge manual">{{fstate .State}}</span>
+      <span class="subtle">{{floc .}}</span>
+      <span class="body">{{ftitle .}}</span>
+      {{if eq (fstate .State) "accepted"}}
+      <form method="post" action="{{$c.Nav.DeleteURL}}" class="inline-form">
+        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+        <input type="hidden" name="id" value="{{.ID}}">
+        <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
+        <button type="submit" class="link danger">delete</button>
+      </form>
+      {{end}}
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="note">None yet — add them below or from the diff view. They publish together with accepted review findings, or on their own.</p>
+  {{end}}
+
+  <details class="new-comment">
+    <summary>Add an MR-level comment</summary>
+    <form method="post" action="{{$c.Nav.CommentURL}}">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
+      <textarea name="body" rows="4" placeholder="posted verbatim as your own comment — markdown supported"></textarea>
+      <button type="submit" class="button">Add comment</button>
+    </form>
+  </details>
+</section>
+{{end}}

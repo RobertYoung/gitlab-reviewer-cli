@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"text/template"
 	"time"
 
 	"charm.land/bubbles/v2/spinner"
@@ -12,8 +11,8 @@ import (
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
-	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx/position"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/publisher"
 )
 
 type publishProgressMsg struct {
@@ -57,8 +56,7 @@ type publish struct {
 	cfg    config.Config
 	opts   publishOpts
 	mode   string // draft | immediate, per-run overridable
-	tmpl   *template.Template
-	index  []position.FileIndex
+	pub    *publisher.Publisher
 
 	ch             chan tea.Msg
 	spin           spinner.Model
@@ -83,16 +81,15 @@ func newPublish(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, ac
 		cfg:    cfg,
 		opts:   opts,
 		mode:   cfg.Publish.Mode,
-		index:  position.Index(diffs),
 		spin:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
 	// A bad per-project template falls back to the built-in layout rather
 	// than blocking the publish; the error is surfaced on screen.
-	tmpl, err := review.ParseBodyTemplate(cfg.Publish.Template)
+	pub, err := publisher.New(deps.Svc, detail, diffs, cfg.Publish)
 	if err != nil {
-		s.errs = append(s.errs, err.Error()+" — using the built-in layout")
+		s.errs = append(s.errs, err.Error())
 	}
-	s.tmpl = tmpl
+	s.pub = pub
 	return s
 }
 
@@ -131,91 +128,32 @@ func (s *publish) wait() tea.Cmd {
 	return func() tea.Msg { return <-s.ch }
 }
 
-// run posts each accepted finding in order. Sequential on purpose: GitLab
-// rate limits are unkind to bursts, and progress is clearer.
+// run posts each accepted finding in order through the shared publisher.
+// Sequential on purpose: GitLab rate limits are unkind to bursts, and
+// progress is clearer.
 func (s *publish) run() {
 	iid := s.detail.IID
+	s.pub.Draft = s.mode == "draft"
 	for i, f := range s.items {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		state, err := s.publishOne(ctx, f)
+		state, err := s.pub.PublishOne(ctx, f)
 		cancel()
 		s.ch <- publishProgressMsg{iid: iid, index: i, state: state, err: err}
 	}
 	s.ch <- publishDoneMsg{iid: iid}
 }
 
-func (s *publish) publishOne(ctx context.Context, f review.Finding) (review.FindingState, error) {
-	project := s.detail.Project()
-	body := f.RenderBody(s.tmpl, s.cfg.Publish.Attribution)
-	draft := s.mode == "draft"
-
-	post := func(body string, pos *gitlabx.Position) error {
-		if draft {
-			return s.deps.Svc.CreateDraftNote(ctx, project, s.detail.IID, body, pos)
-		}
-		if pos != nil {
-			return s.deps.Svc.CreateInlineDiscussion(ctx, project, s.detail.IID, body, pos)
-		}
-		return s.deps.Svc.CreateNote(ctx, project, s.detail.IID, body)
-	}
-
-	// A finding with no file is a deliberate MR-level comment (manual
-	// comments composed in the TUI): post it as a general note, not as a
-	// failed position resolution.
-	if f.File == "" {
-		if err := post(body, nil); err != nil {
-			return review.StatePending, err
-		}
-		return review.StatePublished, nil
-	}
-
-	pos, resolveErr := position.Resolve(f.File, f.Line.OldLine, f.Line.NewLine, s.index, s.detail.DiffRefs)
-	if resolveErr == nil {
-		if err := post(body, pos); err == nil {
-			return review.StatePublished, nil
-		} else if !s.cfg.Publish.FallbackToNote {
-			return review.StatePending, err
-		}
-	} else if !s.cfg.Publish.FallbackToNote {
-		return review.StatePending, resolveErr
-	}
-
-	// Fallback: unpositioned comment with a permalink to the flagged line.
-	fallback := f.RenderFallbackBody(s.tmpl, s.cfg.Publish.Attribution, s.blobURL(f))
-	if err := post(fallback, nil); err != nil {
-		return review.StatePending, err
-	}
-	return review.StateFellBack, nil
-}
-
 // publishReview publishes all pending draft notes in one action.
 func (s *publish) publishReview() tea.Cmd {
 	s.phase = phasePosting
 	iid := s.detail.IID
-	project := s.detail.Project()
-	svc := s.deps.Svc
+	pub := s.pub
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		s.ch <- publishDoneMsg{iid: iid, err: svc.PublishAllDraftNotes(ctx, project, iid)}
+		s.ch <- publishDoneMsg{iid: iid, err: pub.PublishReview(ctx)}
 	}()
 	return s.wait()
-}
-
-// blobURL builds a permalink to the finding's line at the MR head commit.
-func (s *publish) blobURL(f review.Finding) string {
-	if s.detail.WebURL == "" || s.detail.DiffRefs.HeadSHA == "" {
-		return ""
-	}
-	base, _, found := strings.Cut(s.detail.WebURL, "/-/")
-	if !found {
-		return ""
-	}
-	url := fmt.Sprintf("%s/-/blob/%s/%s", base, s.detail.DiffRefs.HeadSHA, f.File)
-	if f.Line.NewLine != nil {
-		url += fmt.Sprintf("#L%d", *f.Line.NewLine)
-	}
-	return url
 }
 
 func (s *publish) Update(msg tea.Msg) (Screen, tea.Cmd) {

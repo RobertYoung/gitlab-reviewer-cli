@@ -40,6 +40,15 @@ type Record struct {
 	Findings  []review.Finding `json:"findings"`
 }
 
+// Path returns where Save writes rec: a file in the store directory keyed
+// by IID and start time. Empty for a nil or unrooted store.
+func (s *Store) Path(rec Record) string {
+	if s == nil || s.dir == "" {
+		return ""
+	}
+	return filepath.Join(s.dir, fmt.Sprintf("review-%d-%d.json", rec.IID, rec.Started.Unix()))
+}
+
 // Save writes the record, atomically replacing any earlier save of the same
 // run: the file is keyed by IID and start time, so curation updates
 // overwrite in place.
@@ -54,7 +63,7 @@ func (s *Store) Save(rec Record) error {
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(s.dir, fmt.Sprintf("review-%d-%d.json", rec.IID, rec.Started.Unix()))
+	path := s.Path(rec)
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err

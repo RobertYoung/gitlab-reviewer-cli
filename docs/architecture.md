@@ -1,10 +1,19 @@
 # Architecture
 
-`gitlab-reviewer` is layered so that the TUI only sees small interfaces:
-`gitlabx.Service` (GitLab API), `checkout.Manager` (repo on disk), and
-`review.Reviewer` (AI backend). `internal/gitlabx` is the only package that
-imports the GitLab client; `internal/review/claudecli` is the only package
-that knows the `claude` binary exists.
+`gitlab-reviewer` is layered so that the frontends only see small
+interfaces: `gitlabx.Service` (GitLab API), `checkout.Manager` (repo on
+disk), and `review.Reviewer` (AI backend). `internal/gitlabx` is the only
+package that imports the GitLab client; `internal/review/claudecli` is the
+only package that knows the `claude` binary exists.
+
+There are two frontends over the same core: the TUI (`internal/tui`,
+Bubble Tea, the root command) and the browser GUI (`internal/webui`, a
+loopback-only HTTP server behind `gitlab-reviewer gui`). Both drive the
+review pipeline through `internal/review/runner` (checkout → prompt →
+reviewer passes → merge → stored record) and publish through
+`internal/review/publisher` (position resolution, draft/immediate posting,
+note fallback), so a review started in one frontend can be reopened in the
+other.
 
 ## Component diagram
 
@@ -18,11 +27,18 @@ graph TD
         PUBLISH[publish screen]
     end
 
+    subgraph WEBUI["internal/webui (browser GUI)"]
+        HANDLERS[HTTP handlers + templates]
+        SSE[review run registry + SSE]
+    end
+
     CONFIG[internal/config<br/>koanf: flags > env > file > defaults]
     GITLABX[internal/gitlabx<br/>client-go wrapper]
     POSITION[internal/gitlabx/position<br/>diff parsing + position mapping]
     CHECKOUT[internal/checkout<br/>clone / path / root → worktree]
     REVIEW[internal/review<br/>Reviewer interface, prompt, schema]
+    RUNNER[internal/review/runner<br/>run orchestration + persistence]
+    PUBLISHER[internal/review/publisher<br/>posting: inline / draft / fallback]
     CLAUDECLI[internal/review/claudecli<br/>claude -p subprocess]
     SECRET[internal/secret<br/>token redaction]
 
@@ -31,12 +47,18 @@ graph TD
     CLAUDE[[claude CLI<br/>Anthropic API / Bedrock]]
 
     CONFIG --> TUI
+    CONFIG --> WEBUI
     MRLIST --> GITLABX
     MRDETAIL --> GITLABX
-    REVIEWRUN --> CHECKOUT
-    REVIEWRUN --> REVIEW
-    FINDINGS --> POSITION
-    PUBLISH --> GITLABX
+    HANDLERS --> GITLABX
+    REVIEWRUN --> RUNNER
+    SSE --> RUNNER
+    RUNNER --> CHECKOUT
+    RUNNER --> REVIEW
+    PUBLISH --> PUBLISHER
+    HANDLERS --> PUBLISHER
+    PUBLISHER --> POSITION
+    PUBLISHER --> GITLABX
     REVIEW --> CLAUDECLI
     GITLABX --> GITLAB
     CHECKOUT --> REPO

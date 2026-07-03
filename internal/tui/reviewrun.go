@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -15,6 +14,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
 )
 
 type (
@@ -102,185 +102,23 @@ func (s *reviewRun) wait() tea.Cmd {
 	return func() tea.Msg { return <-s.ch }
 }
 
-// run executes the whole review off the UI goroutine, reporting through the
-// channel. It must not touch the model. The done message is sent strictly
-// last, after worktree cleanup. Every progress line is also appended to the
-// run log on disk so it can be read back after this screen is gone.
+// run executes the whole review off the UI goroutine through the shared
+// runner, reporting through the channel. It must not touch the model. The
+// done message is sent strictly last, after worktree cleanup.
 func (s *reviewRun) run(ctx context.Context) {
 	iid := s.detail.IID
-	rl := s.deps.Logs.Start(iid, s.detail.Ref(), s.detail.Title)
-	emit := func(text string) {
-		rl.Append(text)
+	r := runner.Runner{
+		Cfg:      s.cfg,
+		Svc:      s.deps.Svc,
+		Reviewer: s.deps.Reviewer,
+		Checkout: s.deps.Checkout,
+		Logs:     s.deps.Logs,
+		Results:  s.deps.Results,
+	}
+	out := r.Run(ctx, s.detail, s.diffs, s.commits, func(text string) {
 		s.ch <- reviewEventMsg{iid: iid, text: text}
-	}
-	res, err := s.execute(ctx, emit)
-	switch {
-	case errors.Is(err, context.Canceled):
-		rl.Finish("cancelled")
-	case err != nil:
-		rl.Finish("failed: " + err.Error())
-	default:
-		rl.Finish(fmt.Sprintf("completed with %d finding(s)", len(res.Findings)))
-	}
-	// Store the result so the review can be reopened later (L on the MR
-	// detail screen), even if this session ends. Curation states are kept
-	// current by the findings screen re-saving the same record.
-	var rec *resultstore.Record
-	if err == nil {
-		rec = &resultstore.Record{
-			IID:       iid,
-			Ref:       s.detail.Ref(),
-			Title:     s.detail.Title,
-			Started:   s.started,
-			Summary:   res.Summary,
-			Warnings:  res.Warnings,
-			SessionID: res.SessionID,
-			CostUSD:   res.CostUSD,
-			LogPath:   rl.Path(),
-			Findings:  res.Findings,
-		}
-		if saveErr := s.deps.Results.Save(*rec); saveErr != nil {
-			res.Warnings = append(res.Warnings, "could not store the review result: "+saveErr.Error())
-		}
-	}
-	s.ch <- reviewDoneMsg{iid: iid, result: res, err: err, logPath: rl.Path(), rec: rec}
-}
-
-func (s *reviewRun) execute(ctx context.Context, emit func(string)) (*review.Result, error) {
-	emit("preparing repository…")
-	path, cleanup, err := s.deps.Checkout(ctx, s.detail, emit)
-	if err != nil {
-		return nil, fmt.Errorf("checkout failed: %w", err)
-	}
-	defer func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := cleanup(cleanupCtx); err != nil {
-			emit("warning: worktree cleanup failed: " + err.Error())
-		}
-	}()
-
-	// Fetch the MR description template from GitLab (best-effort): it lets
-	// the review run a description-vs-template hygiene check when the team's
-	// instructions ask for one. Fetched here in the Go process, not the
-	// read-only claude subprocess.
-	template, err := s.deps.Svc.GetMergeRequestTemplate(ctx, s.detail.Project())
-	if err != nil {
-		emit("note: could not fetch MR template: " + err.Error())
-	}
-
-	reqs, warnings, err := buildRequests(s.cfg, s.detail, s.diffs, s.commits, template, path)
-	if err != nil {
-		return nil, err
-	}
-	// Rebase status is a deterministic MR-level fact with no diff line to
-	// anchor a finding on, so it surfaces as a review warning rather than a
-	// model finding.
-	if s.detail.NeedsRebase() {
-		warnings = append(warnings, rebaseWarning(s.detail))
-	}
-	for _, w := range warnings {
-		emit(w)
-	}
-
-	// Oversized MRs run as several passes; Claude has the whole repo on
-	// disk in every pass, only the focus diff changes.
-	results := make([]*review.Result, 0, len(reqs))
-	for i, req := range reqs {
-		if len(reqs) > 1 {
-			emit(fmt.Sprintf("review pass %d/%d (%d file(s)) with %s…", i+1, len(reqs), len(req.Diffs), s.deps.Reviewer.Name()))
-		} else {
-			emit(fmt.Sprintf("reviewing %d file(s) with %s…", len(req.Diffs), s.deps.Reviewer.Name()))
-		}
-		res, err := s.deps.Reviewer.Review(ctx, req, func(e review.Event) {
-			emit(e.Text)
-		})
-		if err != nil {
-			if len(results) > 0 {
-				// Keep what earlier passes found rather than losing it all.
-				merged := review.MergeResults(results)
-				merged.Warnings = append(merged.Warnings, fmt.Sprintf("pass %d/%d failed: %v", i+1, len(reqs), err))
-				return merged, nil
-			}
-			return nil, err
-		}
-		results = append(results, res)
-	}
-	var final *review.Result
-	if len(results) == 1 {
-		final = results[0]
-	} else {
-		final = review.MergeResults(results)
-	}
-	// Surface pre-review warnings (chunking, rebase status) in the findings
-	// screen, not just the transient progress log.
-	final.Warnings = append(warnings, final.Warnings...)
-	return final, nil
-}
-
-// rebaseWarning describes why the MR branch is not up to date with its
-// target, for the findings-screen warning banner.
-func rebaseWarning(detail gitlabx.MRDetail) string {
-	switch {
-	case detail.HasConflicts:
-		return fmt.Sprintf("MR branch has conflicts with %s — rebase before review", detail.TargetBranch)
-	case detail.DivergedCommits > 0:
-		return fmt.Sprintf("MR branch is %d commit(s) behind %s — a rebase is needed", detail.DivergedCommits, detail.TargetBranch)
-	default:
-		return "MR branch is not up to date with its target"
-	}
-}
-
-// buildRequests assembles the reviewer request(s) from project-resolved
-// config: chunked diffs, category list, and combined custom instructions.
-func buildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, template, repoPath string) ([]review.Request, []string, error) {
-	var warnings []string
-
-	chunks, skipped := review.ChunkDiffs(diffs, cfg.Review.Exclude, cfg.Review.MaxDiffKB)
-	if len(chunks) == 0 {
-		return nil, nil, errors.New("nothing to review: every changed file is excluded or over the diff budget")
-	}
-	if len(skipped) > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d file(s) excluded from the prompt (globs/size budget)", len(skipped)))
-	}
-	if len(chunks) > 1 {
-		warnings = append(warnings, fmt.Sprintf("large MR: splitting the review into %d passes", len(chunks)))
-	}
-
-	instructions := cfg.Review.Instructions
-	if cfg.Review.InstructionsFile != "" {
-		data, err := os.ReadFile(cfg.Review.InstructionsFile)
-		if err != nil {
-			return nil, nil, fmt.Errorf("reading review.instructions_file: %w", err)
-		}
-		if instructions != "" {
-			instructions += "\n\n"
-		}
-		instructions += string(data)
-	}
-
-	categories := make([]review.Category, 0, len(cfg.Review.Categories))
-	for _, c := range cfg.Review.Categories {
-		categories = append(categories, review.Category(c))
-	}
-
-	reqs := make([]review.Request, 0, len(chunks))
-	for _, chunk := range chunks {
-		reqs = append(reqs, review.Request{
-			RepoPath:     repoPath,
-			MR:           detail,
-			Diffs:        chunk,
-			Commits:      commits,
-			Template:     template,
-			Truncated:    skipped,
-			Instructions: instructions,
-			Categories:   categories,
-			Model:        cfg.Review.Model,
-			Timeout:      cfg.Review.Timeout,
-			MaxBudgetUSD: cfg.Review.MaxBudgetUSD,
-		})
-	}
-	return reqs, warnings, nil
+	})
+	s.ch <- reviewDoneMsg{iid: iid, result: out.Result, err: out.Err, logPath: out.LogPath, rec: out.Rec}
 }
 
 func (s *reviewRun) Update(msg tea.Msg) (Screen, tea.Cmd) {

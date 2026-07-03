@@ -1,0 +1,31 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.WebURL)}}
+<section class="panel runpage" data-events="{{$c.EventsURL}}" {{if $c.Done}}data-done="1"{{end}}>
+  <h2>{{if $c.Done}}Review of {{$c.Run.Ref}}{{else}}<span class="spinner"></span> Reviewing {{$c.Run.Ref}}…{{end}}</h2>
+
+  <pre class="runlog" id="runlog">{{range $c.Lines}}{{.}}
+{{end}}</pre>
+
+  <div id="run-status">
+    {{if $c.Done}}
+      {{if $c.Outcome.Cancelled}}
+      <p class="warning">Review cancelled.</p>
+      {{else if $c.Outcome.Err}}
+      <p class="error">Review failed: {{$c.Outcome.Err}}</p>
+      {{else}}
+      <p class="ok">Review completed with {{$c.Outcome.Findings}} finding(s).</p>
+      {{end}}
+      <div class="actions">
+        {{if $c.FindingsURL}}<a class="button primary" href="{{$c.FindingsURL}}">Open findings</a>{{end}}
+        {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">View full log</a>{{end}}
+        <a class="button" href="{{$c.Nav.DetailURL}}">Back to MR</a>
+      </div>
+    {{else}}
+      <form method="post" action="{{$c.CancelURL}}">
+        <button type="submit" class="button danger">Cancel review</button>
+      </form>
+    {{end}}
+  </div>
+</section>
+{{end}}

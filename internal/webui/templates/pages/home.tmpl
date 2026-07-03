@@ -1,0 +1,10 @@
+{{define "content"}}
+<section class="panel narrow">
+  <h2>Choose a GitLab instance</h2>
+  <ul class="instance-list">
+    {{range .Content}}
+    <li><a class="button" href="{{.URL}}">{{.Name}}</a></li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
