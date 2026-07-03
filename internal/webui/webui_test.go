@@ -115,6 +115,12 @@ func (f *fakeService) PublishAllDraftNotes(context.Context, any, int64) error {
 	return nil
 }
 
+func (f *fakeService) GetApprovals(context.Context, any, int64) (*gitlabx.Approvals, error) {
+	return &gitlabx.Approvals{UserCanApprove: true}, nil
+}
+func (f *fakeService) Approve(context.Context, any, int64, string) error { return nil }
+func (f *fakeService) Unapprove(context.Context, any, int64) error       { return nil }
+
 type fakeReviewer struct{ result *review.Result }
 
 func (r *fakeReviewer) Name() string                         { return "fake" }
