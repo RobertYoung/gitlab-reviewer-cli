@@ -232,6 +232,7 @@ silent fallback to the shared token.
 |---|---|---|---|
 | `review.provider` | `GITLAB_REVIEWER_REVIEW_PROVIDER` | `--provider` | `anthropic` (`anthropic`\|`bedrock`) |
 | `review.model` | `GITLAB_REVIEWER_REVIEW_MODEL` | `--model` | claude CLI default |
+| `review.models` | `GITLAB_REVIEWER_REVIEW_MODELS` (comma-separated) | `--models` | curated per-provider list — see below |
 | `review.claude_path` | `GITLAB_REVIEWER_REVIEW_CLAUDE_PATH` | `--claude-path` | `claude` on `PATH` |
 | `review.timeout` | `GITLAB_REVIEWER_REVIEW_TIMEOUT` | `--review-timeout` | `10m` |
 | `review.max_budget_usd` | `GITLAB_REVIEWER_REVIEW_MAX_BUDGET_USD` | `--max-budget-usd` | unset |
@@ -246,6 +247,22 @@ silent fallback to the shared token.
 | `review.use_agents` | `GITLAB_REVIEWER_REVIEW_USE_AGENTS` | `--use-agents` | `false` |
 | `review.env` | — (file only, map) | `--review-env KEY=VALUE` (repeatable) | `{}` |
 | `review.mcp_servers` | — (file only, map) | — | `{}` — see [MCP servers](#mcp-servers) |
+
+`gitlab-reviewer models` lists the models available for the review:
+`review.models` when set, otherwise a curated list of common Claude models
+for the selected provider (aliases like `opus`/`sonnet`/`haiku` plus full
+IDs for `anthropic`; cross-region inference-profile IDs for `bedrock`).
+The same list backs shell completion of `--model`. It is suggestions, not
+validation — `review.model` accepts any model ID the claude CLI
+understands. Set `review.models` to pin your team's own list (e.g.
+account-specific Bedrock inference profiles):
+
+```yaml
+review:
+  models:
+    - eu.anthropic.claude-sonnet-4-6
+    - eu.anthropic.claude-haiku-4-5
+```
 
 `review.instructions` (and/or the contents of `review.instructions_file`)
 are appended to the built-in review prompt — use them for team conventions
@@ -657,6 +674,10 @@ review:
   env:
     HTTPS_PROXY: http://proxy.corp:3128
 ```
+
+`gitlab-reviewer models` lists common inference-profile IDs once
+`review.provider` is `bedrock`; set `review.models` if your account uses
+different regions or profile names.
 
 Verify with a normal review run — the progress log shows the model the
 session started with.
