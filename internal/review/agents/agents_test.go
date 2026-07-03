@@ -171,6 +171,33 @@ func TestCatalogShadowing(t *testing.T) {
 	}
 }
 
+func TestCatalogWithProjectClaudeAgents(t *testing.T) {
+	repo := t.TempDir()
+	writeAgent(t, filepath.Join(repo, ".claude", "agents"), "sql.md", "---\ndescription: from claude\n---\nClaude prompt.\n")
+	writeAgent(t, filepath.Join(repo, ".claude", "agents"), "shared.md", "Claude shared prompt.\n")
+	writeAgent(t, filepath.Join(repo, ".gitlab-reviewer", "agents"), "shared.md", "Reviewer shared prompt.\n")
+
+	cat := NewCatalog("").WithProject(repo)
+	byName := map[string]Agent{}
+	for _, a := range cat.All() {
+		byName[a.Name] = a
+	}
+	if a := byName["sql"]; a.Source != SourceProject || a.Prompt != "Claude prompt." {
+		t.Errorf("claude agent: %+v", a)
+	}
+	// On a name collision .gitlab-reviewer/agents wins, without duplicating
+	// the entry.
+	if a := byName["shared"]; a.Prompt != "Reviewer shared prompt." {
+		t.Errorf("shared agent: %+v", a)
+	}
+	if n := len(cat.All()); n != len(Builtins())+2 {
+		t.Errorf("catalog size %d: %v", n, cat.Names())
+	}
+	if len(cat.Warnings()) != 0 {
+		t.Errorf("warnings: %v", cat.Warnings())
+	}
+}
+
 func TestCatalogResolve(t *testing.T) {
 	c := NewCatalog("")
 	got, err := c.Resolve([]string{"security", "bug"})
@@ -230,6 +257,36 @@ func TestLoadProjectFiles(t *testing.T) {
 	}
 	if !strings.Contains(warns[0], "duplicate name") || !strings.Contains(warns[1], "invalid agent name") {
 		t.Errorf("warnings: %v", warns)
+	}
+}
+
+func TestLoadProjectFilesAcrossDirs(t *testing.T) {
+	files := []File{
+		{Dir: ClaudeAgentsDir, Name: "shared.md", Content: []byte("Claude prompt.")},
+		{Dir: ProjectAgentsDir, Name: "shared.md", Content: []byte("Reviewer prompt.")},
+	}
+	// Same name in different directories is shadowing, not a duplicate:
+	// both parse, and the catalog merge keeps the later (ProjectAgentsDir).
+	got, warns := LoadProjectFiles(files)
+	if len(got) != 2 || len(warns) != 0 {
+		t.Fatalf("agents=%+v warns=%v", got, warns)
+	}
+	if got[0].Path != ClaudeAgentsDir+"/shared.md" || got[1].Path != ProjectAgentsDir+"/shared.md" {
+		t.Errorf("paths: %q, %q", got[0].Path, got[1].Path)
+	}
+
+	cat := NewCatalog("").WithProjectFiles(files)
+	count := 0
+	for _, a := range cat.All() {
+		if a.Name == "shared" {
+			count++
+			if a.Prompt != "Reviewer prompt." {
+				t.Errorf("shared agent: %+v", a)
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("%d shared agents in catalog: %v", count, cat.Names())
 	}
 }
 

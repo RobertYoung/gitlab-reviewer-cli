@@ -16,6 +16,17 @@ import (
 // with their project.
 const ProjectAgentsDir = ".gitlab-reviewer/agents"
 
+// ClaudeAgentsDir is Claude Code's subagents directory. Teams that keep
+// review guidance there ship it to both tools with one set of files; the
+// definition format is compatible (YAML frontmatter + prompt body), and
+// fields this tool does not know are ignored.
+const ClaudeAgentsDir = ".claude/agents"
+
+// ProjectAgentDirs are the repo-relative directories scanned for
+// project-shipped agents, in increasing precedence: a definition in
+// ProjectAgentsDir shadows a same-named one in ClaudeAgentsDir.
+var ProjectAgentDirs = []string{ClaudeAgentsDir, ProjectAgentsDir}
+
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
 // frontmatter is the YAML header of an agent definition file.
@@ -58,32 +69,43 @@ func loadDir(dir string, source Source) (agents []Agent, warnings []string) {
 }
 
 // File is one agent definition fetched from a repository (e.g. over the
-// GitLab API), named by its base file name within the agents directory.
+// GitLab API), named by its base file name within Dir — the agents
+// directory it came from (one of ProjectAgentDirs; empty means
+// ProjectAgentsDir).
 type File struct {
+	Dir     string
 	Name    string
 	Content []byte
 }
 
 // LoadProjectFiles parses fetched project agent definitions with the same
 // skip-and-warn and duplicate handling as loadDir. Non-.md files are
-// ignored, matching the on-disk loader.
+// ignored, matching the on-disk loader. Duplicate names are only skipped
+// within one directory; across directories both agents are returned, and
+// the catalog merge lets the later file shadow the earlier — so callers
+// must supply files in ProjectAgentDirs order.
 func LoadProjectFiles(files []File) (agents []Agent, warnings []string) {
-	seen := map[string]string{} // name → file, for duplicate detection
+	seen := map[string]string{} // dir + name → file, for duplicate detection
 	for _, f := range files {
 		if !strings.HasSuffix(f.Name, ".md") {
 			continue
 		}
-		ref := ProjectAgentsDir + "/" + f.Name
+		dir := f.Dir
+		if dir == "" {
+			dir = ProjectAgentsDir
+		}
+		ref := dir + "/" + f.Name
 		a, err := parse(f.Content, ref, SourceProject)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("agents: skipping %s: %v", ref, err))
 			continue
 		}
-		if prev, dup := seen[a.Name]; dup {
+		key := dir + "\x00" + a.Name
+		if prev, dup := seen[key]; dup {
 			warnings = append(warnings, fmt.Sprintf("agents: skipping %s: duplicate name %q (already defined by %s)", ref, a.Name, prev))
 			continue
 		}
-		seen[a.Name] = ref
+		seen[key] = ref
 		agents = append(agents, a)
 	}
 	return agents, warnings

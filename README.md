@@ -287,8 +287,11 @@ matters more than coverage.
 
 **Bring your own agents.** Drop Markdown files in
 `~/.config/gitlab-reviewer/agents/` (yours) or `.gitlab-reviewer/agents/`
-in the reviewed repo (the team's). The file body is the agent's prompt; an
-optional YAML frontmatter adds metadata:
+in the reviewed repo (the team's). Repos that keep review guidance in
+Claude Code's `.claude/agents/` are picked up too — the definition format
+is compatible, and frontmatter fields this tool does not know (`tools`,
+`model`, …) are ignored. The file body is the agent's prompt; an optional
+YAML frontmatter adds metadata:
 
 ```markdown
 ---
@@ -303,16 +306,17 @@ migrations without a documented rollback.
 ```
 
 Name collisions resolve as repo > user > built-in, so a repo can sharpen
-the stock `security` agent by shipping its own `security.md`. Invalid
+the stock `security` agent by shipping its own `security.md`; within a
+repo, `.gitlab-reviewer/agents/` beats `.claude/agents/`. Invalid
 definition files are skipped with a warning in the picker and the run log.
 Repo-shipped agents run in the same read-only sandbox as every review
 (`Read`/`Grep`/`Glob` only).
 
 How the pickers discover repo agents depends on `checkout.mode`. In `path`
-and `root` modes they read `.gitlab-reviewer/agents/` straight from your
+and `root` modes they read both agent directories straight from your
 local clone — which also picks up definitions your team deliberately keeps
 untracked (e.g. via `.git/info/exclude`, like `checkout.local_overlay`
-files); the run resolves against the same directory, with definitions
+files); the run resolves against the same directories, with definitions
 committed at the MR head taking precedence over local ones of the same
 name. In `clone` mode they are fetched over the GitLab API at the MR's
 head commit — no local checkout needed — so they are toggleable up front,

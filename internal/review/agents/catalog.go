@@ -28,16 +28,19 @@ func NewCatalog(userDir string) *Catalog {
 }
 
 // WithProject returns a copy of the catalog extended with agents shipped in
-// the repo checkout under ProjectAgentsDir. Project agents shadow user and
-// builtin agents of the same name.
+// the repo checkout under the ProjectAgentDirs. Project agents shadow user
+// and builtin agents of the same name; across the project directories the
+// merge order makes ProjectAgentsDir shadow ClaudeAgentsDir.
 func (c *Catalog) WithProject(repoPath string) *Catalog {
 	out := &Catalog{
 		agents:   append([]Agent(nil), c.agents...),
 		warnings: append([]string(nil), c.warnings...),
 	}
-	project, warns := loadDir(filepath.Join(repoPath, filepath.FromSlash(ProjectAgentsDir)), SourceProject)
-	out.merge(project)
-	out.warnings = append(out.warnings, warns...)
+	for _, dir := range ProjectAgentDirs {
+		project, warns := loadDir(filepath.Join(repoPath, filepath.FromSlash(dir)), SourceProject)
+		out.merge(project)
+		out.warnings = append(out.warnings, warns...)
+	}
 	return out
 }
 

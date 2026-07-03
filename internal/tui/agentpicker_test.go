@@ -126,10 +126,16 @@ func repoAgentPicker(t *testing.T, deps Deps) (*agentPicker, func()) {
 }
 
 func repoAgentService() *fakeService {
-	return &fakeService{repoFiles: []gitlabx.RepoFile{{
-		Name:    "sql.md",
-		Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
-	}}}
+	return &fakeService{repoFilesByDir: map[string][]gitlabx.RepoFile{
+		agents.ProjectAgentsDir: {{
+			Name:    "sql.md",
+			Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
+		}},
+		agents.ClaudeAgentsDir: {{
+			Name:    "conventions.md",
+			Content: []byte("---\ndescription: Team conventions\n---\nCheck team conventions.\n"),
+		}},
+	}}
 }
 
 func TestAgentPickerMergesRepoAgents(t *testing.T) {
@@ -141,12 +147,13 @@ func TestAgentPickerMergesRepoAgents(t *testing.T) {
 	before := len(p.agents)
 	deliver()
 
-	if len(p.agents) != before+1 || p.agents[len(p.agents)-1].Name != "sql-migrations" {
-		t.Fatalf("repo agent not merged: %v", p.selected())
+	// Both agent directories are fetched, .claude/agents first.
+	if len(p.agents) != before+2 || p.agents[len(p.agents)-2].Name != "conventions" || p.agents[len(p.agents)-1].Name != "sql-migrations" {
+		t.Fatalf("repo agents not merged: %v", p.selected())
 	}
 	// With no remembered selection everything is checked, repo agents too.
-	if !p.checked["sql-migrations"] {
-		t.Errorf("repo agent not checked by default: %v", p.selected())
+	if !p.checked["sql-migrations"] || !p.checked["conventions"] {
+		t.Errorf("repo agents not checked by default: %v", p.selected())
 	}
 	p.width = 100
 	if !strings.Contains(p.View(), "(project)") {
@@ -186,12 +193,17 @@ func TestAgentPickerSkipsFetchWithoutHeadSHA(t *testing.T) {
 
 func TestAgentPickerReadsLocalClone(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "gitlab.example.com", "group", "app", ".gitlab-reviewer", "agents")
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "local-only.md"), []byte("Untracked local agent.\n"), 0o600); err != nil {
-		t.Fatal(err)
+	clone := filepath.Join(root, "gitlab.example.com", "group", "app")
+	for dir, name := range map[string]string{
+		filepath.Join(clone, ".gitlab-reviewer", "agents"): "local-only.md",
+		filepath.Join(clone, ".claude", "agents"):          "conventions.md",
+	} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("Untracked local agent.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	deps := pickerDeps(t)
@@ -213,10 +225,11 @@ func TestAgentPickerReadsLocalClone(t *testing.T) {
 	if _, c := p.Update(msg); c != nil {
 		t.Fatal("merge must not emit commands")
 	}
-	if p.agents[len(p.agents)-1].Name != "local-only" {
-		t.Fatalf("local agent not merged: %v", p.selected())
+	// Both agent directories in the clone are read, .claude/agents first.
+	if p.agents[len(p.agents)-2].Name != "conventions" || p.agents[len(p.agents)-1].Name != "local-only" {
+		t.Fatalf("local agents not merged: %v", p.selected())
 	}
-	if !p.checked["local-only"] {
-		t.Errorf("local agent not checked by default: %v", p.selected())
+	if !p.checked["local-only"] || !p.checked["conventions"] {
+		t.Errorf("local agents not checked by default: %v", p.selected())
 	}
 }
