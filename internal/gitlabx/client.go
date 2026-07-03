@@ -121,6 +121,7 @@ func toSummary(mr *gitlab.BasicMergeRequest, projectPath string) MRSummary {
 	}
 	if mr.Author != nil {
 		s.Author = mr.Author.Username
+		s.AuthorName = mr.Author.Name
 	}
 	if mr.CreatedAt != nil {
 		s.CreatedAt = *mr.CreatedAt
@@ -247,6 +248,7 @@ func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*
 	}
 	if mr.Author != nil {
 		detail.Author = mr.Author.Username
+		detail.AuthorName = mr.Author.Name
 	}
 	if mr.CreatedAt != nil {
 		detail.CreatedAt = *mr.CreatedAt
@@ -479,7 +481,7 @@ func (c *Client) GetApprovals(ctx context.Context, project any, iid int64) (*App
 	}
 	for _, by := range a.ApprovedBy {
 		if by.User != nil {
-			out.ApprovedBy = append(out.ApprovedBy, by.User.Username)
+			out.ApprovedBy = append(out.ApprovedBy, userDisplay(by.User.Name, by.User.Username))
 		}
 	}
 	return out, nil
@@ -514,6 +516,7 @@ func toDiscussion(d *gitlab.Discussion) Discussion {
 		}
 		if n.Author.Username != "" {
 			note.Author = n.Author.Username
+			note.AuthorName = n.Author.Name
 		}
 		if n.CreatedAt != nil {
 			note.CreatedAt = *n.CreatedAt

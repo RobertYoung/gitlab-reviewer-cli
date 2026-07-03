@@ -207,7 +207,7 @@ func anchorComments(discussions []gitlabx.Discussion, pending []review.Finding) 
 			if n.System {
 				continue
 			}
-			t.Comments = append(t.Comments, inlineComment{Author: n.Author, Body: n.Body, When: n.CreatedAt})
+			t.Comments = append(t.Comments, inlineComment{Author: n.AuthorDisplay(), Body: n.Body, When: n.CreatedAt})
 			t.Resolved = t.Resolved && n.Resolved
 		}
 		if len(t.Comments) == 0 {

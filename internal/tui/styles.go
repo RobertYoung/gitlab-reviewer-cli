@@ -320,7 +320,7 @@ func renderThread(d gitlabx.Discussion, width int) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		head := "💬 @" + n.Author
+		head := "💬 " + n.AuthorDisplay()
 		if n.Resolved {
 			head += subtleStyle.Render(" (resolved)")
 		}

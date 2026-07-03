@@ -33,7 +33,7 @@
         <td>!{{.IID}}</td>
         <td><a href="{{call $c.MRURL .}}">{{if .Draft}}<span class="badge draft">draft</span> {{end}}{{.Title}}</a></td>
         <td class="subtle">{{.ProjectPath}}</td>
-        <td class="subtle">{{.Author}}</td>
+        <td class="subtle">{{.AuthorDisplay}}</td>
         <td class="subtle">{{.TargetBranch}}</td>
         <td class="subtle">{{reltime .UpdatedAt}}</td>
       </tr>

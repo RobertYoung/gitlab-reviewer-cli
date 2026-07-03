@@ -332,7 +332,7 @@ func (s *mrList) refreshRows() {
 			fmt.Sprintf("!%d", mr.IID),
 			truncate(mr.ProjectPath, 26),
 			title,
-			mr.Author,
+			truncate(mr.AuthorDisplay(), 14),
 			mr.TargetBranch,
 			relTime(mr.UpdatedAt),
 		}

@@ -55,7 +55,8 @@ type MRSummary struct {
 	Description  string
 	State        string
 	Draft        bool
-	Author       string
+	Author       string // username
+	AuthorName   string // full name; empty when GitLab omits it
 	SourceBranch string
 	TargetBranch string
 	HeadSHA      string
@@ -85,6 +86,11 @@ func (m MRSummary) ProjectWebURL() string {
 		return m.WebURL[:i]
 	}
 	return ""
+}
+
+// AuthorDisplay formats the author for display.
+func (m MRSummary) AuthorDisplay() string {
+	return userDisplay(m.AuthorName, m.Author)
 }
 
 // AuthorWebURL is the author's profile page on the MR's instance, or empty
@@ -147,7 +153,7 @@ type Approvals struct {
 	Approved          bool // every required approval rule is satisfied
 	ApprovalsRequired int64
 	ApprovalsLeft     int64
-	ApprovedBy        []string // usernames
+	ApprovedBy        []string // display names, see userDisplay
 	UserHasApproved   bool
 	UserCanApprove    bool
 }
@@ -199,13 +205,32 @@ func (d Discussion) Anchor() *Position {
 
 // Note is a single comment, optionally anchored to a diff position.
 type Note struct {
-	ID        int64
-	Author    string
-	Body      string
-	System    bool
-	Resolved  bool
-	CreatedAt time.Time
-	Position  *Position // nil for general (unpositioned) notes
+	ID         int64
+	Author     string // username
+	AuthorName string // full name; empty when GitLab omits it
+	Body       string
+	System     bool
+	Resolved   bool
+	CreatedAt  time.Time
+	Position   *Position // nil for general (unpositioned) notes
+}
+
+// AuthorDisplay formats the note's author for display.
+func (n Note) AuthorDisplay() string {
+	return userDisplay(n.AuthorName, n.Author)
+}
+
+// userDisplay renders a user as "Full Name (@username)", degrading to
+// whichever part is known when the other is missing.
+func userDisplay(name, username string) string {
+	switch {
+	case name != "" && username != "":
+		return name + " (@" + username + ")"
+	case username != "":
+		return "@" + username
+	default:
+		return name
+	}
 }
 
 // Position locates a comment on a diff, mapping 1:1 onto the GitLab API's
