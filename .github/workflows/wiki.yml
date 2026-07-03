@@ -1,0 +1,78 @@
+name: Sync Wiki
+
+# Publishes docs/wiki/ to the repository's GitHub wiki. docs/wiki/ is the
+# source of truth (reviewed via PRs); the wiki is a rendered mirror.
+#
+# NOTE: the wiki repo (…​.wiki.git) does not exist until the wiki has at least
+# one page. Create any page once via the web UI (Wiki tab -> Create the first
+# page) to initialise it; after that this workflow keeps it in sync.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/wiki/**'
+      - '.github/workflows/wiki.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Serialise wiki pushes so concurrent runs can't race on the wiki remote.
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      # Pushing to OWNER/REPO.wiki.git with GITHUB_TOKEN needs contents: write.
+      contents: write
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Sync docs/wiki to the GitHub wiki
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          wiki_dir="$(mktemp -d)"
+          if ! git clone --depth 1 \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" \
+            "$wiki_dir"; then
+            echo "::error::Could not clone the wiki repo. Create the first wiki" \
+              "page via the web UI once to initialise …​.wiki.git, then re-run." >&2
+            exit 1
+          fi
+
+          # Replace the wiki's tracked content wholesale so deletions propagate.
+          find "$wiki_dir" -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+          cp docs/wiki/*.md "$wiki_dir"/
+
+          # In-page links use PageName.md so they resolve in the GitHub file
+          # browser; wiki pages are served extensionless, so strip .md from
+          # relative page links. URLs (contain '/' or ':') are left untouched.
+          for f in "$wiki_dir"/*.md; do
+            sed -i -E 's/\]\(([A-Za-z0-9._-]+)\.md(#[^)]*)?\)/](\1\2)/g' "$f"
+          done
+
+          cd "$wiki_dir"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date."
+            exit 0
+          fi
+          git commit -m "docs: sync wiki from ${GITHUB_SHA}"
+          git push
