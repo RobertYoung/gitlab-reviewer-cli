@@ -57,6 +57,7 @@ type fakeService struct {
 	memberProjects []gitlabx.ProjectInfo
 	mr             *gitlabx.MRDetail  // nil serves sampleMR()
 	diffs          []gitlabx.FileDiff // nil serves sampleDiffs()
+	discussions    []gitlabx.Discussion
 	repoFiles      []gitlabx.RepoFile
 	repoFilesErr   error
 	inline         []string
@@ -109,7 +110,7 @@ func (f *fakeService) ListDirectoryFiles(context.Context, any, string, string) (
 }
 
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {
-	return nil, nil
+	return f.discussions, nil
 }
 
 func (f *fakeService) CreateInlineDiscussion(_ context.Context, _ any, _ int64, body string, _ *gitlabx.Position) error {
@@ -472,6 +473,46 @@ func TestDiffPageRendersLinesAndComments(t *testing.T) {
 	env.post("/i/default/mr/comment/delete", mrForm(url.Values{"id": {pending[0].ID}}))
 	if left := env.srv.comments.list(mrKey("default", "group/app", 5)); len(left) != 0 {
 		t.Fatalf("comment not deleted: %+v", left)
+	}
+}
+
+func TestDiffPageGroupsDiscussionsIntoThreads(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.discussions = []gitlabx.Discussion{
+		{ID: "d1", Notes: []gitlabx.Note{
+			{Author: "alice", Body: "looks wrong", Position: &gitlabx.Position{NewPath: "main.go", NewLine: intp(2)}},
+			{Author: "bob", Body: "agreed"},
+		}},
+		{ID: "d2", Notes: []gitlabx.Note{
+			{Author: "carol", Body: "old nit", Resolved: true, Position: &gitlabx.Position{NewPath: "main.go", NewLine: intp(1)}},
+		}},
+	}
+
+	code, body := env.get("/i/default/mr/diff?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("diff: %d", code)
+	}
+	// The unresolved discussion renders as one expanded thread holding both notes.
+	if !strings.Contains(body, `class="thread" open`) {
+		t.Fatalf("unresolved thread not open:\n%s", body)
+	}
+	for _, want := range []string{"looks wrong", "agreed", "2 comments"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("thread missing %q:\n%s", want, body)
+		}
+	}
+	// The resolved discussion is present but collapsed.
+	if !strings.Contains(body, `class="thread resolved"`) || strings.Contains(body, `class="thread resolved" open`) {
+		t.Fatalf("resolved thread not collapsed:\n%s", body)
+	}
+	if !strings.Contains(body, "old nit") {
+		t.Fatalf("resolved thread content missing:\n%s", body)
+	}
+
+	// The split layout renders the same threads.
+	_, body = env.get("/i/default/mr/diff?project=group%2Fapp&iid=5&view=split")
+	if !strings.Contains(body, `class="thread" open`) || strings.Contains(body, `class="thread resolved" open`) {
+		t.Fatalf("split view threads wrong:\n%s", body)
 	}
 }
 
