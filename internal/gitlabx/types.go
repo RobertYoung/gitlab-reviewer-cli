@@ -219,3 +219,10 @@ type Position struct {
 	OldLine  *int
 	NewLine  *int
 }
+
+// RepoFile is one file fetched from a repository tree, named by its base
+// file name within the listed directory.
+type RepoFile struct {
+	Name    string
+	Content []byte
+}

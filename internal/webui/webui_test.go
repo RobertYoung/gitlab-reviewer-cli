@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -54,6 +55,8 @@ type fakeService struct {
 	memberProjects []gitlabx.ProjectInfo
 	mr             *gitlabx.MRDetail  // nil serves sampleMR()
 	diffs          []gitlabx.FileDiff // nil serves sampleDiffs()
+	repoFiles      []gitlabx.RepoFile
+	repoFilesErr   error
 	inline         []string
 	notes          []string
 	drafts         []string
@@ -96,7 +99,13 @@ func (f *fakeService) ListDiffs(context.Context, any, int64) ([]gitlabx.FileDiff
 func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit, error) {
 	return []gitlabx.Commit{{ShortID: "abc1234", Title: "add import"}}, nil
 }
+
 func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) { return "", nil }
+
+func (f *fakeService) ListDirectoryFiles(context.Context, any, string, string) ([]gitlabx.RepoFile, error) {
+	return f.repoFiles, f.repoFilesErr
+}
+
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {
 	return nil, nil
 }
@@ -818,5 +827,40 @@ func TestAgentSelectionDrivesRunAndBadge(t *testing.T) {
 	code, body = env.get("/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName)
 	if code != http.StatusOK || strings.Contains(body, "· security") {
 		t.Fatalf("legacy record must render without an agent badge: %d", code)
+	}
+}
+
+func TestMRDetailOffersRepoAgents(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.repoFiles = []gitlabx.RepoFile{{
+		Name:    "sql.md",
+		Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
+	}}
+
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	if !strings.Contains(body, `name="agents" value="sql-migrations"`) {
+		t.Fatalf("form missing the repo agent:\n%s", body)
+	}
+	if !strings.Contains(body, `<span class="badge">project</span>`) {
+		t.Fatalf("repo agent missing its project badge:\n%s", body)
+	}
+}
+
+func TestMRDetailSurvivesRepoAgentFetchFailure(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.repoFilesErr = errors.New("boom")
+
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	if !strings.Contains(body, `name="agents" value="bug"`) {
+		t.Fatalf("builtin agents must still be offered:\n%s", body)
+	}
+	if !strings.Contains(body, "could not fetch repo agents") {
+		t.Fatalf("fetch failure must surface as a warning:\n%s", body)
 	}
 }

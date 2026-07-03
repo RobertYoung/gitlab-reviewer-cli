@@ -356,3 +356,52 @@ func TestErrorsCarryContext(t *testing.T) {
 		t.Errorf("error should name the project: %v", err)
 	}
 }
+
+func TestListDirectoryFiles(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/repository/tree", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("path"); got != ".gitlab-reviewer/agents" {
+			t.Errorf("path = %q", got)
+		}
+		if got := r.URL.Query().Get("ref"); got != "abc123" {
+			t.Errorf("ref = %q", got)
+		}
+		writeJSON(t, w, []map[string]any{
+			{"id": "1", "name": "sql.md", "type": "blob", "path": ".gitlab-reviewer/agents/sql.md"},
+			{"id": "2", "name": "sub", "type": "tree", "path": ".gitlab-reviewer/agents/sub"},
+		})
+	})
+	mux.HandleFunc("/api/v4/projects/{project}/repository/files/{path}/raw", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("ref"); got != "abc123" {
+			t.Errorf("raw ref = %q", got)
+		}
+		_, _ = w.Write([]byte("Prompt."))
+	})
+	c := newTestClient(t, nil, nil, mux)
+	files, err := c.ListDirectoryFiles(context.Background(), "group/app", ".gitlab-reviewer/agents", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("got %d files, want 1 (trees skipped): %+v", len(files), files)
+	}
+	if files[0].Name != "sql.md" || string(files[0].Content) != "Prompt." {
+		t.Errorf("file: %+v", files[0])
+	}
+}
+
+func TestListDirectoryFilesMissingDir(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/repository/tree", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(t, w, map[string]any{"message": "404 Tree Not Found"})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	files, err := c.ListDirectoryFiles(context.Background(), "group/app", ".gitlab-reviewer/agents", "abc123")
+	if err != nil {
+		t.Fatalf("missing directory must not be an error: %v", err)
+	}
+	if files != nil {
+		t.Errorf("files = %+v", files)
+	}
+}

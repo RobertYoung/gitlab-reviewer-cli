@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -203,5 +204,111 @@ func TestSelectionStoreRoundTrip(t *testing.T) {
 	nilStore.Save("x", []string{"bug"}) // must not panic
 	if got := nilStore.Load("x"); got != nil {
 		t.Fatalf("nil store load: %v", got)
+	}
+}
+
+func TestLoadProjectFiles(t *testing.T) {
+	files := []File{
+		{Name: "notes.txt", Content: []byte("not an agent")},
+		{Name: "sql.md", Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n")},
+		{Name: "dup.md", Content: []byte("---\nname: sql-migrations\n---\nAnother prompt.\n")},
+		{Name: "bad.md", Content: []byte("---\nname: NOT VALID\n---\nPrompt.\n")},
+	}
+	got, warns := LoadProjectFiles(files)
+	if len(got) != 1 {
+		t.Fatalf("agents: %+v", got)
+	}
+	a := got[0]
+	if a.Name != "sql-migrations" || a.Source != SourceProject || a.Prompt != "Look for locks." {
+		t.Errorf("agent: %+v", a)
+	}
+	if a.Path != ProjectAgentsDir+"/sql.md" {
+		t.Errorf("path: %q", a.Path)
+	}
+	if len(warns) != 2 {
+		t.Fatalf("warnings: %v", warns)
+	}
+	if !strings.Contains(warns[0], "duplicate name") || !strings.Contains(warns[1], "invalid agent name") {
+		t.Errorf("warnings: %v", warns)
+	}
+}
+
+func TestCatalogWithProjectFiles(t *testing.T) {
+	base := NewCatalog("")
+	cat := base.WithProjectFiles([]File{
+		{Name: "security.md", Content: []byte("Shadowed security prompt.")},
+		{Name: "extra.md", Content: []byte("Extra prompt.")},
+	})
+
+	// Shadowing replaces the builtin in place; the new agent is appended.
+	names := cat.Names()
+	if got, want := slices.Index(names, "security"), slices.Index(base.Names(), "security"); got != want {
+		t.Errorf("security moved: index %d, want %d", got, want)
+	}
+	if names[len(names)-1] != "extra" {
+		t.Errorf("names: %v", names)
+	}
+	for _, a := range cat.All() {
+		if a.Name == "security" && (a.Source != SourceProject || a.Prompt != "Shadowed security prompt.") {
+			t.Errorf("security not shadowed: %+v", a)
+		}
+	}
+	// The base catalog is unchanged.
+	if len(base.All()) != len(cat.All())-1 {
+		t.Errorf("base grew: %v", base.Names())
+	}
+}
+
+func TestRemoteCacheExtend(t *testing.T) {
+	base := NewCatalog("")
+	rc := NewRemoteCache()
+	calls := 0
+	fetch := func() ([]File, error) {
+		calls++
+		return []File{{Name: "extra.md", Content: []byte("Prompt.")}}, nil
+	}
+
+	cat, err := rc.Extend(base, "group/app", "sha1", fetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(cat.Names(), "extra") {
+		t.Fatalf("names: %v", cat.Names())
+	}
+	if _, err := rc.Extend(base, "group/app", "sha1", fetch); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Errorf("same (project, sha) must hit the cache: %d fetches", calls)
+	}
+	// A new head SHA fetches fresh.
+	if _, err := rc.Extend(base, "group/app", "sha2", fetch); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Errorf("new sha must refetch: %d fetches", calls)
+	}
+
+	// Failures return the base catalog and are not cached.
+	failures := 0
+	failing := func() ([]File, error) { failures++; return nil, errors.New("boom") }
+	for range 2 {
+		cat, err := rc.Extend(base, "group/other", "sha1", failing)
+		if err == nil || len(cat.All()) != len(base.All()) {
+			t.Fatalf("failed fetch: cat %v, err %v", cat.Names(), err)
+		}
+	}
+	if failures != 2 {
+		t.Errorf("failures must not be cached: %d fetches", failures)
+	}
+
+	// A nil cache still fetches, just without memoising.
+	var nilRC *RemoteCache
+	cat, err = nilRC.Extend(base, "group/app", "sha1", fetch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(cat.Names(), "extra") || calls != 3 {
+		t.Errorf("nil cache: names %v, %d fetches", cat.Names(), calls)
 	}
 }

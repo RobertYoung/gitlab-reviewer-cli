@@ -34,6 +34,9 @@ type Deps struct {
 	// Selection remembers the last agent selection per project; nil is a
 	// no-op store.
 	Selection *agents.SelectionStore
+	// ProjectAgents caches the repo-shipped agent definitions the picker
+	// fetches over the API, per (project, MR head); nil fetches uncached.
+	ProjectAgents *agents.RemoteCache
 	// Logs stores each review run's progress log for later viewing; nil
 	// disables both storing and the log screens' content.
 	Logs *runlog.Store

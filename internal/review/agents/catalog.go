@@ -41,6 +41,20 @@ func (c *Catalog) WithProject(repoPath string) *Catalog {
 	return out
 }
 
+// WithProjectFiles returns a copy of the catalog extended with agent
+// definitions fetched from the repository (e.g. over the GitLab API) — the
+// remote counterpart of WithProject, with the same shadowing.
+func (c *Catalog) WithProjectFiles(files []File) *Catalog {
+	out := &Catalog{
+		agents:   append([]Agent(nil), c.agents...),
+		warnings: append([]string(nil), c.warnings...),
+	}
+	project, warns := LoadProjectFiles(files)
+	out.merge(project)
+	out.warnings = append(out.warnings, warns...)
+	return out
+}
+
 // merge appends extras, replacing same-named agents in place.
 func (c *Catalog) merge(extra []Agent) {
 	for _, a := range extra {
