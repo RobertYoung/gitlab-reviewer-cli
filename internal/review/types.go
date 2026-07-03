@@ -116,6 +116,13 @@ type Finding struct {
 	Manual bool `json:"manual,omitempty"`
 }
 
+// DiffFile points the reviewer at an on-disk diff for a changed file whose
+// diff was too large to inline in the prompt. Both paths are repo-relative.
+type DiffFile struct {
+	Path     string // the changed file
+	DiffPath string // the file containing its full diff
+}
+
 // Request is everything a backend needs to run one review.
 type Request struct {
 	// RepoPath is the checkout the review runs in (the subprocess cwd).
@@ -131,8 +138,15 @@ type Request struct {
 	// model so instructions can drive a description-vs-template hygiene
 	// check. Empty when the project has no template.
 	Template string
-	// Truncated lists files that were excluded or cut by the diff budget.
-	Truncated []string
+	// Excluded lists changed files dropped from review by configuration
+	// (exclude globs, generated files); shown to the model as context only.
+	Excluded []string
+	// DiffFiles lists changed files whose diffs were too large to inline;
+	// each full diff was written into the checkout for the model to Read.
+	DiffFiles []DiffFile
+	// Unavailable lists changed files GitLab returned no diff for; the model
+	// can only read their state at the head commit.
+	Unavailable []string
 	// Instructions is extra prompt text: global then per-project.
 	Instructions string
 	// Categories to report on.

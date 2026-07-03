@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
@@ -112,7 +114,7 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 		emit("note: could not fetch MR template: " + err.Error())
 	}
 
-	reqs, warnings, err := BuildRequests(r.Cfg, detail, diffs, commits, template, path)
+	reqs, info, warnings, err := BuildRequests(r.Cfg, detail, diffs, commits, template, path)
 	if err != nil {
 		return nil, err
 	}
@@ -122,6 +124,9 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 	if detail.NeedsRebase() {
 		warnings = append(warnings, RebaseWarning(detail))
 	}
+	for _, line := range info {
+		emit(line)
+	}
 	for _, w := range warnings {
 		emit(w)
 	}
@@ -130,10 +135,11 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 	// disk in every pass, only the focus diff changes.
 	results := make([]*review.Result, 0, len(reqs))
 	for i, req := range reqs {
+		files := len(req.Diffs) + len(req.DiffFiles)
 		if len(reqs) > 1 {
-			emit(fmt.Sprintf("review pass %d/%d (%d file(s)) with %s…", i+1, len(reqs), len(req.Diffs), r.Reviewer.Name()))
+			emit(fmt.Sprintf("review pass %d/%d (%d file(s)) with %s…", i+1, len(reqs), files, r.Reviewer.Name()))
 		} else {
-			emit(fmt.Sprintf("reviewing %d file(s) with %s…", len(req.Diffs), r.Reviewer.Name()))
+			emit(fmt.Sprintf("reviewing %d file(s) with %s…", files, r.Reviewer.Name()))
 		}
 		res, err := r.Reviewer.Review(ctx, req, func(e review.Event) {
 			emit(e.Text)
@@ -174,17 +180,57 @@ func RebaseWarning(detail gitlabx.MRDetail) string {
 	}
 }
 
+// DiffFilesDir is where oversized diffs are written inside the checkout so
+// the reviewer can Read them (the review session has no Bash to run git).
+const DiffFilesDir = ".review-diffs"
+
 // BuildRequests assembles the reviewer request(s) from project-resolved
 // config: chunked diffs, category list, and combined custom instructions.
-func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, template, repoPath string) ([]review.Request, []string, error) {
-	var warnings []string
+// Diffs too large to inline are written into the checkout under
+// DiffFilesDir so the reviewer can still see them. It returns the requests,
+// informational progress lines, and warnings worth persisting with the
+// result (only genuine information loss qualifies).
+func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, template, repoPath string) ([]review.Request, []string, []string, error) {
+	var info, warnings []string
 
 	chunks, skipped := review.ChunkDiffs(diffs, cfg.Review.Exclude, cfg.Review.MaxDiffKB)
-	if len(chunks) == 0 {
-		return nil, nil, errors.New("nothing to review: every changed file is excluded or over the diff budget")
+
+	// Drop diff files from an earlier interrupted run of a reused worktree.
+	_ = os.RemoveAll(filepath.Join(repoPath, DiffFilesDir))
+
+	var (
+		excluded    []string
+		unavailable []string
+		diffFiles   []review.DiffFile
+	)
+	for i, s := range skipped {
+		switch s.Reason {
+		case review.SkipExcluded:
+			excluded = append(excluded, s.Path)
+		case review.SkipUnavailable:
+			unavailable = append(unavailable, s.Path)
+		case review.SkipOverBudget:
+			rel, err := writeDiffFile(repoPath, i, s)
+			if err != nil {
+				unavailable = append(unavailable, s.Path)
+				warnings = append(warnings, fmt.Sprintf("could not write the oversized diff for %s: %v", s.Path, err))
+				continue
+			}
+			diffFiles = append(diffFiles, review.DiffFile{Path: s.Path, DiffPath: rel})
+		}
 	}
-	if len(skipped) > 0 {
-		warnings = append(warnings, fmt.Sprintf("%d file(s) excluded from the prompt (globs/size budget)", len(skipped)))
+
+	if len(chunks) == 0 && len(diffFiles) == 0 {
+		return nil, nil, nil, errors.New("nothing to review: every changed file is excluded by configuration or has no retrievable diff")
+	}
+	if len(excluded) > 0 {
+		info = append(info, fmt.Sprintf("%d file(s) excluded from review by configured filters (lockfiles/vendored/generated)", len(excluded)))
+	}
+	if len(diffFiles) > 0 {
+		info = append(info, fmt.Sprintf("%d oversized diff(s) written into the checkout for the reviewer to read", len(diffFiles)))
+	}
+	if len(unavailable) > 0 {
+		warnings = append(warnings, fmt.Sprintf("%d file(s) changed but GitLab returned no diff (too large); the reviewer only sees their head state", len(unavailable)))
 	}
 	if len(chunks) > 1 {
 		warnings = append(warnings, fmt.Sprintf("large MR: splitting the review into %d passes", len(chunks)))
@@ -194,7 +240,7 @@ func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 	if cfg.Review.InstructionsFile != "" {
 		data, err := os.ReadFile(cfg.Review.InstructionsFile)
 		if err != nil {
-			return nil, nil, fmt.Errorf("reading review.instructions_file: %w", err)
+			return nil, nil, nil, fmt.Errorf("reading review.instructions_file: %w", err)
 		}
 		if instructions != "" {
 			instructions += "\n\n"
@@ -207,21 +253,49 @@ func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 		categories = append(categories, review.Category(c))
 	}
 
+	if len(chunks) == 0 {
+		// Everything inline-sized was filtered out but oversized diffs
+		// remain reviewable from disk: run one pass with no inline diff.
+		chunks = [][]gitlabx.FileDiff{nil}
+	}
 	reqs := make([]review.Request, 0, len(chunks))
-	for _, chunk := range chunks {
-		reqs = append(reqs, review.Request{
+	for i, chunk := range chunks {
+		req := review.Request{
 			RepoPath:     repoPath,
 			MR:           detail,
 			Diffs:        chunk,
 			Commits:      commits,
 			Template:     template,
-			Truncated:    skipped,
+			Excluded:     excluded,
+			Unavailable:  unavailable,
 			Instructions: instructions,
 			Categories:   categories,
 			Model:        cfg.Review.Model,
 			Timeout:      cfg.Review.Timeout,
 			MaxBudgetUSD: cfg.Review.MaxBudgetUSD,
-		})
+		}
+		// On-disk diffs join the first pass only, so multi-pass reviews
+		// don't report the same oversized files twice.
+		if i == 0 {
+			req.DiffFiles = diffFiles
+		}
+		reqs = append(reqs, req)
 	}
-	return reqs, warnings, nil
+	return reqs, info, warnings, nil
+}
+
+// writeDiffFile stores one oversized diff inside the checkout and returns
+// its repo-relative path. The worktree is always tool-managed and detached,
+// never the user's working tree, so writing scratch files here is safe.
+func writeDiffFile(repoPath string, n int, s review.SkippedDiff) (string, error) {
+	dir := filepath.Join(repoPath, DiffFilesDir)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	name := fmt.Sprintf("%03d-%s.diff", n+1, strings.ReplaceAll(s.Path, "/", "__"))
+	content := fmt.Sprintf("--- a/%s\n+++ b/%s\n%s", s.OldPath, s.Path, s.Diff)
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+		return "", err
+	}
+	return DiffFilesDir + "/" + name, nil
 }

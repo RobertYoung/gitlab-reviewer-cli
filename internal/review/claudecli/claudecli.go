@@ -148,9 +148,6 @@ func (b *Backend) Review(ctx context.Context, req review.Request, onEvent func(r
 	}
 	res.SessionID = final.SessionID
 	res.CostUSD = final.TotalCostUSD
-	if len(req.Truncated) > 0 {
-		res.Warnings = append(res.Warnings, fmt.Sprintf("%d file(s) were not sent to the reviewer (excluded or over the diff budget)", len(req.Truncated)))
-	}
 	return res, nil
 }
 

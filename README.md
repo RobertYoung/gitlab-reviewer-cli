@@ -25,7 +25,8 @@ Prefer a browser? The same workflow is available as a local web app via
    it can explore the whole repository (read files, grep for callers), not
    just the diff. Reviews always run in a detached git worktree at the MR
    head commit; your working tree is never touched. Large MRs are split into
-   multiple review passes automatically.
+   multiple review passes automatically, and individual diffs too large to
+   inline are written into the checkout as files for Claude to read.
 3. **Curate** — every suggested comment is shown against its diff hunk and
    is editable and individually acceptable or rejectable before anything
    leaves your machine.
