@@ -60,8 +60,13 @@ type Instance struct {
 }
 
 type Review struct {
-	Provider     string        `koanf:"provider"` // anthropic | bedrock
-	Model        string        `koanf:"model"`
+	Provider string `koanf:"provider"` // anthropic | bedrock
+	Model    string `koanf:"model"`
+	// Models is the list offered by the `models` command and --model shell
+	// completion. Empty falls back to a curated list of common Claude
+	// models for the selected provider. Suggestions only: review.model
+	// accepts any string the claude CLI understands.
+	Models       []string      `koanf:"models"`
 	ClaudePath   string        `koanf:"claude_path"`
 	Timeout      time.Duration `koanf:"timeout"`
 	MaxBudgetUSD float64       `koanf:"max_budget_usd"`

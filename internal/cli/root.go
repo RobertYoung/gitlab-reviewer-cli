@@ -141,7 +141,21 @@ func newRoot(st *state) *cobra.Command {
 	root.PersistentFlags().StringVar(&st.configFile, "config", "", "path to settings file (default "+config.DefaultFile()+")")
 	addSettingFlags(root)
 
-	root.AddCommand(newVersionCmd(), newConfigCmd(st), newCacheCmd(st), newGUICmd(st))
+	// --model completes to the same list the models command prints. The
+	// completion runs outside the normal command path, so load the
+	// configuration on demand if PersistentPreRunE hasn't populated it.
+	_ = root.RegisterFlagCompletionFunc("model", func(cmd *cobra.Command, _ []string, _ string) ([]string, cobra.ShellCompDirective) {
+		if st.loaded == nil {
+			res, err := config.Load(config.Options{File: st.configFile, Flags: cmd.Flags()})
+			if err != nil {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			st.loaded = res
+		}
+		return st.loaded.Config.ModelOptions(), cobra.ShellCompDirectiveNoFileComp
+	})
+
+	root.AddCommand(newVersionCmd(), newModelsCmd(st), newConfigCmd(st), newCacheCmd(st), newGUICmd(st))
 	return root
 }
 
@@ -159,6 +173,7 @@ func addSettingFlags(root *cobra.Command) {
 
 	f.String("provider", "", "AI provider: anthropic|bedrock")
 	f.String("model", "", "model passed to the claude CLI")
+	f.StringSlice("models", nil, "models offered by the models command and --model completion (default: curated per-provider list)")
 	f.String("claude-path", "", "path to the claude binary")
 	f.Duration("review-timeout", 0, "maximum duration for one review")
 	f.Float64("max-budget-usd", 0, "maximum spend per review in USD, shared across the selected agents")
