@@ -70,6 +70,7 @@ func (s *helpScreen) View() string {
 			{"]/[", "next/previous hunk"},
 			{"g/G", "top/bottom"},
 			{"v", "toggle unified / side-by-side diff"},
+			{"d", "toggle MR overview (description and commits)"},
 			{"c", "comment on the selected line (ctrl+s saves)"},
 			{"C", "general MR-level comment"},
 			{"P", "publish pending manual comments"},

@@ -68,6 +68,7 @@ type mrDetail struct {
 	fileIdx   int
 	hunkLines []int
 	split     bool // side-by-side diff layout
+	overview  bool // viewport shows description + commits instead of the diff
 	tree      *fileTree
 	showTree  bool // file explorer sidebar visible
 	treeFocus bool // keys drive the explorer instead of the diff
@@ -112,6 +113,9 @@ func (s *mrDetail) Title() string {
 }
 
 func (s *mrDetail) Hints() string {
+	if s.overview {
+		return "↑/↓ scroll · d/esc back to diff · o browser · q quit"
+	}
 	if s.treeFocus {
 		return "↑/↓ move · enter open · h/l fold/unfold · tab diff · e hide · esc back · q quit"
 	}
@@ -123,7 +127,7 @@ func (s *mrDetail) Hints() string {
 	if s.approvals != nil && s.approvals.UserHasApproved {
 		approve = "a unapprove"
 	}
-	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · r review · L past reviews · " + approve + " · o browser · esc back"
+	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · d overview · r review · L past reviews · " + approve + " · o browser · esc back"
 	if len(s.pendingComments()) > 0 {
 		hints = "P publish comments · " + hints
 	}
@@ -219,6 +223,9 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			if len(s.diffs) > 0 {
 				s.setFile(s.fileIdx)
 			}
+			if s.overview {
+				s.vp.SetContent(s.overviewContent())
+			}
 		}
 		s.layout()
 		return s, nil
@@ -257,6 +264,9 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		s.loading--
 		s.commits = msg.commits
+		if s.overview {
+			s.vp.SetContent(s.overviewContent())
+		}
 		return s, nil
 
 	case mrDiscussionsLoadedMsg:
@@ -293,6 +303,21 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		return s, nil
 
 	case tea.KeyPressMsg:
+		if s.overview {
+			switch msg.String() {
+			case "d", "esc":
+				s.overview = false
+				s.setFile(s.fileIdx)
+				return s, nil
+			case "q":
+				return s, tea.Quit
+			case "o":
+				return s, openURLCmd(s.deps, s.mr.WebURL)
+			}
+			var cmd tea.Cmd
+			s.vp, cmd = s.vp.Update(msg)
+			return s, cmd
+		}
 		if s.treeFocus && s.treeWidth() > 0 {
 			switch msg.String() {
 			case "up", "k":
@@ -374,6 +399,11 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			s.split = !s.split
 			s.invalidateRender()
 			s.setFile(s.fileIdx)
+			return s, nil
+		case "d":
+			s.overview = true
+			s.vp.SetContent(s.overviewContent())
+			s.vp.GotoTop()
 			return s, nil
 		case "]":
 			s.jumpHunk(1)
@@ -505,8 +535,12 @@ func (s *mrDetail) allDiscussions(fileIdx int) []gitlabx.Discussion {
 }
 
 // refresh rebuilds the viewport content with the cursor gutter; the cached
-// render itself is untouched.
+// render itself is untouched. The overview owns the viewport while it is
+// open, so async re-renders must not clobber it.
 func (s *mrDetail) refresh() {
+	if s.overview {
+		return
+	}
 	r, ok := s.rendered[s.fileIdx]
 	if !ok {
 		return
@@ -651,11 +685,15 @@ func (s *mrDetail) header() string {
 	fmt.Fprintf(&b, "%s → %s · @%s", s.mr.SourceBranch, s.mr.TargetBranch, s.mr.Author)
 	if s.detail != nil && s.detail.HasConflicts {
 		b.WriteString(" · " + errorStyle.Render("has conflicts"))
+	} else if s.detail != nil && s.detail.NeedsRebase() {
+		b.WriteString(" · " + draftStyle.Render("needs rebase"))
 	}
 	b.WriteString(s.approvalStatus())
 	b.WriteByte('\n')
 	b.WriteString(subtleStyle.Render(truncate(s.mr.WebURL, max(s.width-2, 20))) + "\n")
-	if len(s.diffs) > 0 {
+	if s.overview {
+		b.WriteString(subtleStyle.Render("overview — description & commits") + "\n")
+	} else if len(s.diffs) > 0 {
 		info := fmt.Sprintf("file %d/%d · %s", s.fileIdx+1, len(s.diffs), truncate(s.diffs[s.fileIdx].Path(), max(s.mainWidth()-14, 20)))
 		if pending := len(s.pendingComments()); pending > 0 {
 			info += fmt.Sprintf(" · %d pending comment(s)", pending)
@@ -665,6 +703,33 @@ func (s *mrDetail) header() string {
 		fmt.Fprintf(&b, "%s loading…\n", s.spin.View())
 	} else {
 		b.WriteString(subtleStyle.Render("no changes") + "\n")
+	}
+	return b.String()
+}
+
+// overviewContent renders the MR description and commit list shown when the
+// overview is toggled over the diff (the same metadata the GUI's MR detail
+// page shows).
+func (s *mrDetail) overviewContent() string {
+	width := max(s.mainWidth()-2, 40)
+	desc := s.mr.Description
+	if s.detail != nil {
+		desc = s.detail.Description
+	}
+	var b strings.Builder
+	b.WriteString(headerStyle.Render("Description") + "\n")
+	if desc = strings.TrimSpace(desc); desc != "" {
+		b.WriteString(wrap(desc, width) + "\n")
+	} else {
+		b.WriteString(subtleStyle.Render("no description") + "\n")
+	}
+	b.WriteByte('\n')
+	b.WriteString(headerStyle.Render("Commits") + "\n")
+	if len(s.commits) == 0 {
+		b.WriteString(subtleStyle.Render("none loaded"))
+	}
+	for _, c := range s.commits {
+		b.WriteString(fileStyle.Render(c.ShortID) + " " + truncate(c.Title, max(width-10, 20)) + "\n")
 	}
 	return b.String()
 }

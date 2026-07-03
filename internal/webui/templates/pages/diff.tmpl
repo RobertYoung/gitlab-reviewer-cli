@@ -5,10 +5,12 @@
   <aside class="filetree">
     <h3>{{len $c.Files}} changed file{{if ne (len $c.Files) 1}}s{{end}}</h3>
     <ul>
-      {{range $c.Files}}
-      <li><a href="#file-{{.Index}}" title="{{.Path}}"><span class="fstatus fstatus-{{.Status}}">{{.Letter}}</span><span class="fname">{{.Path}}</span>{{if .Comments}}<span class="badge comments">💬 {{.Comments}}</span>{{end}}</a></li>
-      {{end}}
+      {{range $c.Explorer}}{{template "explorernode" .}}{{end}}
     </ul>
+    <p class="view-toggle subtle">layout:
+      {{if $c.Split}}<a href="{{$c.UnifiedURL}}">unified</a> · <strong>split</strong>
+      {{else}}<strong>unified</strong> · <a href="{{$c.SplitURL}}">split</a>{{end}}
+    </p>
     <div class="actions column">
       <form method="post" action="{{$c.Nav.ReviewURL}}">
         <input type="hidden" name="project" value="{{$c.Nav.Project}}">
@@ -36,6 +38,27 @@
       <header><span class="fstatus fstatus-{{.Status}}">{{.Letter}}</span> <span class="fpath">{{.Path}}</span></header>
       {{if .TooLarge}}<p class="note">This file's diff is too large to display.</p>{{end}}
       {{$file := .}}
+      {{if $c.Split}}
+      <table class="diff split">
+        {{range .Rows}}
+        {{if .Hunk}}
+        <tr class="hunk"><td class="ln"></td><td class="gutter"></td><td class="code" colspan="4">{{.Hunk}}</td></tr>
+        {{else}}
+        <tr class="line">
+          <td class="ln {{.Left.Kind}}">{{if .Left.Num}}{{.Left.Num}}{{end}}</td>
+          <td class="gutter {{.Left.Kind}}">{{if eq .Left.Kind "del"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="{{.Left.Num}}" data-new="">+</button>{{end}}</td>
+          <td class="code {{.Left.Kind}}">{{.Left.HTML}}</td>
+          <td class="ln {{.Right.Kind}}">{{if .Right.Num}}{{.Right.Num}}{{end}}</td>
+          <td class="gutter {{.Right.Kind}}">{{if eq .Right.Kind "add"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="" data-new="{{.Right.Num}}">+</button>{{else if eq .Right.Kind "ctx"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="{{.Left.Num}}" data-new="{{.Right.Num}}">+</button>{{end}}</td>
+          <td class="code {{.Right.Kind}}">{{.Right.HTML}}</td>
+        </tr>
+        {{range .Comments}}
+        <tr class="inline-comment"><td colspan="2" class="ln"></td><td colspan="4">{{template "diffcomment" (commentrow . $c)}}</td></tr>
+        {{end}}
+        {{end}}
+        {{end}}
+      </table>
+      {{else}}
       <table class="diff">
         {{range .Lines}}
         {{if eq .Kind "hunk"}}
@@ -48,34 +71,19 @@
           <td class="code">{{.HTML}}</td>
         </tr>
         {{range .Comments}}
-        <tr class="inline-comment"><td colspan="3" class="ln"></td><td>
-          <div class="comment{{if .Pending}} pending{{end}}">
-            <div class="meta">
-              {{if .Pending}}<span class="badge manual">yours · {{.State}}</span>{{else}}<strong>{{.Author}}</strong> <span class="subtle">{{reltime .When}}</span>{{end}}
-            </div>
-            <pre class="prose">{{.Body}}</pre>
-            {{if and .Pending .ID}}
-            <form method="post" action="{{$c.Nav.DeleteURL}}" class="inline-form">
-              <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-              <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-              <input type="hidden" name="id" value="{{.ID}}">
-              <input type="hidden" name="back" value="{{$c.BackURL}}">
-              <button type="submit" class="link danger">delete</button>
-            </form>
-            {{end}}
-          </div>
-        </td></tr>
+        <tr class="inline-comment"><td colspan="3" class="ln"></td><td>{{template "diffcomment" (commentrow . $c)}}</td></tr>
         {{end}}
         {{end}}
         {{end}}
       </table>
+      {{end}}
     </article>
     {{end}}
   </section>
 </div>
 
 <template id="comment-form-template">
-  <tr class="inline-comment new"><td colspan="3" class="ln"></td><td>
+  <tr class="inline-comment new"><td class="ln"></td><td>
     <form method="post" action="{{$c.Nav.CommentURL}}" class="comment-form">
       <input type="hidden" name="project" value="{{$c.Nav.Project}}">
       <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
@@ -91,4 +99,37 @@
     </form>
   </td></tr>
 </template>
+{{end}}
+
+{{define "explorernode"}}
+{{if .File}}
+<li><a href="#file-{{.File.Index}}" title="{{.File.Path}}"><span class="fstatus fstatus-{{.File.Status}}">{{.File.Letter}}</span><span class="fname">{{.Name}}</span>{{if .File.Comments}}<span class="badge comments">💬 {{.File.Comments}}</span>{{end}}</a></li>
+{{else}}
+<li>
+  <details open>
+    <summary title="fold/unfold">{{.Name}}/</summary>
+    <ul>
+      {{range .Children}}{{template "explorernode" .}}{{end}}
+    </ul>
+  </details>
+</li>
+{{end}}
+{{end}}
+
+{{define "diffcomment"}}
+<div class="comment{{if .C.Pending}} pending{{end}}">
+  <div class="meta">
+    {{if .C.Pending}}<span class="badge manual">yours · {{.C.State}}</span>{{else}}<strong>{{.C.Author}}</strong> <span class="subtle">{{reltime .C.When}}</span>{{end}}
+  </div>
+  <pre class="prose">{{.C.Body}}</pre>
+  {{if and .C.Pending .C.ID}}
+  <form method="post" action="{{.Nav.DeleteURL}}" class="inline-form">
+    <input type="hidden" name="project" value="{{.Nav.Project}}">
+    <input type="hidden" name="iid" value="{{.Nav.IID}}">
+    <input type="hidden" name="id" value="{{.C.ID}}">
+    <input type="hidden" name="back" value="{{.BackURL}}">
+    <button type="submit" class="link danger">delete</button>
+  </form>
+  {{end}}
+</div>
 {{end}}

@@ -97,7 +97,8 @@ past-reviews screen (or after a failed review) to read it.
 You can approve without leaving the TUI: press `a` on the MR detail screen
 to approve the MR (the approval is pinned to the head commit you reviewed),
 and `a` again to remove your approval. The header shows who has already
-approved.
+approved. Press `d` to flip the diff over to an overview of the MR — its
+description and commit list — and `d` or `esc` to flip back.
 
 You can also comment yourself, without leaving the TUI: in the diff view
 move the line cursor (`↑`/`↓`) and press `c` to comment on the selected
@@ -132,15 +133,16 @@ gitlab-reviewer gui --no-browser   # just print the URL
 </details>
 
 The GUI mirrors the TUI screen for screen — instance picker, group/project
-scope picker when nothing is configured, MR list with filters, MR overview,
-diff, review progress, findings triage, publish (draft or immediate), past
-reviews — over the exact same core: reviews run
-through the same pipeline, results land in the same stores, and a review
-started in one frontend can be reopened in the other. What the browser
-adds is rendering the terminal can't match: syntax-highlighted diffs with
-soft wrapping, a persistent file explorer alongside the diff, existing MR
-discussions shown inline where they were made, and click-to-comment on any
-diff line (`⌘`/`ctrl`+`enter` submits). Review progress streams live over
+scope picker when nothing is configured, MR list with filters, MR overview
+with approve/unapprove, diff (unified or side-by-side), review progress,
+findings triage, publish (draft or immediate), past reviews — over the
+exact same core: reviews run through the same pipeline, results land in
+the same stores, and a review started in one frontend can be reopened in
+the other ([full feature matrix](docs/features.md)). What the browser adds
+is rendering the terminal can't match: syntax-highlighted diffs with soft
+wrapping, a persistent file-explorer tree with collapsible folders alongside
+the diff, existing MR discussions shown inline where they were made, and
+click-to-comment on any diff line (`⌘`/`ctrl`+`enter` submits). Review progress streams live over
 server-sent events, and the page jumps to the findings when the run
 completes.
 
@@ -409,10 +411,11 @@ text itself, add guidance via `review.instructions`, e.g.
 | `ui.diff_view` | `GITLAB_REVIEWER_UI_DIFF_VIEW` | `--diff-view` | `unified` (`unified`\|`split`) |
 | `ui.file_explorer` | `GITLAB_REVIEWER_UI_FILE_EXPLORER` | `--file-explorer` | `closed` (`open`\|`closed`) |
 
-`ui.diff_view` sets the diff layout on the MR detail screen: `unified`
-(classic `+`/`-` stream) or `split` (side-by-side — old lines left, new
-lines right, with line numbers on both sides). Press `v` in the diff view
-to toggle the layout for the current session regardless of the setting.
+`ui.diff_view` sets the diff layout on the MR detail screen, in the TUI and
+the GUI alike: `unified` (classic `+`/`-` stream) or `split` (side-by-side —
+old lines left, new lines right, with line numbers on both sides). Press `v`
+in the TUI diff view, or use the layout links in the GUI's diff sidebar, to
+switch layout for the current session regardless of the setting.
 
 `ui.file_explorer` sets the initial state of the changed-files explorer on
 the MR detail screen: a collapsible directory tree in a left sidebar, with a
@@ -549,6 +552,7 @@ matter: `feat:`/`fix:` trigger releases.
 ## Documentation
 
 - [Architecture](docs/architecture.md) — component and sequence diagrams
+- [Features by frontend](docs/features.md) — what the TUI and the browser GUI each support
 - [Design decisions](docs/adr/) — short ADRs for the choices that shaped the tool
 
 ## Roadmap

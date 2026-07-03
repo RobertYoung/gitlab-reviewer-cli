@@ -178,6 +178,7 @@ type mrNav struct {
 	ReviewURL   string // POST target
 	CommentURL  string // POST target
 	DeleteURL   string // POST target
+	ApproveURL  string // POST target
 	PublishURL  string // GET confirm page for pending comments
 	FindingsURL string
 }
@@ -193,6 +194,7 @@ func newMRNav(inst, project string, iid int64) mrNav {
 		ReviewURL:  instPath(inst, "/mr/review"),
 		CommentURL: instPath(inst, "/mr/comment"),
 		DeleteURL:  instPath(inst, "/mr/comment/delete"),
+		ApproveURL: instPath(inst, "/mr/approve"),
 		PublishURL: mrURL(inst, "/mr/publish", project, iid, url.Values{"source": {"comments"}}),
 	}
 }
@@ -202,6 +204,7 @@ type mrDetailContent struct {
 	Detail        *gitlabx.MRDetail
 	Commits       []gitlabx.Commit
 	Pending       []review.Finding
+	Approvals     *gitlabx.Approvals // nil when the instance exposes none
 	RebaseWarning string
 	HasAccepted   bool
 }
@@ -220,14 +223,16 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 		s.renderError(w, http.StatusBadGateway, err)
 		return
 	}
-	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), iid) // best-effort
+	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), iid)    // best-effort
+	approvals, _ := d.Svc.GetApprovals(r.Context(), detail.Project(), iid) // decoration; page works without it
 	pending := s.comments.list(mrKey(inst, project, iid))
 
 	content := mrDetailContent{
-		Nav:     newMRNav(inst, project, iid),
-		Detail:  detail,
-		Commits: commits,
-		Pending: pending,
+		Nav:       newMRNav(inst, project, iid),
+		Detail:    detail,
+		Commits:   commits,
+		Pending:   pending,
+		Approvals: approvals,
 	}
 	for _, f := range pending {
 		if f.State == review.StateAccepted {
@@ -244,13 +249,18 @@ type diffContent struct {
 	Nav         mrNav
 	Detail      *gitlabx.MRDetail
 	Files       []diffFile
+	Explorer    []*explorerNode  // Files grouped into a collapsible tree
 	General     []review.Finding // pending MR-level comments
 	HasAccepted bool
 	BackURL     string // this page, for comment form redirects
+	Split       bool   // side-by-side layout
+	UnifiedURL  string // layout toggle targets
+	SplitURL    string
 }
 
 // handleDiff shows the full MR diff with the file explorer sidebar, inline
-// discussions, and manual comment forms.
+// discussions, and manual comment forms. ?view=unified|split selects the
+// layout; the configured ui.diff_view is the default, as in the TUI.
 func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 	inst := r.PathValue("inst")
 	project, iid, err := mrQuery(r)
@@ -258,6 +268,11 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 		s.renderError(w, http.StatusBadRequest, err)
 		return
 	}
+	view := r.URL.Query().Get("view")
+	if view == "" {
+		view = d.Cfg.UI.DiffView
+	}
+	split := view == "split"
 	detail, err := d.Svc.GetMergeRequest(r.Context(), parseProject(project), iid)
 	if err != nil {
 		s.renderError(w, http.StatusBadGateway, err)
@@ -271,12 +286,17 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 	discussions, _ := d.Svc.ListDiscussions(r.Context(), detail.Project(), iid) // decorative
 	pending := s.comments.list(mrKey(inst, project, iid))
 
+	viewQuery := url.Values{"view": {view}}
 	content := diffContent{
-		Nav:     newMRNav(inst, project, iid),
-		Detail:  detail,
-		Files:   buildDiffFiles(diffs, discussions, pending),
-		BackURL: mrURL(inst, "/mr/diff", project, iid, nil),
+		Nav:        newMRNav(inst, project, iid),
+		Detail:     detail,
+		Files:      buildDiffFiles(diffs, discussions, pending, split),
+		BackURL:    mrURL(inst, "/mr/diff", project, iid, viewQuery),
+		Split:      split,
+		UnifiedURL: mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"unified"}}),
+		SplitURL:   mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"split"}}),
 	}
+	content.Explorer = buildExplorer(content.Files)
 	for _, f := range pending {
 		if f.File == "" {
 			content.General = append(content.General, f)
@@ -325,5 +345,28 @@ func (s *Server) handleCommentDelete(w http.ResponseWriter, r *http.Request, _ *
 		return
 	}
 	s.comments.remove(mrKey(inst, project, iid), r.FormValue("id"))
+	localRedirect(w, r, r.FormValue("back"), mrURL(inst, "/mr", project, iid, nil))
+}
+
+// handleApprove approves the MR, or removes the user's approval when the
+// form says so. The head SHA posted from the detail page rides along on
+// approval, so an MR that gained commits since the page was rendered is
+// rejected by GitLab rather than silently approved.
+func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request, d *Deps) {
+	inst := r.PathValue("inst")
+	project, iid, err := mrQuery(r)
+	if err != nil {
+		s.renderError(w, http.StatusBadRequest, err)
+		return
+	}
+	if r.FormValue("action") == "unapprove" {
+		err = d.Svc.Unapprove(r.Context(), parseProject(project), iid)
+	} else {
+		err = d.Svc.Approve(r.Context(), parseProject(project), iid, r.FormValue("sha"))
+	}
+	if err != nil {
+		s.renderError(w, http.StatusBadGateway, err)
+		return
+	}
 	localRedirect(w, r, r.FormValue("back"), mrURL(inst, "/mr", project, iid, nil))
 }
