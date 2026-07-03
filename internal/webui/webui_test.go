@@ -2,12 +2,15 @@ package webui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -52,8 +55,11 @@ type fakeService struct {
 	groups         []gitlabx.GroupInfo
 	groupProjects  map[string][]gitlabx.ProjectInfo
 	memberProjects []gitlabx.ProjectInfo
+	mr             *gitlabx.MRDetail  // nil serves sampleMR()
 	diffs          []gitlabx.FileDiff // nil serves sampleDiffs()
 	discussions    []gitlabx.Discussion
+	repoFiles      []gitlabx.RepoFile
+	repoFilesErr   error
 	inline         []string
 	notes          []string
 	drafts         []string
@@ -80,6 +86,9 @@ func (f *fakeService) ListMemberProjects(context.Context, string, gitlabx.Page) 
 
 func (f *fakeService) GetMergeRequest(context.Context, any, int64) (*gitlabx.MRDetail, error) {
 	mr := sampleMR()
+	if f.mr != nil {
+		mr = *f.mr
+	}
 	return &mr, nil
 }
 
@@ -93,7 +102,13 @@ func (f *fakeService) ListDiffs(context.Context, any, int64) ([]gitlabx.FileDiff
 func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit, error) {
 	return []gitlabx.Commit{{ShortID: "abc1234", Title: "add import"}}, nil
 }
+
 func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) { return "", nil }
+
+func (f *fakeService) ListDirectoryFiles(context.Context, any, string, string) ([]gitlabx.RepoFile, error) {
+	return f.repoFiles, f.repoFilesErr
+}
+
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {
 	return f.discussions, nil
 }
@@ -347,6 +362,39 @@ func TestMRListAndDetail(t *testing.T) {
 	code, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
 	if code != http.StatusOK || !strings.Contains(body, "Imports fmt.") || !strings.Contains(body, "Run AI review") {
 		t.Fatalf("MR detail: %d\n%s", code, body)
+	}
+}
+
+func TestMRHeaderLinksAndMarkdownDescription(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	mr := sampleMR()
+	mr.Description = "Imports **fmt** for printing.\n\n<script>alert(1)</script>"
+	env.svc.mr = &mr
+
+	// Both the overview and the diff page show the metadata line with each
+	// part linked to GitLab, and the description rendered from markdown.
+	for _, page := range []string{
+		"/i/default/mr?project=group%2Fapp&iid=5",
+		"/i/default/mr/diff?project=group%2Fapp&iid=5",
+	} {
+		code, body := env.get(page)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", page, code)
+		}
+		for _, want := range []string{
+			"<strong>fmt</strong>",
+			`href="https://gitlab.example.com/group/app/-/merge_requests/5" target="_blank" rel="noopener">group/app!5</a>`,
+			`href="https://gitlab.example.com/alice" target="_blank" rel="noopener">alice</a>`,
+			`href="https://gitlab.example.com/group/app/-/tree/feature" target="_blank" rel="noopener">feature</a>`,
+			`href="https://gitlab.example.com/group/app/-/tree/main" target="_blank" rel="noopener">main</a>`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Fatalf("%s missing %q:\n%s", page, want, body)
+			}
+		}
+		if strings.Contains(body, "<script>alert") {
+			t.Fatalf("%s renders raw HTML from the description:\n%s", page, body)
+		}
 	}
 }
 
@@ -822,5 +870,70 @@ func TestAgentSelectionDrivesRunAndBadge(t *testing.T) {
 	code, body = env.get("/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName)
 	if code != http.StatusOK || strings.Contains(body, "· security") {
 		t.Fatalf("legacy record must render without an agent badge: %d", code)
+	}
+}
+
+func TestMRDetailOffersRepoAgents(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.repoFiles = []gitlabx.RepoFile{{
+		Name:    "sql.md",
+		Content: []byte("---\nname: sql-migrations\ndescription: Lock hazards\n---\nLook for locks.\n"),
+	}}
+
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	if !strings.Contains(body, `name="agents" value="sql-migrations"`) {
+		t.Fatalf("form missing the repo agent:\n%s", body)
+	}
+	if !strings.Contains(body, `<span class="badge">project</span>`) {
+		t.Fatalf("repo agent missing its project badge:\n%s", body)
+	}
+}
+
+func TestMRDetailSurvivesRepoAgentFetchFailure(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.repoFilesErr = errors.New("boom")
+
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	if !strings.Contains(body, `name="agents" value="bug"`) {
+		t.Fatalf("builtin agents must still be offered:\n%s", body)
+	}
+	if !strings.Contains(body, "could not fetch repo agents") {
+		t.Fatalf("fetch failure must surface as a warning:\n%s", body)
+	}
+}
+
+func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "gitlab.example.com", "group", "app", ".gitlab-reviewer", "agents")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "local-only.md"), []byte("Untracked local agent.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.Checkout.Mode = "root"
+		c.Checkout.Root = root
+		c.GitLab.BaseURL = "https://gitlab.example.com"
+	})
+	// The API must not be consulted in root mode.
+	env.svc.repoFilesErr = errors.New("API must not be used")
+
+	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr page: %d", code)
+	}
+	if !strings.Contains(body, `name="agents" value="local-only"`) {
+		t.Fatalf("form missing the local clone agent:\n%s", body)
+	}
+	if strings.Contains(body, "could not fetch repo agents") {
+		t.Fatalf("root mode must not hit the API:\n%s", body)
 	}
 }

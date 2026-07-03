@@ -16,6 +16,7 @@ require (
 	github.com/knadh/koanf/v2 v2.3.5
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9
+	github.com/yuin/goldmark v1.8.2
 	gitlab.com/gitlab-org/api/client-go/v2 v2.44.0
 	go.yaml.in/yaml/v3 v3.0.4
 )

@@ -27,6 +27,7 @@ import (
 	"github.com/alecthomas/chroma/v2/formatters/html"
 	chromastyles "github.com/alecthomas/chroma/v2/styles"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
@@ -53,8 +54,12 @@ type Deps struct {
 	// Selection remembers the last agent selection per project; nil is a
 	// no-op store.
 	Selection *agents.SelectionStore
-	Logs      *runlog.Store
-	Results   *resultstore.Store
+	// ProjectAgents caches the repo-shipped agent definitions the review
+	// form fetches over the API, per (project, MR head); nil fetches
+	// uncached.
+	ProjectAgents *agents.RemoteCache
+	Logs          *runlog.Store
+	Results       *resultstore.Store
 }
 
 // catalog returns the agent catalog, defaulting to builtins only.
@@ -63,6 +68,38 @@ func (d *Deps) catalog() *agents.Catalog {
 		return agents.NewCatalog("")
 	}
 	return d.Agents
+}
+
+// projectCatalog extends the catalog with agents shipped in the MR's
+// repository under .gitlab-reviewer/agents/, so the review form can offer
+// them before any checkout exists: read from the local clone in path/root
+// checkout modes (covering definitions kept untracked), otherwise fetched
+// over the API at the MR head. Best-effort: on fetch failure the base
+// catalog is returned with a warning.
+func (d *Deps) projectCatalog(ctx context.Context, detail *gitlabx.MRDetail) (*agents.Catalog, []string) {
+	base := d.catalog()
+	cfg := d.cfgFor(detail.ProjectPath)
+	if dir, ok := checkout.LocalRepoDir(cfg.Checkout, cfg.GitLab.BaseURL, detail.ProjectPath); ok {
+		return base.WithProject(dir), nil
+	}
+	if detail.HeadSHA == "" {
+		return base, nil
+	}
+	cat, err := d.ProjectAgents.Extend(base, detail.ProjectPath, detail.HeadSHA, func() ([]agents.File, error) {
+		repoFiles, err := d.Svc.ListDirectoryFiles(ctx, detail.Project(), agents.ProjectAgentsDir, detail.HeadSHA)
+		if err != nil {
+			return nil, err
+		}
+		files := make([]agents.File, len(repoFiles))
+		for i, f := range repoFiles {
+			files[i] = agents.File(f)
+		}
+		return files, nil
+	})
+	if err != nil {
+		return base, []string{"agents: could not fetch repo agents: " + err.Error()}
+	}
+	return cat, nil
 }
 
 func (d *Deps) cfgFor(projectPath string) config.Config {

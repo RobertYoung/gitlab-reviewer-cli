@@ -57,9 +57,18 @@ the new key.
   Cross-agent dedup is a possible follow-up.
 - Repo-shipped agent prompts steer the reviewer but run in the same
   read-only tool sandbox as every review; agent definitions cannot alter
-  tool allowlists. In clone mode they are only discoverable after checkout,
-  so the picker may not list them on a first review — the runner re-resolves
-  the selection post-checkout and notes unselected repo agents in the log.
+  tool allowlists. In path/root checkout modes the pickers and the runner
+  read `.gitlab-reviewer/agents/` from the user's local clone, which covers
+  definitions deliberately kept untracked (the local_overlay pattern);
+  definitions committed at the MR head shadow same-named local ones. In
+  clone mode the pickers fetch the directory over the GitLab API at the MR
+  head SHA (cached per project + sha), so repo agents are toggleable before
+  any checkout exists — including agents the MR itself adds or edits, which
+  also means different MRs of one project can legitimately show different
+  agent lists. The fetch is best-effort: on failure the picker warns and
+  shows builtins + user agents, and the runner still re-resolves the
+  selection from the checkout post-fetch, noting unselected repo agents in
+  the log.
 - `review.use_agents` (Claude Code subagents via the Task tool) is an
   unrelated, older knob; documentation calls the distinction out, and
   renaming it to `use_subagents` is a candidate follow-up.

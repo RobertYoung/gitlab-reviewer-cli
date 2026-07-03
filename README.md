@@ -306,9 +306,19 @@ Name collisions resolve as repo > user > built-in, so a repo can sharpen
 the stock `security` agent by shipping its own `security.md`. Invalid
 definition files are skipped with a warning in the picker and the run log.
 Repo-shipped agents run in the same read-only sandbox as every review
-(`Read`/`Grep`/`Glob` only); in clone mode they are discovered after
-checkout, so they appear in the run log the first time and in the picker
-once a local checkout exists.
+(`Read`/`Grep`/`Glob` only).
+
+How the pickers discover repo agents depends on `checkout.mode`. In `path`
+and `root` modes they read `.gitlab-reviewer/agents/` straight from your
+local clone — which also picks up definitions your team deliberately keeps
+untracked (e.g. via `.git/info/exclude`, like `checkout.local_overlay`
+files); the run resolves against the same directory, with definitions
+committed at the MR head taking precedence over local ones of the same
+name. In `clone` mode they are fetched over the GitLab API at the MR's
+head commit — no local checkout needed — so they are toggleable up front,
+including agents the MR itself adds or changes. If the fetch fails the
+picker falls back to the built-in and user agents with a warning, and the
+runner still merges the repo's agents from the checkout at run time.
 
 Findings carry the agent that produced them: the findings screens show it
 alongside severity and category, and `publish.template` can reference it as
