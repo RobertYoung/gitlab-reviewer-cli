@@ -10,6 +10,9 @@ missing docs, style concerns) land in the TUI where you can edit, accept, or
 reject each one before publishing them back to the MR as inline discussions
 — immediately, or as a GitLab draft review published in one action.
 
+Prefer a browser? The same workflow is available as a local web app via
+[`gitlab-reviewer gui`](#browser-gui).
+
 ![demo](docs/demo.gif) <!-- TODO: record demo GIF -->
 
 ## How it works
@@ -103,6 +106,52 @@ line, or `C` for a general MR-level comment. Manual comments post verbatim
 pipeline as generated findings — publish them directly with `P`, or press
 `r` and they ride along to be curated and published with the review's
 findings.
+
+## Browser GUI
+
+Prefer a browser to a terminal? `gitlab-reviewer gui` serves the same
+workflow as a local web app:
+
+```sh
+gitlab-reviewer gui                # random free port, opens your browser
+gitlab-reviewer gui --port 8080    # fixed port
+gitlab-reviewer gui --no-browser   # just print the URL
+```
+
+![Diff view — syntax-highlighted diff with file explorer, inline discussions, and click-to-comment](docs/screenshots/gui-diff.png)
+
+<details>
+<summary>More screenshots: MR list, review progress, findings triage</summary>
+
+![MR list with filters](docs/screenshots/gui-mr-list.png)
+
+![Review progress streaming live](docs/screenshots/gui-review-run.png)
+
+![Findings triage — accept, reject, edit, publish](docs/screenshots/gui-findings.png)
+
+</details>
+
+The GUI mirrors the TUI screen for screen — instance picker, MR list with
+filters, MR overview, diff, review progress, findings triage, publish
+(draft or immediate), past reviews — over the exact same core: reviews run
+through the same pipeline, results land in the same stores, and a review
+started in one frontend can be reopened in the other. What the browser
+adds is rendering the terminal can't match: syntax-highlighted diffs with
+soft wrapping, a persistent file explorer alongside the diff, existing MR
+discussions shown inline where they were made, and click-to-comment on any
+diff line (`⌘`/`ctrl`+`enter` submits). Review progress streams live over
+server-sent events, and the page jumps to the findings when the run
+completes.
+
+The server binds to `127.0.0.1` only, and every session is protected by a
+random token baked into the launch URL — other local processes cannot
+drive your review session. The URL is printed on stdout; opening it once
+sets a strict same-site session cookie and drops the token from the
+address bar.
+
+`--instance` is not needed: with several `gitlab.instances` configured the
+GUI starts on an instance picker, and each instance's MRs are browsed under
+its own URL path.
 
 ## Configuration
 
@@ -508,6 +557,7 @@ matter: `feat:`/`fix:` trigger releases.
 - [x] M2 — review MVP (Claude review, findings editor, inline publish)
 - [x] M3 — draft reviews, auto-comment, discussions in context, syntax highlighting
 - [x] M4 — multi-pass reviews for large MRs, cache management
+- [x] M5 — browser GUI (`gitlab-reviewer gui`): the same workflow served as a local web app
 - [ ] Homebrew tap
 - [ ] OS keychain storage for the GitLab token
 - [ ] OAuth authentication

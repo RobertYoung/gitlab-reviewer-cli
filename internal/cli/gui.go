@@ -1,0 +1,152 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+
+	"github.com/spf13/cobra"
+
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/version"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/webui"
+)
+
+// newGUICmd serves the browser-based GUI: the same review workflow as the
+// TUI over a loopback-only web server.
+func newGUICmd(st *state) *cobra.Command {
+	var (
+		port      int
+		noBrowser bool
+	)
+	cmd := &cobra.Command{
+		Use:   "gui",
+		Short: "Serve the browser-based GUI",
+		Long:  "gui starts a local web server on 127.0.0.1 and opens your browser on a\nsession-tokenised URL. It offers the same workflow as the TUI — browse MRs,\nread the diff, comment, run AI reviews, curate findings, publish — with\nHTML rendering: syntax-highlighted diffs, a persistent file explorer, and\ninline discussion threads.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg := st.loaded.Config
+			if err := cfg.Validate(); err != nil {
+				return err
+			}
+			if err := cfg.ValidateGitLab(); err != nil {
+				return err
+			}
+			// Full template check (field names included) — cfg.Validate
+			// only covers syntax.
+			if _, err := review.ParseBodyTemplate(cfg.Publish.Template); err != nil {
+				return err
+			}
+
+			// Raw stream transcripts and run logs share one directory.
+			reviewsDir := filepath.Join(config.DefaultStateDir(), "reviews")
+			reviewer := claudecli.New(cfg, reviewsDir)
+			if err := reviewer.CheckAvailable(cmd.Context()); err != nil {
+				return err
+			}
+			logs := runlog.NewStore(reviewsDir)
+			results := resultstore.NewStore(reviewsDir)
+
+			// Enforce the clone-cache budget in the background; the server
+			// must not wait on a filesystem walk.
+			if manager, err := checkout.NewManager(cfg.Checkout, cfg.GitLab.BaseURL, cfg.GitLab.Token); err == nil {
+				go func() {
+					if res, err := manager.EvictIfNeeded(context.Background()); err != nil {
+						slog.Warn("cache eviction failed", "error", err)
+					} else if len(res.Removed) > 0 {
+						slog.Info("evicted cached clones", "count", len(res.Removed), "freed_bytes", res.FreedBytes)
+					}
+				}()
+			}
+
+			srv, err := webui.New(webui.Options{
+				Instances:  cfg.InstanceNames(),
+				ReviewsDir: reviewsDir,
+				Version:    version.Version,
+				MakeDeps: func(instance string) (*webui.Deps, error) {
+					icfg := cfg
+					if instance != "" {
+						var err error
+						if icfg, err = cfg.WithInstance(instance); err != nil {
+							return nil, err
+						}
+					}
+					svc, err := gitlabx.New(icfg.GitLab.BaseURL, icfg.GitLab.Token, icfg.GitLab.Projects, icfg.GitLab.Groups)
+					if err != nil {
+						return nil, st.redactor.RedactError(err)
+					}
+					manager, err := checkout.NewManager(icfg.Checkout, icfg.GitLab.BaseURL, icfg.GitLab.Token)
+					if err != nil {
+						return nil, st.redactor.RedactError(err)
+					}
+					deps := &webui.Deps{
+						Cfg:      icfg,
+						Svc:      svc,
+						Reviewer: reviewer,
+						Logs:     logs,
+						Results:  results,
+						Checkout: func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (string, func(context.Context) error, error) {
+							co, err := manager.Ensure(ctx, mr, progress)
+							if err != nil {
+								return "", nil, st.redactor.RedactError(err)
+							}
+							return co.Path, co.Close, nil
+						},
+						CfgFor: func(projectPath string) config.Config {
+							projectCfg, err := st.loaded.ForProject(projectPath)
+							if err != nil {
+								return icfg
+							}
+							// Per-project overrides cover review/checkout/publish
+							// only; keep the resolved instance's gitlab settings.
+							projectCfg.GitLab = icfg.GitLab
+							return projectCfg
+						},
+					}
+					return deps, nil
+				},
+			})
+			if err != nil {
+				return err
+			}
+
+			err = srv.Serve(cmd.Context(), port, func(url string) {
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "gitlab-reviewer GUI listening — open:\n\n  %s\n\nPress ctrl+c to stop.\n", url)
+				if !noBrowser {
+					if err := openBrowser(url); err != nil {
+						slog.Warn("could not open the browser", "error", err)
+					}
+				}
+			})
+			if err != nil {
+				return st.redactor.RedactError(err)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().IntVar(&port, "port", 0, "port to listen on (default: a random free port)")
+	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not open the browser automatically")
+	return cmd
+}
+
+// openBrowser opens url in the platform's default browser. The URL is a
+// single argv element (no shell), so it cannot inject commands.
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return exec.Command("open", url).Start() //nolint:gosec // loopback URL built by the server, passed as one arg
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start() //nolint:gosec // loopback URL built by the server, passed as one arg
+	default:
+		return exec.Command("xdg-open", url).Start() //nolint:gosec // loopback URL built by the server, passed as one arg
+	}
+}

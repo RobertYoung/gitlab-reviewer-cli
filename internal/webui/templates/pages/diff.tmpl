@@ -1,0 +1,94 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<div class="diff-layout">
+  <aside class="filetree">
+    <h3>{{len $c.Files}} changed file{{if ne (len $c.Files) 1}}s{{end}}</h3>
+    <ul>
+      {{range $c.Files}}
+      <li><a href="#file-{{.Index}}" title="{{.Path}}"><span class="fstatus fstatus-{{.Status}}">{{.Letter}}</span><span class="fname">{{.Path}}</span>{{if .Comments}}<span class="badge comments">💬 {{.Comments}}</span>{{end}}</a></li>
+      {{end}}
+    </ul>
+    <div class="actions column">
+      <form method="post" action="{{$c.Nav.ReviewURL}}">
+        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+        <button type="submit" class="button review">▶ Run AI review</button>
+      </form>
+      {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
+    </div>
+  </aside>
+
+  <section class="diff-files">
+    {{if $c.General}}
+    <div class="panel">
+      <h3>Pending MR-level comments</h3>
+      <ul class="pending-comments">
+        {{range $c.General}}
+        <li><span class="badge manual">{{fstate .State}}</span> {{ftitle .}}</li>
+        {{end}}
+      </ul>
+    </div>
+    {{end}}
+
+    {{range $c.Files}}
+    <article class="diff-file" id="file-{{.Index}}">
+      <header><span class="fstatus fstatus-{{.Status}}">{{.Letter}}</span> <span class="fpath">{{.Path}}</span></header>
+      {{if .TooLarge}}<p class="note">This file's diff is too large to display.</p>{{end}}
+      {{$file := .}}
+      <table class="diff">
+        {{range .Lines}}
+        {{if eq .Kind "hunk"}}
+        <tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="gutter"></td><td class="code">{{.HTML}}</td></tr>
+        {{else}}
+        <tr class="line {{.Kind}}" data-file="{{$file.NewPath}}" data-old="{{.Old}}" data-new="{{.New}}">
+          <td class="ln">{{if .Old}}{{.Old}}{{end}}</td>
+          <td class="ln">{{if .New}}{{.New}}{{end}}</td>
+          <td class="gutter">{{if .CanComment}}<button type="button" class="add-comment" title="add a comment on this line">+</button>{{end}}</td>
+          <td class="code">{{.HTML}}</td>
+        </tr>
+        {{range .Comments}}
+        <tr class="inline-comment"><td colspan="3" class="ln"></td><td>
+          <div class="comment{{if .Pending}} pending{{end}}">
+            <div class="meta">
+              {{if .Pending}}<span class="badge manual">yours · {{.State}}</span>{{else}}<strong>{{.Author}}</strong> <span class="subtle">{{reltime .When}}</span>{{end}}
+            </div>
+            <pre class="prose">{{.Body}}</pre>
+            {{if and .Pending .ID}}
+            <form method="post" action="{{$c.Nav.DeleteURL}}" class="inline-form">
+              <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+              <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <input type="hidden" name="back" value="{{$c.BackURL}}">
+              <button type="submit" class="link danger">delete</button>
+            </form>
+            {{end}}
+          </div>
+        </td></tr>
+        {{end}}
+        {{end}}
+        {{end}}
+      </table>
+    </article>
+    {{end}}
+  </section>
+</div>
+
+<template id="comment-form-template">
+  <tr class="inline-comment new"><td colspan="3" class="ln"></td><td>
+    <form method="post" action="{{$c.Nav.CommentURL}}" class="comment-form">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <input type="hidden" name="back" value="{{$c.BackURL}}">
+      <input type="hidden" name="file" value="">
+      <input type="hidden" name="old" value="">
+      <input type="hidden" name="new" value="">
+      <textarea name="body" rows="3" placeholder="posted verbatim as your own comment — markdown supported"></textarea>
+      <div class="actions">
+        <button type="submit" class="button primary">Add comment</button>
+        <button type="button" class="button cancel-comment">Cancel</button>
+      </div>
+    </form>
+  </td></tr>
+</template>
+{{end}}

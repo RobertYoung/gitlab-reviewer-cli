@@ -1,0 +1,8 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav "")}}
+<section class="panel">
+  <h2>Review log <span class="subtle">{{$c.Name}}</span></h2>
+  <pre class="runlog">{{$c.Text}}</pre>
+</section>
+{{end}}

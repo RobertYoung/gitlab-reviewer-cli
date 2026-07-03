@@ -1,0 +1,76 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<section class="panel">
+  <h2>Findings · {{$c.Detail.Ref}}</h2>
+  {{if $c.Rec.Summary}}<pre class="prose summary">{{$c.Rec.Summary}}</pre>{{end}}
+  {{range $c.Rec.Warnings}}<p class="warning">⚠ {{.}}</p>{{end}}
+
+  <div class="actions">
+    <form method="post" action="{{$c.StateURL}}">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <input type="hidden" name="record" value="{{$c.RecordName}}">
+      <input type="hidden" name="action" value="accept-all">
+      <button type="submit" class="button">Accept all pending</button>
+    </form>
+    {{if $c.Accepted}}<a class="button primary" href="{{$c.PublishURL}}">Publish {{$c.Accepted}} accepted</a>{{end}}
+    {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">Run log</a>{{end}}
+  </div>
+
+  {{if not $c.Items}}
+  <p class="note">The reviewer found nothing to flag.</p>
+  {{end}}
+
+  {{range $c.Items}}
+  {{$f := .F}}
+  <article class="finding state-{{fstate $f.State}}" id="f-{{$f.ID}}">
+    <header>
+      {{template "sevbadge" $f}}
+      <strong class="ftitle">{{ftitle $f}}</strong>
+      <span class="subtle">{{floc $f}}</span>
+      <span class="spacer"></span>
+      {{template "statebadge" $f.State}}
+    </header>
+    <pre class="prose">{{$f.Body}}</pre>
+    {{if $f.Suggestion}}
+    <div class="suggestion">
+      <span class="subtle">suggested replacement:</span>
+      <pre class="prose add">+{{$f.Suggestion}}</pre>
+    </div>
+    {{end}}
+    {{template "excerpt" .Excerpt}}
+    <footer class="actions">
+      <form method="post" action="{{$c.StateURL}}" class="inline-form">
+        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+        <input type="hidden" name="record" value="{{$c.RecordName}}">
+        <input type="hidden" name="id" value="{{$f.ID}}">
+        <input type="hidden" name="action" value="accept">
+        <button type="submit" class="button ok">✓ Accept</button>
+      </form>
+      <form method="post" action="{{$c.StateURL}}" class="inline-form">
+        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+        <input type="hidden" name="record" value="{{$c.RecordName}}">
+        <input type="hidden" name="id" value="{{$f.ID}}">
+        <input type="hidden" name="action" value="reject">
+        <button type="submit" class="button danger">✗ Reject</button>
+      </form>
+      <details class="edit">
+        <summary class="button">Edit body</summary>
+        <form method="post" action="{{$c.StateURL}}">
+          <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+          <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+          <input type="hidden" name="record" value="{{$c.RecordName}}">
+          <input type="hidden" name="id" value="{{$f.ID}}">
+          <input type="hidden" name="action" value="edit">
+          <textarea name="body" rows="6">{{$f.Body}}</textarea>
+          <button type="submit" class="button primary">Save</button>
+        </form>
+      </details>
+    </footer>
+  </article>
+  {{end}}
+</section>
+{{end}}

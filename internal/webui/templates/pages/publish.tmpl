@@ -1,0 +1,64 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<section class="panel">
+  {{if not $c.Posted}}
+  <h2>Publish {{len $c.Items}} comment(s) to {{$c.Detail.Ref}}</h2>
+  {{if not $c.Items}}
+  <p class="note">Nothing accepted to publish.</p>
+  {{else}}
+  <ul class="publish-items">
+    {{range $c.Items}}
+    <li>{{template "sevbadge" .}} <span class="subtle">{{floc .}}</span> {{ftitle .}}</li>
+    {{end}}
+  </ul>
+  <form method="post" action="{{$c.PostURL}}" class="publish-form">
+    <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+    <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+    <input type="hidden" name="source" value="{{$c.Source}}">
+    <input type="hidden" name="record" value="{{$c.RecordName}}">
+    <label class="mode"><input type="radio" name="mode" value="draft" {{if eq $c.Mode "draft"}}checked{{end}}>
+      <strong>draft review</strong> <span class="subtle">— comments stay invisible until you publish the review in one action</span></label>
+    <label class="mode"><input type="radio" name="mode" value="immediate" {{if eq $c.Mode "immediate"}}checked{{end}}>
+      <strong>immediate</strong> <span class="subtle">— each comment appears on the MR as it is posted</span></label>
+    <button type="submit" class="button primary">Publish</button>
+    <span class="note">Posting is sequential and can take a few seconds per comment.</span>
+  </form>
+  {{end}}
+
+  {{else}}
+  <h2>{{if $c.DraftReady}}Draft review ready{{else}}Publish complete{{end}}</h2>
+  {{if $c.TmplErr}}<p class="warning">⚠ {{$c.TmplErr}}</p>{{end}}
+  <ul class="publish-items">
+    {{range $c.Results}}
+    <li>
+      {{if .Err}}<span class="badge state-failed">✗ failed</span>
+      {{else if eq (fstate .State) "published"}}<span class="badge state-published">✓ {{if .F.File}}inline{{else}}note{{end}}</span>
+      {{else if eq (fstate .State) "note"}}<span class="badge state-note">✓ note (no inline position)</span>
+      {{else}}<span class="badge">{{fstate .State}}</span>{{end}}
+      <span class="subtle">{{floc .F}}</span> {{ftitle .F}}
+      {{if .Err}}<div class="error">{{.Err}}</div>{{end}}
+    </li>
+    {{end}}
+  </ul>
+  <p>{{$c.Inline}} inline · {{$c.Notes}} as notes · {{$c.Failed}} failed</p>
+
+  {{if $c.DraftReady}}
+  <p>{{if eq $c.Mode "draft"}}The comments were created as a pending review — publish it to make them visible, or leave them as drafts in GitLab.{{end}}</p>
+  <div class="actions">
+    <form method="post" action="{{$c.ReviewURL}}">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <button type="submit" class="button primary">Publish review now</button>
+    </form>
+    <a class="button" href="{{$c.Nav.DetailURL}}">Keep as drafts</a>
+  </div>
+  {{else}}
+  <div class="actions">
+    <a class="button primary" href="{{$c.Nav.DetailURL}}">Back to MR</a>
+    {{if $c.Detail.WebURL}}<a class="button" href="{{$c.Detail.WebURL}}" target="_blank" rel="noopener">Open in GitLab ↗</a>{{end}}
+  </div>
+  {{end}}
+  {{end}}
+</section>
+{{end}}

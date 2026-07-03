@@ -1,0 +1,27 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<section class="panel">
+  <h2>Past reviews · {{$c.Detail.Ref}}</h2>
+  {{if not $c.Entries}}
+  <p class="note">No stored reviews for this MR. Run a review — its findings and log are kept here for reference.</p>
+  {{else}}
+  <table class="list">
+    <thead><tr><th>Started</th><th>Result</th><th>Title</th><th></th></tr></thead>
+    <tbody>
+      {{range $c.Entries}}
+      <tr>
+        <td>{{datetime .Started}}</td>
+        <td>{{if .FindingsURL}}{{.Findings}} finding(s), {{.Accepted}} accepted{{else}}<span class="subtle">log only</span>{{end}}</td>
+        <td class="subtle">{{.Title}}</td>
+        <td class="actions-cell">
+          {{if .FindingsURL}}<a class="button" href="{{.FindingsURL}}">Open findings</a>{{end}}
+          {{if .LogURL}}<a class="button" href="{{.LogURL}}">Log</a>{{end}}
+        </td>
+      </tr>
+      {{end}}
+    </tbody>
+  </table>
+  {{end}}
+</section>
+{{end}}

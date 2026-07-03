@@ -3,8 +3,6 @@
 package tui
 
 import (
-	"context"
-
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -13,11 +11,12 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
 )
 
 // CheckoutFunc prepares a review worktree for an MR and returns its path
 // plus a cleanup function. Progress lines go to the TUI's review log.
-type CheckoutFunc func(ctx context.Context, mr gitlabx.MRDetail, progress func(string)) (path string, cleanup func(context.Context) error, err error)
+type CheckoutFunc = runner.CheckoutFunc
 
 // Deps bundles everything screens need. CfgFor resolves per-project
 // overrides on top of the base configuration. OpenURL overrides the

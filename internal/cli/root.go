@@ -1,5 +1,6 @@
 // Package cli wires the cobra command tree: the root command launches the
-// TUI; subcommands cover version, config inspection, and cache maintenance.
+// TUI; subcommands cover the browser GUI, version, config inspection, and
+// cache maintenance.
 package cli
 
 import (
@@ -135,7 +136,7 @@ func newRoot(st *state) *cobra.Command {
 	root.PersistentFlags().StringVar(&st.configFile, "config", "", "path to settings file (default "+config.DefaultFile()+")")
 	addSettingFlags(root)
 
-	root.AddCommand(newVersionCmd(), newConfigCmd(st), newCacheCmd(st))
+	root.AddCommand(newVersionCmd(), newConfigCmd(st), newCacheCmd(st), newGUICmd(st))
 	return root
 }
 
