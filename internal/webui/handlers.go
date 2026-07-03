@@ -182,6 +182,7 @@ type mrNav struct {
 	ApproveURL  string // POST target
 	PublishURL  string // GET confirm page for pending comments
 	FindingsURL string
+	ChatURL     string // POST target: start a conversation about the MR/line
 }
 
 func newMRNav(inst, project string, iid int64) mrNav {
@@ -197,6 +198,7 @@ func newMRNav(inst, project string, iid int64) mrNav {
 		DeleteURL:  instPath(inst, "/mr/comment/delete"),
 		ApproveURL: instPath(inst, "/mr/approve"),
 		PublishURL: mrURL(inst, "/mr/publish", project, iid, url.Values{"source": {"comments"}}),
+		ChatURL:    instPath(inst, "/mr/chat/start"),
 	}
 }
 

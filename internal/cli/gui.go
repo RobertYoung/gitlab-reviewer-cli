@@ -95,6 +95,7 @@ func newGUICmd(st *state) *cobra.Command {
 						Cfg:       icfg,
 						Svc:       svc,
 						Reviewer:  reviewer,
+						Chatter:   reviewer,
 						Agents:    catalog,
 						Selection: selection,
 						// Per-instance cache: the (project, sha) key is only

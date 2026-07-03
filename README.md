@@ -109,6 +109,14 @@ pipeline as generated findings — publish them directly with `P`, or press
 `r` and they ride along to be curated and published with the review's
 findings.
 
+Not sure what a change does? Chat about it instead of (or before)
+commenting: press `t` to open a conversation with Claude about the selected
+diff line, or `T` to discuss the MR as a whole. The chat runs inside a
+checkout of the MR branch, so Claude reads the surrounding code, callers,
+and tests while answering — and the conversation is multi-turn, so you can
+dig in with follow-up questions (`ctrl+s` sends). Chats are ephemeral:
+nothing is posted to GitLab or stored on disk.
+
 ## Browser GUI
 
 Prefer a browser to a terminal? `gitlab-reviewer gui` serves the same
@@ -146,6 +154,12 @@ the diff, existing MR discussions shown inline where they were made, and
 click-to-comment on any diff line (`⌘`/`ctrl`+`enter` submits). Review progress streams live over
 server-sent events, and the page jumps to the findings when the run
 completes.
+
+The chat is there too: "Chat with Claude" on the MR overview (or the diff
+sidebar) opens a conversation about the whole MR, and the `+` button on any
+diff line offers "Ask Claude" alongside "Add comment" — whatever you typed
+becomes the first message of a chat anchored to that line. Replies stream
+their progress live and the conversation continues until you end the chat.
 
 The server binds to `127.0.0.1` only, and every session is protected by a
 random token baked into the launch URL — other local processes cannot

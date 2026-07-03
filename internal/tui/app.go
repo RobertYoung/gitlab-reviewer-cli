@@ -26,6 +26,9 @@ type Deps struct {
 	Cfg      config.Config
 	Svc      gitlabx.Service
 	Reviewer review.Reviewer
+	// Chatter answers conversational questions about an MR inside its
+	// checkout; nil hides the chat keys.
+	Chatter  review.Chatter
 	Checkout CheckoutFunc
 	CfgFor   func(projectPath string) config.Config
 	// Agents is the catalog of available review agents (builtins + user

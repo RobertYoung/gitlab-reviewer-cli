@@ -73,6 +73,8 @@ func (s *helpScreen) View() string {
 			{"d", "toggle MR overview (description and commits)"},
 			{"c", "comment on the selected line (ctrl+s saves)"},
 			{"C", "general MR-level comment"},
+			{"t", "chat with Claude about the selected line"},
+			{"T", "chat with Claude about the whole MR"},
 			{"P", "publish pending manual comments"},
 			{"e", "toggle file explorer"},
 			{"tab", "switch focus explorer ↔ diff"},
@@ -94,6 +96,11 @@ func (s *helpScreen) View() string {
 			{"h/l", "fold / unfold directory"},
 			{"g/G", "top/bottom"},
 			{"esc", "back to the diff"},
+		}},
+		{"chat (t/T on the MR detail)", [][2]string{
+			{"ctrl+s", "send the message"},
+			{"pgup/pgdn", "scroll the conversation"},
+			{"esc", "cancel the reply being written, then end the chat"},
 		}},
 		{"review", [][2]string{
 			{"esc", "cancel the running review"},

@@ -215,10 +215,12 @@ func newTestEnv(t *testing.T, rev review.Reviewer, cfgOpts ...func(*config.Confi
 	srv, err := New(Options{
 		ReviewsDir: dir,
 		MakeDeps: func(string) (*Deps, error) {
+			chatter, _ := rev.(review.Chatter)
 			return &Deps{
 				Cfg:      cfg,
 				Svc:      svc,
 				Reviewer: rev,
+				Chatter:  chatter,
 				Logs:     runlog.NewStore(dir),
 				Results:  resultstore.NewStore(dir),
 				Checkout: func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
@@ -935,5 +937,121 @@ func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
 	}
 	if strings.Contains(body, "could not fetch repo agents") {
 		t.Fatalf("root mode must not hit the API:\n%s", body)
+	}
+}
+
+// --- chat ---
+
+type fakeChatter struct {
+	mu    sync.Mutex
+	reqs  []review.ChatRequest
+	reply string
+}
+
+func (c *fakeChatter) Chat(_ context.Context, req review.ChatRequest, onEvent func(review.Event)) (*review.ChatReply, error) {
+	c.mu.Lock()
+	c.reqs = append(c.reqs, req)
+	c.mu.Unlock()
+	onEvent(review.Event{Kind: review.EventStatus, Text: "reading code…"})
+	return &review.ChatReply{Text: c.reply, SessionID: "chat-sess-1", CostUSD: 0.01}, nil
+}
+
+func (c *fakeChatter) requests() []review.ChatRequest {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]review.ChatRequest(nil), c.reqs...)
+}
+
+// fakeChatReviewer serves both seams, like the real claudecli backend.
+type fakeChatReviewer struct {
+	fakeReviewer
+	fakeChatter
+}
+
+// waitChat polls one chat session until no turn is in flight.
+func waitChat(t *testing.T, s *Server, id string) *chatSession {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		cs := s.chats.get(id)
+		if cs != nil && !cs.snapshot().Busy {
+			return cs
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("chat session never went idle")
+	return nil
+}
+
+func TestChatFlow(t *testing.T) {
+	rev := &fakeChatReviewer{
+		fakeReviewer{result: defaultResult()},
+		fakeChatter{reply: "It guards the expiry claim."},
+	}
+	env := newTestEnv(t, rev)
+
+	// Starting a line chat with a first message redirects to the chat page.
+	code, body := env.post("/i/default/mr/chat/start", mrForm(url.Values{
+		"file": {"main.go"}, "new": {"2"}, "body": {"why is this needed?"},
+	}))
+	if code != http.StatusOK || !strings.Contains(body, "main.go:2") {
+		t.Fatalf("chat start: %d\n%s", code, body)
+	}
+
+	cs := waitChat(t, env.srv, "c1")
+	code, body = env.get("/i/default/chat/" + cs.ID)
+	if code != http.StatusOK {
+		t.Fatalf("chat page: %d", code)
+	}
+	for _, want := range []string{"why is this needed?", "It guards the expiry claim."} {
+		if !strings.Contains(body, want) {
+			t.Errorf("chat page missing %q:\n%s", want, body)
+		}
+	}
+
+	reqs := rev.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d", len(reqs))
+	}
+	req := reqs[0]
+	if req.Focus == nil || req.Focus.File != "main.go" || req.Focus.Line.NewLine == nil || *req.Focus.Line.NewLine != 2 {
+		t.Errorf("focus: %+v", req.Focus)
+	}
+	if req.SessionID != "" || req.Message != "why is this needed?" || req.RepoPath == "" {
+		t.Errorf("request: %+v", req)
+	}
+
+	// A follow-up message resumes the backend session.
+	env.post("/i/default/chat/"+cs.ID+"/send", url.Values{"message": {"and the old branch?"}})
+	waitChat(t, env.srv, cs.ID)
+	if reqs = rev.requests(); len(reqs) != 2 || reqs[1].SessionID != "chat-sess-1" {
+		t.Fatalf("second turn should resume: %+v", reqs)
+	}
+
+	// The SSE endpoint reports done immediately once the turn finished.
+	code, body = env.get("/i/default/chat/" + cs.ID + "/events")
+	if code != http.StatusOK || !strings.Contains(body, "event: done") {
+		t.Fatalf("events: %d\n%s", code, body)
+	}
+
+	// Ending the chat closes the session and disables the composer.
+	env.post("/i/default/chat/"+cs.ID+"/end", url.Values{})
+	code, body = env.get("/i/default/chat/" + cs.ID)
+	if code != http.StatusOK || !strings.Contains(body, "This chat has ended.") {
+		t.Fatalf("ended chat page: %d\n%s", code, body)
+	}
+
+	// A start without a file anchor opens a whole-MR chat.
+	code, body = env.post("/i/default/mr/chat/start", mrForm(nil))
+	if code != http.StatusOK || !strings.Contains(body, "Chat about group/app!5") {
+		t.Fatalf("MR chat page: %d\n%s", code, body)
+	}
+}
+
+func TestChatUnavailableWithoutChatter(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}) // no Chatter seam
+	code, body := env.post("/i/default/mr/chat/start", mrForm(nil))
+	if code != http.StatusNotImplemented || !strings.Contains(body, "chat is not available") {
+		t.Fatalf("want 501, got %d\n%s", code, body)
 	}
 }

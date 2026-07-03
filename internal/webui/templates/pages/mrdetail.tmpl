@@ -30,6 +30,11 @@
         {{range $c.AgentWarnings}}<p class="warning">⚠ {{.}}</p>{{end}}
       </details>
     </form>
+    <form method="post" action="{{$c.Nav.ChatURL}}">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <button type="submit" class="button">💬 Chat with Claude</button>
+    </form>
     <a class="button" href="{{$c.Nav.HistoryURL}}">Past reviews</a>
     {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
     {{if and $c.Approvals $c.Approvals.UserCanApprove}}

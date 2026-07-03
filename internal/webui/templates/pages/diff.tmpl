@@ -26,6 +26,11 @@
         <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
         <button type="submit" class="button review">▶ Run AI review</button>
       </form>
+      <form method="post" action="{{$c.Nav.ChatURL}}">
+        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+        <button type="submit" class="button">💬 Chat about this MR</button>
+      </form>
       {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
     </div>
   </aside>
@@ -109,6 +114,7 @@
       <textarea name="body" rows="3" placeholder="posted verbatim as your own comment — markdown supported"></textarea>
       <div class="actions">
         <button type="submit" class="button primary">Add comment</button>
+        <button type="submit" class="button" formaction="{{$c.Nav.ChatURL}}" title="open a chat with Claude about this line — your text becomes the first message">💬 Ask Claude</button>
         <button type="button" class="button cancel-comment">Cancel</button>
       </div>
     </form>

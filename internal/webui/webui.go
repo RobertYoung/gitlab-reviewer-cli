@@ -46,6 +46,9 @@ type Deps struct {
 	Cfg      config.Config
 	Svc      gitlabx.Service
 	Reviewer review.Reviewer
+	// Chatter answers conversational questions about an MR inside its
+	// checkout; nil disables the chat pages.
+	Chatter  review.Chatter
 	Checkout runner.CheckoutFunc
 	CfgFor   func(projectPath string) config.Config
 	// Agents is the catalog of available review agents (builtins + user
@@ -144,6 +147,7 @@ type Server struct {
 
 	runs     *runRegistry
 	comments *commentStore
+	chats    *chatRegistry
 }
 
 // New builds the server and generates its per-session access token.
@@ -173,6 +177,7 @@ func New(opts Options) (*Server, error) {
 		deps:      map[string]*Deps{},
 		runs:      newRunRegistry(),
 		comments:  newCommentStore(),
+		chats:     newChatRegistry(),
 	}, nil
 }
 
@@ -241,6 +246,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /i/{inst}/mr/publish/review", s.withDeps(s.handlePublishReview))
 	mux.HandleFunc("GET /i/{inst}/mr/history", s.withDeps(s.handleHistory))
 	mux.HandleFunc("GET /i/{inst}/mr/log", s.withDeps(s.handleLogView))
+	mux.HandleFunc("POST /i/{inst}/mr/chat/start", s.withDeps(s.handleChatStart))
+	mux.HandleFunc("GET /i/{inst}/chat/{chat}", s.withDeps(s.handleChatPage))
+	mux.HandleFunc("POST /i/{inst}/chat/{chat}/send", s.withDeps(s.handleChatSend))
+	mux.HandleFunc("GET /i/{inst}/chat/{chat}/events", s.withDeps(s.handleChatEvents))
+	mux.HandleFunc("POST /i/{inst}/chat/{chat}/cancel", s.withDeps(s.handleChatCancel))
+	mux.HandleFunc("POST /i/{inst}/chat/{chat}/end", s.withDeps(s.handleChatEnd))
 
 	return s.auth(mux)
 }
@@ -274,6 +285,8 @@ func (s *Server) Serve(ctx context.Context, port int, ready func(url string)) er
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
+		// End open conversations first so their worktrees are released.
+		s.chats.closeAll(shutdownCtx)
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			slog.Warn("gui server shutdown", "error", err)
 		}

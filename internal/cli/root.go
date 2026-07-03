@@ -107,6 +107,7 @@ func newRoot(st *state) *cobra.Command {
 				Cfg:           cfg,
 				Svc:           svc,
 				Reviewer:      reviewer,
+				Chatter:       reviewer,
 				Agents:        agents.NewCatalog(config.DefaultAgentsDir()),
 				Selection:     agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json")),
 				ProjectAgents: agents.NewRemoteCache(),

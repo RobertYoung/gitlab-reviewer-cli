@@ -127,7 +127,11 @@ func (s *mrDetail) Hints() string {
 	if s.approvals != nil && s.approvals.UserHasApproved {
 		approve = "a unapprove"
 	}
-	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + explorer + " · v layout · d overview · r review · L past reviews · " + approve + " · o browser · esc back"
+	chat := ""
+	if s.deps.Chatter != nil {
+		chat = "t/T chat · "
+	}
+	hints := "↑/↓ move · n/p file · ]/[ hunk · c comment · C MR comment · " + chat + explorer + " · v layout · d overview · r review · L past reviews · " + approve + " · o browser · esc back"
 	if len(s.pendingComments()) > 0 {
 		hints = "P publish comments · " + hints
 	}
@@ -432,26 +436,31 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			s.refresh()
 			return s, nil
 		case "c":
-			if s.cursor < 0 || s.cursor >= len(s.lineRefs) || !s.lineRefs[s.cursor].commentable() {
+			ref, excerpt, ok := s.cursorLine()
+			if !ok {
 				return s, nil
 			}
-			ref := s.lineRefs[s.cursor]
-			anchor := &commentAnchor{file: s.diffs[s.fileIdx].NewPath}
-			if ref.old > 0 {
-				old := ref.old
-				anchor.line.OldLine = &old
-			}
-			if ref.new > 0 {
-				newL := ref.new
-				anchor.line.NewLine = &newL
-			}
-			excerpt := ""
-			if r, ok := s.rendered[s.fileIdx]; ok && s.cursor < len(r.lines) {
-				excerpt = r.lines[s.cursor]
-			}
+			anchor := &commentAnchor{file: s.diffs[s.fileIdx].NewPath, line: ref}
 			return s, pushScreen(newCommentComposer(anchor, excerpt, s.addComment))
 		case "C":
 			return s, pushScreen(newCommentComposer(nil, "", s.addComment))
+		case "t":
+			// Needs the detail (metadata) and a rendered diff line; other
+			// fetches (commits, approvals) may still be in flight.
+			if s.deps.Chatter == nil || s.detail == nil {
+				return s, nil
+			}
+			ref, excerpt, ok := s.cursorLine()
+			if !ok {
+				return s, nil
+			}
+			focus := &review.ChatFocus{File: s.diffs[s.fileIdx].NewPath, Line: ref}
+			return s, pushScreen(newChatScreen(s.deps, *s.detail, s.diffs, focus, excerpt))
+		case "T":
+			if s.deps.Chatter == nil || s.detail == nil {
+				return s, nil
+			}
+			return s, pushScreen(newChatScreen(s.deps, *s.detail, s.diffs, nil, ""))
 		case "P":
 			pending := s.pendingComments()
 			if len(pending) == 0 || s.detail == nil {
@@ -465,6 +474,27 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 	var cmd tea.Cmd
 	s.vp, cmd = s.vp.Update(msg)
 	return s, cmd
+}
+
+// cursorLine resolves the selected diff line into a LineRef plus its
+// rendered excerpt; ok is false when no commentable line is selected.
+func (s *mrDetail) cursorLine() (line review.LineRef, excerpt string, ok bool) {
+	if s.cursor < 0 || s.cursor >= len(s.lineRefs) || !s.lineRefs[s.cursor].commentable() {
+		return line, "", false
+	}
+	ref := s.lineRefs[s.cursor]
+	if ref.old > 0 {
+		old := ref.old
+		line.OldLine = &old
+	}
+	if ref.new > 0 {
+		newL := ref.new
+		line.NewLine = &newL
+	}
+	if r, cached := s.rendered[s.fileIdx]; cached && s.cursor < len(r.lines) {
+		excerpt = r.lines[s.cursor]
+	}
+	return line, excerpt, true
 }
 
 func (s *mrDetail) setFile(idx int) {
