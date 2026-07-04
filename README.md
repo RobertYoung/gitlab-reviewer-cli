@@ -131,6 +131,26 @@ click-to-comment on any diff line. The server binds to `127.0.0.1` only
 and every session is protected by a random token baked into the launch
 URL. See the [GUI guide](docs/wiki/GUI-Guide.md).
 
+## Headless / CI
+
+`gitlab-reviewer review` runs one review non-interactively for CI jobs and
+scripting — same pipeline, no UI:
+
+```sh
+# report only: findings stored + printed, nothing posted to GitLab
+gitlab-reviewer review mygroup/myapp!123 --output json
+
+# post the findings as one draft review, published in one action
+gitlab-reviewer review "$CI_PROJECT_PATH!$CI_MERGE_REQUEST_IID" --publish draft
+```
+
+Progress streams to stderr, the outcome to stdout (`text` or `json`), and
+the exit code is non-zero on failure. Publishing is off by default
+(`--publish none`): the stored review can be reopened later in the TUI or
+GUI to curate and publish with a human in the loop. See
+[Headless mode](docs/wiki/Headless-Mode.md) for publish semantics, exit
+codes, and a GitLab CI job example.
+
 ## Configuration
 
 Every setting is available as a flag, an environment variable, and a key in
@@ -247,6 +267,7 @@ matter: `feat:`/`fix:` trigger releases.
   [Getting started](docs/wiki/Getting-Started.md) ·
   [TUI guide](docs/wiki/TUI-Guide.md) ·
   [GUI guide](docs/wiki/GUI-Guide.md) ·
+  [Headless mode](docs/wiki/Headless-Mode.md) ·
   [Configuration reference](docs/wiki/Configuration-Reference.md) ·
   [Review agents](docs/wiki/Review-Agents.md) ·
   [MCP servers](docs/wiki/MCP-Servers.md) ·
@@ -269,6 +290,7 @@ matter: `feat:`/`fix:` trigger releases.
 - [x] M3 — draft reviews, auto-comment, discussions in context, syntax highlighting
 - [x] M4 — multi-pass reviews for large MRs, cache management
 - [x] M5 — browser GUI (`gitlab-reviewer gui`): the same workflow served as a local web app
+- [x] M6 — headless review (`gitlab-reviewer review`): the same pipeline as a one-shot command for CI
 - [ ] Homebrew tap
 - [ ] OS keychain storage for the GitLab token
 - [ ] OAuth authentication

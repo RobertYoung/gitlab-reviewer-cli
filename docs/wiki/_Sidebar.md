@@ -5,6 +5,7 @@
 - [Getting Started](Getting-Started)
 - [TUI Guide](TUI-Guide)
 - [GUI Guide](GUI-Guide)
+- [Headless Mode](Headless-Mode)
 - [Review Agents](Review-Agents)
 - [MCP Servers](MCP-Servers)
 - [Checkout Modes](Checkout-Modes)
