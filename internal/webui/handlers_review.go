@@ -41,7 +41,10 @@ func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request, d *De
 		d.Selection.Save(detail.ProjectPath, agentNames)
 		d.Selection.SaveModels(detail.ProjectPath, agentModels)
 	}
-	run := s.startRun(d, inst, *detail, diffs, commits, agentNames, agentModels)
+	// Incremental by default: the runner falls back to a full review when no
+	// usable baseline exists; the form's "full re-review" box forces one.
+	incremental := r.FormValue("full") == ""
+	run := s.startRun(d, inst, *detail, diffs, commits, agentNames, agentModels, incremental)
 	http.Redirect(w, r, instPath(inst, "/run/"+run.ID), http.StatusSeeOther) //nolint:gosec // server-built path: escaped instance + generated run ID
 }
 

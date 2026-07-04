@@ -53,6 +53,10 @@ type reviewRun struct {
 	// agentModels overrides the review model per agent (agent name → model
 	// ID), from the picker; nil applies no overrides.
 	agentModels map[string]string
+	// incremental asks the runner for a delta review against the MR's last
+	// stored record (the picker's default when one exists); the runner falls
+	// back to a full review when the baseline is unusable.
+	incremental bool
 
 	ch      chan tea.Msg
 	cancel  context.CancelFunc
@@ -66,7 +70,7 @@ type reviewRun struct {
 	height  int
 }
 
-func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState), agentNames []string, agentModels map[string]string) *reviewRun {
+func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState), agentNames []string, agentModels map[string]string, incremental bool) *reviewRun {
 	return &reviewRun{
 		deps:         deps,
 		detail:       detail,
@@ -76,6 +80,7 @@ func newReviewRun(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, 
 		manualReport: manualReport,
 		agentNames:   agentNames,
 		agentModels:  agentModels,
+		incremental:  incremental,
 		cfg:          deps.cfgFor(detail.ProjectPath),
 		spin:         spinner.New(spinner.WithSpinner(spinner.MiniDot)),
 	}
@@ -125,6 +130,7 @@ func (s *reviewRun) run(ctx context.Context) {
 		AgentModels: s.agentModels,
 		Logs:        s.deps.Logs,
 		Results:     s.deps.Results,
+		Incremental: s.incremental,
 	}
 	out := r.Run(ctx, s.detail, s.diffs, s.commits, func(text string) {
 		s.ch <- reviewEventMsg{iid: iid, text: text}

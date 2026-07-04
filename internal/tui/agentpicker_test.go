@@ -6,11 +6,13 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 )
 
 func pickerDeps(t *testing.T) Deps {
@@ -295,5 +297,60 @@ func TestAgentPickerReadsLocalClone(t *testing.T) {
 	}
 	if !p.checked["local-only"] || !p.checked["conventions"] {
 		t.Errorf("local agents not checked by default: %v", p.selected())
+	}
+}
+
+func TestAgentPickerIncrementalToggle(t *testing.T) {
+	detail, diffs, _ := reviewFixture()
+	deps := pickerDeps(t)
+	deps.Cfg.Review.Agents = []string{"bug"}
+
+	// Without a stored review there is no baseline: no toggle, full review.
+	p := newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	if p.prevHead != "" {
+		t.Fatalf("prevHead = %q without any stored review", p.prevHead)
+	}
+	if strings.Contains(p.Hints(), "full/incremental") {
+		t.Error("toggle hint shown without a baseline")
+	}
+
+	// With a stored review the picker defaults to incremental, and f toggles.
+	deps.Results = resultstore.NewStore(t.TempDir())
+	if err := deps.Results.Save(resultstore.Record{
+		IID: detail.IID, Ref: detail.Ref(), Started: time.Unix(100, 0),
+		BaseSHA: "b", HeadSHA: "prevhead1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var screen Screen = newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	p = screen.(*agentPicker)
+	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	if p.prevHead != "prevhead1" {
+		t.Fatalf("prevHead = %q", p.prevHead)
+	}
+	if !strings.Contains(p.View(), "incremental: reviewing the changes since prevhead") {
+		t.Errorf("view missing the incremental line:\n%s", p.View())
+	}
+	screen, _ = screen.Update(key("f"))
+	if !p.full || !strings.Contains(p.View(), "full re-review") {
+		t.Errorf("f must switch to a full re-review (full=%v):\n%s", p.full, p.View())
+	}
+	screen, _ = screen.Update(key("f"))
+	if p.full {
+		t.Error("f must toggle back to incremental")
+	}
+
+	// Starting the run carries the incremental choice.
+	_, cmd := screen.Update(key("enter"))
+	if cmd == nil {
+		t.Fatal("enter must start the run")
+	}
+	msg, ok := cmd().(popScreenMsg)
+	if !ok {
+		t.Fatalf("enter must swap screens, got %T", cmd())
+	}
+	run := msg.replacement.(*reviewRun)
+	if !run.incremental {
+		t.Error("run must be incremental by default when a baseline exists")
 	}
 }

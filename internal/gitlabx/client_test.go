@@ -180,6 +180,46 @@ func TestListDiffsPaginates(t *testing.T) {
 	}
 }
 
+func TestCompareRevisions(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/repository/compare", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("from"); got != "oldsha" {
+			t.Errorf("from = %q", got)
+		}
+		if got := r.URL.Query().Get("to"); got != "newsha" {
+			t.Errorf("to = %q", got)
+		}
+		if got := r.URL.Query().Get("straight"); got != "true" {
+			t.Errorf("straight = %q", got)
+		}
+		writeJSON(t, w, map[string]any{
+			"diffs": []map[string]any{{
+				"old_path": "a.go", "new_path": "b.go", "renamed_file": true,
+				"diff": "@@ -1 +1 @@\n-x\n+y\n",
+			}},
+		})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	diffs, err := c.CompareRevisions(context.Background(), "group/app", "oldsha", "newsha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(diffs) != 1 || !diffs[0].RenamedFile || diffs[0].Path() != "a.go → b.go" {
+		t.Fatalf("diffs = %+v", diffs)
+	}
+}
+
+func TestCompareRevisionsTimeoutIsAnError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/repository/compare", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, map[string]any{"compare_timeout": true})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	if _, err := c.CompareRevisions(context.Background(), "group/app", "oldsha", "newsha"); err == nil {
+		t.Fatal("want an error on compare_timeout")
+	}
+}
+
 func TestGetMergeRequestTemplatePrefersDefault(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v4/projects/{project}/templates/merge_requests", func(w http.ResponseWriter, r *http.Request) {

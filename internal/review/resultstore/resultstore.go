@@ -28,10 +28,16 @@ func NewStore(dir string) *Store { return &Store{dir: dir} }
 // states, so re-saving after each accept/reject/edit keeps the record
 // current with the screen.
 type Record struct {
-	IID       int64            `json:"iid"`
-	Ref       string           `json:"ref"` // project!iid; IIDs alone collide across projects
-	Title     string           `json:"title"`
-	Started   time.Time        `json:"started"`
+	IID     int64     `json:"iid"`
+	Ref     string    `json:"ref"` // project!iid; IIDs alone collide across projects
+	Title   string    `json:"title"`
+	Started time.Time `json:"started"`
+	// BaseSHA and HeadSHA are the MR diff refs the review ran against. They
+	// key the record to a commit so a later run can review only what changed
+	// since (incremental re-review); empty on records from before they were
+	// stored.
+	BaseSHA   string           `json:"base_sha,omitempty"`
+	HeadSHA   string           `json:"head_sha,omitempty"`
 	Summary   string           `json:"summary,omitempty"`
 	Warnings  []string         `json:"warnings,omitempty"`
 	SessionID string           `json:"session_id,omitempty"`
@@ -82,6 +88,20 @@ func (s *Store) Load(path string) (Record, error) {
 		return rec, fmt.Errorf("decoding %s: %w", filepath.Base(path), err)
 	}
 	return rec, nil
+}
+
+// Latest returns the newest stored record for ref (the full record, not
+// just its listing entry), or nil when the MR has no stored reviews.
+func (s *Store) Latest(ref string) (*Record, error) {
+	entries, err := s.List(ref)
+	if err != nil || len(entries) == 0 {
+		return nil, err
+	}
+	rec, err := s.Load(entries[0].Path)
+	if err != nil {
+		return nil, err
+	}
+	return &rec, nil
 }
 
 // Entry describes one stored record, with enough of its content for a

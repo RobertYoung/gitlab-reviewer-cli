@@ -148,6 +148,24 @@ func TestBuildUserPromptShape(t *testing.T) {
 	if strings.Contains(p, "docs") {
 		t.Error("disabled category leaked into prompt")
 	}
+	if strings.Contains(p, "incremental re-review") {
+		t.Error("incremental note in a full-review prompt")
+	}
+}
+
+func TestBuildUserPromptIncrementalNote(t *testing.T) {
+	req := Request{
+		MR:              gitlabx.MRDetail{MRSummary: gitlabx.MRSummary{IID: 5, Title: "Add cache"}},
+		Diffs:           []gitlabx.FileDiff{{OldPath: "c.go", NewPath: "c.go", Diff: "@@ -1 +1 @@\n-a\n+b\n"}},
+		Incremental:     true,
+		LastReviewedSHA: "0123456789abcdef",
+	}
+	p := BuildUserPrompt(req)
+	for _, want := range []string{"incremental re-review", "01234567", "changes pushed since"} {
+		if !strings.Contains(p, want) {
+			t.Errorf("prompt missing %q", want)
+		}
+	}
 }
 
 func TestFullSystemPrompt(t *testing.T) {

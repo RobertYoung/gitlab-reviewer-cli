@@ -70,6 +70,7 @@ other modality (keyboard-driven vs browser-native).
 | Feature | TUI | GUI | Notes |
 |---|:-:|:-:|---|
 | Run AI review (multi-pass for large MRs) | ✅ | ✅ | Same runner |
+| Incremental re-review of the delta since the last reviewed head | ✅ | ✅ | Default when a stored review exists; previous findings carry forward with their curation states. Override: TUI `f` in the picker, GUI "full re-review" checkbox, CLI `--full` |
 | Agent selection before each scan | ✅ | ✅ | TUI: picker on `r`; GUI: checkboxes on the review form. Last selection remembered per project |
 | Custom review agents (user + repo `.md` definitions) | ✅ | ✅ | Shared catalog; repo > user > builtin on name collision |
 | Live progress log | ✅ | ✅ | GUI streams over server-sent events; lines prefixed per agent |

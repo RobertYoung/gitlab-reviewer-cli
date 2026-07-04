@@ -48,7 +48,11 @@ The GUI mirrors the TUI screen for screen:
   (checkboxes) matching the TUI's picker, with a per-agent model dropdown
   next to each; the selection and model picks per project are remembered
   across both frontends. See
-  [Review Agents](Review-Agents.md#per-agent-model).
+  [Review Agents](Review-Agents.md#per-agent-model). Once the MR has a
+  stored review, runs default to an incremental re-review (only the
+  changes since the last reviewed commit, previous findings and their
+  curation states carried forward); a *full re-review* checkbox forces
+  scanning the entire diff.
 - **Review progress** — the run log streams live over server-sent events;
   the page jumps to the findings when the run completes. A cancel button
   stops the run.

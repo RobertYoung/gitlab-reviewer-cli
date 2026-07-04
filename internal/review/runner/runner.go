@@ -19,6 +19,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/delta"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
 )
@@ -46,6 +47,15 @@ type Runner struct {
 	// model and cfg.Review.Model; agents absent from the map keep those
 	// defaults. Nil applies no overrides.
 	AgentModels map[string]string
+	// Incremental asks for a delta review: when Results holds a previous
+	// review of this MR, only the changes pushed since its head go through
+	// the review passes, and the previous findings — with their curation
+	// states — carry forward (dropping ones whose anchor lines changed).
+	// It falls back to a full review when no usable baseline exists: first
+	// review, a rebase, or an unreachable stored head. Frontends expose the
+	// inverse override (--full, "full re-review") to force scanning the
+	// whole diff again.
+	Incremental bool
 	// Logs stores the run's progress log; nil disables storing.
 	Logs *runlog.Store
 	// Results stores the run's result record; nil disables storing.
@@ -92,6 +102,8 @@ func (r Runner) Run(ctx context.Context, detail gitlabx.MRDetail, diffs []gitlab
 			Ref:       detail.Ref(),
 			Title:     detail.Title,
 			Started:   started,
+			BaseSHA:   detail.DiffRefs.BaseSHA,
+			HeadSHA:   detail.DiffRefs.HeadSHA,
 			Summary:   res.Summary,
 			Warnings:  res.Warnings,
 			SessionID: res.SessionID,
@@ -107,6 +119,17 @@ func (r Runner) Run(ctx context.Context, detail gitlabx.MRDetail, diffs []gitlab
 }
 
 func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, emit func(string)) (*review.Result, error) {
+	plan := r.planIncremental(ctx, detail, diffs, emit)
+	reviewDiffs := diffs
+	if plan != nil {
+		reviewDiffs = plan.diffs
+		if len(reviewDiffs) == 0 {
+			// The head did not move (or the comparison came back empty):
+			// nothing to spend a review pass on.
+			return plan.carriedOnlyResult(), nil
+		}
+	}
+
 	emit("preparing repository…")
 	path, cleanup, err := r.Checkout(ctx, detail, emit)
 	if err != nil {
@@ -129,9 +152,22 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 		emit("note: could not fetch MR template: " + err.Error())
 	}
 
-	reqs, info, warnings, err := BuildRequests(r.Cfg, detail, diffs, commits, template, path)
+	reqs, info, warnings, err := BuildRequests(r.Cfg, detail, reviewDiffs, commits, template, path)
 	if err != nil {
+		if plan != nil && errors.Is(err, ErrNothingToReview) {
+			// Every file changed since the last review is excluded by
+			// configuration: nothing new for the agents, but the carried
+			// findings still make a complete result.
+			return plan.carriedOnlyResult(), nil
+		}
 		return nil, err
+	}
+	if plan != nil {
+		for i := range reqs {
+			reqs[i].Incremental = true
+			reqs[i].LastReviewedSHA = plan.since
+		}
+		warnings = append(warnings, plan.note())
 	}
 	// Rebase status is a deterministic MR-level fact with no diff line to
 	// anchor a finding on, so it surfaces as a review warning rather than a
@@ -254,10 +290,133 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 	} else {
 		final = review.MergeResults(ok)
 	}
+	if plan != nil {
+		// Old-side line numbers from an incremental pass count lines of the
+		// last reviewed head, not of the MR diff's base, so they cannot
+		// anchor a GitLab position. Drop the anchor and let publishing fall
+		// back to a file-level note rather than risk a wrong inline placement.
+		// New-side numbers count lines of the head commit either way.
+		for i := range final.Findings {
+			if final.Findings[i].Line.NewLine == nil {
+				final.Findings[i].Line.OldLine = nil
+			}
+		}
+		// Prepend the carried findings (curation states intact) and renumber
+		// everything so IDs stay unique within the combined record.
+		final.Findings = append(append([]review.Finding(nil), plan.carried...), final.Findings...)
+		for i := range final.Findings {
+			final.Findings[i].ID = fmt.Sprintf("f%03d", i+1)
+		}
+	}
 	// Surface pre-review warnings (chunking, rebase status, failed agents)
 	// in the findings screen, not just the transient progress log.
 	final.Warnings = append(warnings, final.Warnings...)
 	return final, nil
+}
+
+// incrementalPlan is a planned delta review: the diffs to send through the
+// review passes (changes since the last reviewed head) and the previous
+// review's findings that carry forward.
+type incrementalPlan struct {
+	since   string // the last reviewed head SHA
+	diffs   []gitlabx.FileDiff
+	carried []review.Finding
+	dropped int
+}
+
+// note is the persisted warning describing what the incremental run did.
+func (p *incrementalPlan) note() string {
+	msg := fmt.Sprintf("incremental review: reviewed the changes since %s; %d finding(s) carried forward from the previous review", shortSHA(p.since), len(p.carried))
+	if p.dropped > 0 {
+		msg += fmt.Sprintf(", %d dropped because their code changed", p.dropped)
+	}
+	return msg
+}
+
+// carriedOnlyResult is the outcome when nothing changed since the last
+// review (or nothing reviewable did): no agent passes, the previous
+// findings carried forward unchanged.
+func (p *incrementalPlan) carriedOnlyResult() *review.Result {
+	return &review.Result{
+		Summary:  fmt.Sprintf("No reviewable changes since the last reviewed commit %s; %d finding(s) carried forward.", shortSHA(p.since), len(p.carried)),
+		Findings: p.carried,
+		Warnings: []string{p.note()},
+	}
+}
+
+// planIncremental decides whether this run can review only the delta since
+// the last stored review. A nil plan means a full review, with the reason
+// already emitted; the fallback is deliberate — a wrong baseline must never
+// silently narrow what gets reviewed.
+func (r Runner) planIncremental(ctx context.Context, detail gitlabx.MRDetail, mrDiffs []gitlabx.FileDiff, emit func(string)) *incrementalPlan {
+	if !r.Incremental {
+		return nil
+	}
+	prev, err := r.Results.Latest(detail.Ref())
+	switch {
+	case err != nil:
+		emit("incremental: could not read the stored reviews (" + err.Error() + "); running a full review")
+		return nil
+	case prev == nil:
+		emit("no stored review for this MR yet; running a full review")
+		return nil
+	case prev.HeadSHA == "" || prev.BaseSHA == "":
+		emit("the last stored review predates commit tracking; running a full review")
+		return nil
+	case prev.BaseSHA != detail.DiffRefs.BaseSHA:
+		emit("the MR was rebased since the last review; running a full review")
+		return nil
+	}
+	if prev.HeadSHA == detail.DiffRefs.HeadSHA {
+		emit(fmt.Sprintf("head %s is unchanged since the last review; carrying its findings forward", shortSHA(prev.HeadSHA)))
+		return &incrementalPlan{since: prev.HeadSHA, carried: append([]review.Finding(nil), prev.Findings...)}
+	}
+	deltaDiffs, err := r.Svc.CompareRevisions(ctx, detail.Project(), prev.HeadSHA, detail.DiffRefs.HeadSHA)
+	if err != nil {
+		emit(fmt.Sprintf("cannot compare against the last reviewed head %s (%v); running a full review", shortSHA(prev.HeadSHA), err))
+		return nil
+	}
+	kept, dropped := delta.CarryForward(prev.Findings, deltaDiffs, mrDiffs)
+	for _, f := range dropped {
+		emit("dropping stale finding (" + f.State.String() + "): " + findingLoc(f))
+	}
+	emit(fmt.Sprintf("incremental review: %d file(s) changed since %s, %d finding(s) carried forward",
+		len(deltaDiffs), shortSHA(prev.HeadSHA), len(kept)))
+	// The comparison lacks GitLab's per-file metadata; borrow it from the MR
+	// diff so exclusion filters treat the files exactly the same.
+	mrByPath := map[string]gitlabx.FileDiff{}
+	for _, d := range mrDiffs {
+		mrByPath[d.NewPath] = d
+	}
+	for i, d := range deltaDiffs {
+		if md, ok := mrByPath[d.NewPath]; ok {
+			deltaDiffs[i].GeneratedFile = md.GeneratedFile
+		}
+	}
+	return &incrementalPlan{since: prev.HeadSHA, diffs: deltaDiffs, carried: kept, dropped: len(dropped)}
+}
+
+// shortSHA abbreviates a commit SHA for progress lines.
+func shortSHA(sha string) string {
+	if len(sha) > 8 {
+		return sha[:8]
+	}
+	return sha
+}
+
+// findingLoc renders where a finding points, for progress lines.
+func findingLoc(f review.Finding) string {
+	loc := f.File
+	switch {
+	case f.Line.NewLine != nil:
+		loc = fmt.Sprintf("%s:%d", f.File, *f.Line.NewLine)
+	case f.Line.OldLine != nil:
+		loc = fmt.Sprintf("%s:%d (old)", f.File, *f.Line.OldLine)
+	}
+	if f.Title != "" {
+		loc += " — " + f.Title
+	}
+	return loc
 }
 
 // resolveAgents merges project-shipped agents into the catalog and resolves
@@ -343,6 +502,11 @@ func RebaseWarning(detail gitlabx.MRDetail) string {
 // the reviewer can Read them (the review session has no Bash to run git).
 const DiffFilesDir = ".review-diffs"
 
+// ErrNothingToReview means every changed file was filtered out before any
+// review pass could run. Incremental runs treat it as "nothing new" rather
+// than a failure.
+var ErrNothingToReview = errors.New("nothing to review: every changed file is excluded by configuration or has no retrievable diff")
+
 // BuildRequests assembles the reviewer request(s) from project-resolved
 // config: chunked diffs and combined custom instructions. The requests are
 // agent-neutral; the runner specialises a copy per selected agent. Diffs too
@@ -381,7 +545,7 @@ func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 	}
 
 	if len(chunks) == 0 && len(diffFiles) == 0 {
-		return nil, nil, nil, errors.New("nothing to review: every changed file is excluded by configuration or has no retrievable diff")
+		return nil, nil, nil, ErrNothingToReview
 	}
 	if len(excluded) > 0 {
 		info = append(info, fmt.Sprintf("%d file(s) excluded from review by configured filters (lockfiles/vendored/generated)", len(excluded)))

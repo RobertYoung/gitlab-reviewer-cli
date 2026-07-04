@@ -403,7 +403,8 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 	f := newHeadlessFixture(t)
 
 	// --- run the real command, once per target form; the MR URL's host
-	// (the httptest server) matches --gitlab-base-url ---
+	// (the httptest server) matches --gitlab-base-url. --full keeps the later
+	// runs from going incremental against the record the first one stored ---
 	targets := []struct{ name, target string }{
 		{"ref", "group/app!7"},
 		{"url", f.srvURL + "/group/app/-/merge_requests/7"},
@@ -414,7 +415,7 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			root := newRoot(&state{redactor: secret.NewRedactor()})
-			root.SetArgs(f.args(tc.target, "--publish", "immediate", "--output", "json"))
+			root.SetArgs(f.args(tc.target, "--publish", "immediate", "--output", "json", "--full"))
 			root.SetOut(&stdout)
 			root.SetErr(&stderr)
 			if err := root.Execute(); err != nil {
@@ -478,6 +479,42 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 			}
 		})
 	}
+
+	// --- incremental rerun: without --full, the unchanged head means no
+	// review passes run, the published finding carries forward, and nothing
+	// is posted to GitLab again ---
+	t.Run("incremental rerun", func(t *testing.T) {
+		f.posted.Count, f.posted.Body, f.posted.Position = 0, "", nil
+
+		var stdout, stderr bytes.Buffer
+		root := newRoot(&state{redactor: secret.NewRedactor()})
+		root.SetArgs(f.args("group/app!7", "--publish", "immediate", "--output", "json"))
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		if err := root.Execute(); err != nil {
+			t.Fatalf("review command failed: %v\nstderr:\n%s", err, stderr.String())
+		}
+
+		var got struct {
+			resultstore.Record
+			RecordPath string `json:"record_path"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+			t.Fatalf("decoding stdout: %v\n%s", err, stdout.String())
+		}
+		if !strings.Contains(got.Summary, "No reviewable changes") {
+			t.Errorf("summary = %q", got.Summary)
+		}
+		if len(got.Findings) != 1 || got.Findings[0].State != review.StatePublished {
+			t.Fatalf("carried findings: %+v", got.Findings)
+		}
+		if f.posted.Count != 0 {
+			t.Errorf("already-published finding re-posted: %+v", f.posted)
+		}
+		if !strings.Contains(stderr.String(), "unchanged since the last review") {
+			t.Errorf("expected the incremental note on stderr, got:\n%s", stderr.String())
+		}
+	})
 }
 
 // TestHeadlessReviewGateExitCode covers gate.min_severity in headless mode:

@@ -144,7 +144,7 @@ func (g *runRegistry) get(id string) *reviewRun {
 // screen: run through the shared runner, then fold the diff view's pending
 // manual comments and the auto-accept threshold into the stored record so
 // the findings page opens with the same curation state the TUI would show.
-func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, agentNames []string, agentModels map[string]string) *reviewRun {
+func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, agentNames []string, agentModels map[string]string, incremental bool) *reviewRun {
 	s.runs.mu.Lock()
 	s.runs.seq++
 	run := &reviewRun{
@@ -179,6 +179,7 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 			AgentModels: agentModels,
 			Logs:        d.Logs,
 			Results:     d.Results,
+			Incremental: incremental,
 		}
 		out := r.Run(ctx, detail, diffs, commits, run.append)
 
@@ -197,10 +198,14 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 			// Same curation bootstrap as the TUI findings screen: findings
 			// below the publish floor are marked (they never reach GitLab),
 			// findings at or above the auto-comment threshold arrive
-			// accepted, and pending manual comments join the record.
+			// accepted, and pending manual comments join the record. Only
+			// pending findings qualify either way: an incremental run
+			// carries forward already-curated (published, rejected)
+			// findings whose states must survive.
 			floor := review.Severity(cfg.Publish.MinSeverity)
 			for i := range rec.Findings {
-				if rec.Findings[i].Severity.Valid() && !rec.Findings[i].Severity.AtLeast(floor) {
+				if rec.Findings[i].State == review.StatePending &&
+					rec.Findings[i].Severity.Valid() && !rec.Findings[i].Severity.AtLeast(floor) {
 					rec.Findings[i].State = review.StateBelowThreshold
 				}
 			}

@@ -126,6 +126,37 @@ func TestListFiltersAndSorts(t *testing.T) {
 	}
 }
 
+func TestLatestReturnsNewestForRef(t *testing.T) {
+	store := NewStore(t.TempDir())
+	older := record(1, "a/b!1", time.Unix(100, 0))
+	newer := record(1, "a/b!1", time.Unix(200, 0))
+	newer.BaseSHA, newer.HeadSHA = "base1", "head2"
+	for _, r := range []Record{older, newer, record(2, "c/d!2", time.Unix(300, 0))} {
+		if err := store.Save(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := store.Latest("a/b!1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || !got.Started.Equal(newer.Started) {
+		t.Fatalf("latest = %+v", got)
+	}
+	if got.BaseSHA != "base1" || got.HeadSHA != "head2" {
+		t.Errorf("sha round-trip: %+v", got)
+	}
+
+	if none, err := store.Latest("x/y!9"); err != nil || none != nil {
+		t.Errorf("latest for unknown ref: %v, err=%v", none, err)
+	}
+	var nilStore *Store
+	if none, err := nilStore.Latest("a/b!1"); err != nil || none != nil {
+		t.Errorf("nil store latest: %v, err=%v", none, err)
+	}
+}
+
 func TestListMissingDir(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "does-not-exist"))
 	entries, err := store.List("")
