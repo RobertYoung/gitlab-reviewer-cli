@@ -17,6 +17,7 @@ and installation, start with the
 | [Getting Started](Getting-Started.md) | Install, token setup, your first review end to end |
 | [TUI Guide](TUI-Guide.md) | Every screen and keybinding: browsing, reviewing, curating, chat, approvals |
 | [GUI Guide](GUI-Guide.md) | The browser frontend: launching, screens, shortcuts, its security model |
+| [Headless Mode](Headless-Mode.md) | `gitlab-reviewer review`: non-interactive reviews for CI jobs and scripting |
 | [Review Agents](Review-Agents.md) | Built-in reviewers, per-scan selection, cost control, writing your own agents |
 | [MCP Servers](MCP-Servers.md) | Granting the review session live reference material, safely |
 | [Checkout Modes](Checkout-Modes.md) | Managed clones vs your own, the cache, worktrees, local overlays |
@@ -30,7 +31,7 @@ and installation, start with the
 | Page | What it covers |
 |---|---|
 | [Configuration Reference](Configuration-Reference.md) | Every key, environment variable, flag, default, and validation rule |
-| [CLI Reference](CLI-Reference.md) | All commands: the TUI, `gui`, `config`, `cache`, `version` |
+| [CLI Reference](CLI-Reference.md) | All commands: the TUI, `gui`, `review`, `config`, `cache`, `version` |
 
 ## Design documentation
 

@@ -3,6 +3,7 @@
 ```
 gitlab-reviewer [flags]              # launch the TUI
 gitlab-reviewer gui [flags]          # launch the browser GUI
+gitlab-reviewer review <project!iid | MR URL>  # run one review non-interactively (CI/scripting)
 gitlab-reviewer config show          # print effective configuration (secrets redacted)
 gitlab-reviewer config validate      # check the configuration
 gitlab-reviewer cache ls             # list cached clones
@@ -41,6 +42,26 @@ Serves the browser GUI on `127.0.0.1` and prints a tokenised launch URL.
 | `--no-browser` | `false` | don't open the browser, just print the URL |
 
 See the [GUI Guide](GUI-Guide.md).
+
+## `gitlab-reviewer review`
+
+Runs one review non-interactively and prints the outcome to stdout —
+progress streams to stderr. Nothing is posted to GitLab unless `--publish`
+says so. The MR is named as `project!iid` or by its web URL; a URL's host
+also selects the matching `gitlab.instances` entry.
+
+```sh
+gitlab-reviewer review mygroup/myapp!123 --publish draft --agents bug,security
+gitlab-reviewer review https://gitlab.example.com/mygroup/myapp/-/merge_requests/123
+```
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--publish` | `none` | `none` (store/report only), `draft` (one review, published in one action), `immediate` |
+| `--output` | `text` | `text` or `json` on stdout |
+
+See [Headless Mode](Headless-Mode.md) for publish semantics, exit codes,
+and a GitLab CI example.
 
 ## `gitlab-reviewer config`
 
