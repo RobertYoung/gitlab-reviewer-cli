@@ -37,6 +37,7 @@ type reviewRun struct {
 	err        error
 	recName    string // stored record file name; "" when the run stored none
 	logName    string // stored progress log file name
+	findings   int    // findings stored with the record
 	draftReady bool   // auto-publish left a draft review pending
 }
 
@@ -80,6 +81,7 @@ func (r *reviewRun) finish(out runOutcome) {
 	}
 	r.recName = out.RecName
 	r.logName = out.LogName
+	r.findings = out.Findings
 	r.draftReady = out.DraftReady
 	for ch := range r.subs {
 		select {
@@ -111,7 +113,7 @@ func (r *reviewRun) unsubscribe(ch chan runEvent) {
 }
 
 func (r *reviewRun) outcomeLocked() *runOutcome {
-	out := &runOutcome{RecName: r.recName, LogName: r.logName, DraftReady: r.draftReady}
+	out := &runOutcome{RecName: r.recName, LogName: r.logName, Findings: r.findings, DraftReady: r.draftReady}
 	if r.err != nil {
 		if errors.Is(r.err, context.Canceled) {
 			out.Cancelled = true

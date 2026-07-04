@@ -299,7 +299,9 @@ pre.prose.summary { border-left: 3px solid var(--accent); padding-left: 0.75rem;
   border: 1px solid var(--border);
   border-radius: 8px;
   margin-bottom: 1rem;
-  overflow: hidden;
+  /* clip, not hidden: overflow:hidden would make the card the sticky
+     header's scrollport, wedging it 2.6rem down inside the card */
+  overflow: clip;
 }
 .diff-file > header {
   display: flex;

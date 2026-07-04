@@ -823,10 +823,13 @@ func TestReviewRunToFindingsToPublish(t *testing.T) {
 		t.Fatalf("run outcome: %+v", out)
 	}
 
-	// The run page now links to the findings.
+	// The run page now links to the findings and reports their count.
 	code, body = env.get("/i/default/run/" + run.ID)
 	if code != http.StatusOK || !strings.Contains(body, "Open findings") {
 		t.Fatalf("run page after done: %d\n%s", code, body)
+	}
+	if !strings.Contains(body, "completed with 1 finding(s)") {
+		t.Fatalf("run page lost the findings count:\n%s", body)
 	}
 
 	findingsPath := "/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName
