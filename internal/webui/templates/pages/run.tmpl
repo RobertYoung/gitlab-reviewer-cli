@@ -4,6 +4,8 @@
 <section class="panel runpage" data-events="{{$c.EventsURL}}" {{if $c.Done}}data-done="1"{{end}}>
   <h2>{{if $c.Done}}Review of {{$c.Run.Ref}}{{else}}<span class="spinner"></span> Reviewing {{$c.Run.Ref}}…{{end}}</h2>
 
+  <div class="agent-strip" id="agent-strip" hidden></div>
+
   <pre class="runlog" id="runlog">{{range $c.Lines}}{{.}}
 {{end}}</pre>
 
@@ -16,9 +18,19 @@
       {{else}}
       <p class="ok">Review completed with {{$c.Outcome.Findings}} finding(s).</p>
       {{end}}
+      {{if $c.Outcome.DraftReady}}
+      <p>The accepted findings were published as a pending draft review — publish it to make them visible, or leave them as drafts in GitLab.</p>
+      {{end}}
       <div class="actions">
-        {{if $c.FindingsURL}}<a class="button primary" href="{{$c.FindingsURL}}">Open findings</a>{{end}}
-        {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">View full log</a>{{end}}
+        {{if $c.Outcome.DraftReady}}
+        <form method="post" action="{{$c.PublishReviewURL}}">
+          <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+          <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+          <button type="submit" class="button primary">Publish review now</button>
+        </form>
+        {{end}}
+        {{if $c.FindingsURL}}<a class="button{{if not $c.Outcome.DraftReady}} primary{{end}}" href="{{$c.FindingsURL}}">Open findings</a>{{end}}
+        {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">{{template "icon" "log"}} View full log</a>{{end}}
         <a class="button" href="{{$c.Nav.DetailURL}}">Back to MR</a>
       </div>
     {{else}}

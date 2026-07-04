@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
 )
 
@@ -67,6 +70,7 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 type mrListContent struct {
 	Instance   string
 	MRs        []gitlabx.MRSummary
+	Reviewed   []*mrReviewedInfo // parallel to MRs; nil entries mean no stored review
 	State      string
 	Search     string
 	Author     string
@@ -80,6 +84,15 @@ type mrListContent struct {
 	NextURL    string
 	Err        string
 	MRURL      func(gitlabx.MRSummary) string
+}
+
+// mrReviewedInfo decorates a listed MR that has stored reviews: how the
+// latest one went, linking to the past-reviews page.
+type mrReviewedInfo struct {
+	Findings int
+	Accepted int
+	When     time.Time
+	URL      string // past reviews of this MR
 }
 
 // handleMRList lists merge requests with the same filters as the TUI list.
@@ -131,6 +144,29 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 		content.Err = err.Error()
 	}
 	content.MRs = mrs
+	// Decorate MRs that already have a stored review: one scan of the local
+	// result store, keyed by MR ref (entries come back newest first).
+	latest := map[string]resultstore.Entry{}
+	if entries, err := d.Results.List(""); err == nil {
+		for _, e := range entries {
+			if _, ok := latest[e.Ref]; !ok {
+				latest[e.Ref] = e
+			}
+		}
+	}
+	content.Reviewed = make([]*mrReviewedInfo, len(mrs))
+	for i, m := range mrs {
+		e, ok := latest[m.Ref()]
+		if !ok || m.ProjectPath == "" {
+			continue
+		}
+		content.Reviewed[i] = &mrReviewedInfo{
+			Findings: e.Findings,
+			Accepted: e.Accepted,
+			When:     e.Started,
+			URL:      mrURL(inst, "/mr/history", m.ProjectPath, m.IID, nil),
+		}
+	}
 	if page > 1 {
 		content.PrevURL = listPageURL(inst, q, page-1)
 	}
@@ -363,6 +399,17 @@ type diffContent struct {
 	Split       bool   // side-by-side layout
 	UnifiedURL  string // layout toggle targets
 	SplitURL    string
+	// Review-form state, same as the MR detail page.
+	AgentOptions   []agentOption
+	AgentWarnings  []string
+	PrevReviewHead string // baseline for the full-re-review override
+	// A stored review shown inline: its findings anchor on their diff
+	// lines and can be triaged in place.
+	RecordName      string
+	RecordTime      time.Time
+	StateURL        string           // POST target for accept/reject
+	FindingsURL     string           // the findings page for the same record
+	GeneralFindings []review.Finding // the record's MR-level findings
 }
 
 // handleDiff shows the full MR diff with the file explorer sidebar, inline
@@ -392,16 +439,57 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 	}
 	discussions, _ := d.Svc.ListDiscussions(r.Context(), detail.Project(), iid) // decorative
 	pending := s.comments.list(mrKey(inst, project, iid))
+	cat, fetchWarnings := d.projectCatalog(r.Context(), detail)
+
+	// The latest stored review rides along so its findings can be triaged
+	// in diff context; ?record= pins a specific one (the findings page
+	// links back here with it).
+	recName := r.URL.Query().Get("record")
+	if recName == "" {
+		if entries, err := d.Results.List(detail.Ref()); err == nil && len(entries) > 0 {
+			recName = filepath.Base(entries[0].Path) // newest first
+		}
+	}
+	var recFindings []review.Finding
+	var recTime time.Time
+	if recName != "" {
+		if path, err := s.safeStoreFile(recName, ".json"); err == nil {
+			if rec, err := d.Results.Load(path); err == nil {
+				recFindings = rec.Findings
+				recTime = rec.Started
+			} else {
+				recName = ""
+			}
+		} else {
+			recName = ""
+		}
+	}
 
 	viewQuery := url.Values{"view": {view}}
 	content := diffContent{
-		Nav:        newMRNav(inst, project, iid),
-		Detail:     detail,
-		Files:      buildDiffFiles(diffs, discussions, pending, split),
-		BackURL:    mrURL(inst, "/mr/diff", project, iid, viewQuery),
-		Split:      split,
-		UnifiedURL: mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"unified"}}),
-		SplitURL:   mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"split"}}),
+		Nav:           newMRNav(inst, project, iid),
+		Detail:        detail,
+		Files:         buildDiffFiles(diffs, discussions, pending, recFindings, split),
+		BackURL:       mrURL(inst, "/mr/diff", project, iid, viewQuery),
+		Split:         split,
+		UnifiedURL:    mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"unified"}}),
+		SplitURL:      mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"split"}}),
+		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
+		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
+		RecordName:    recName,
+		RecordTime:    recTime,
+		StateURL:      instPath(inst, "/mr/findings/state"),
+	}
+	if recName != "" {
+		content.FindingsURL = mrURL(inst, "/mr/findings", project, iid, url.Values{"record": {recName}})
+	}
+	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
+		content.PrevReviewHead = prev.HeadSHA
+	}
+	for _, f := range recFindings {
+		if f.File == "" {
+			content.GeneralFindings = append(content.GeneralFindings, f)
+		}
 	}
 	content.Explorer = buildExplorer(content.Files)
 	for _, f := range pending {

@@ -8,8 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/publisher"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
 )
 
@@ -27,13 +30,14 @@ type reviewRun struct {
 	Started  time.Time
 	cancel   context.CancelFunc
 
-	mu      sync.Mutex
-	lines   []string
-	subs    map[chan runEvent]struct{}
-	done    bool
-	err     error
-	recName string // stored record file name; "" when the run stored none
-	logName string // stored progress log file name
+	mu         sync.Mutex
+	lines      []string
+	subs       map[chan runEvent]struct{}
+	done       bool
+	err        error
+	recName    string // stored record file name; "" when the run stored none
+	logName    string // stored progress log file name
+	draftReady bool   // auto-publish left a draft review pending
 }
 
 // runEvent is one SSE payload: a progress line, or the final done event.
@@ -49,6 +53,9 @@ type runOutcome struct {
 	RecName   string
 	LogName   string
 	Findings  int
+	// DraftReady reports that auto-publish (publish.auto_comment, draft
+	// mode) created a pending draft review awaiting one-click publication.
+	DraftReady bool
 }
 
 func (r *reviewRun) append(text string) {
@@ -73,6 +80,7 @@ func (r *reviewRun) finish(out runOutcome) {
 	}
 	r.recName = out.RecName
 	r.logName = out.LogName
+	r.draftReady = out.DraftReady
 	for ch := range r.subs {
 		select {
 		case ch <- runEvent{Done: &out}:
@@ -103,7 +111,7 @@ func (r *reviewRun) unsubscribe(ch chan runEvent) {
 }
 
 func (r *reviewRun) outcomeLocked() *runOutcome {
-	out := &runOutcome{RecName: r.recName, LogName: r.logName}
+	out := &runOutcome{RecName: r.recName, LogName: r.logName, DraftReady: r.draftReady}
 	if r.err != nil {
 		if errors.Is(r.err, context.Canceled) {
 			out.Cancelled = true
@@ -218,6 +226,11 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 				}
 			}
 			rec.Findings = append(rec.Findings, s.comments.take(key)...)
+			// TUI parity: auto_comment publishes the accepted findings
+			// without further confirmation once the run completes.
+			if cfg.Publish.AutoComment {
+				outcome.DraftReady = autoPublish(ctx, d, cfg, detail, diffs, rec, run.append)
+			}
 			if err := d.Results.Save(*rec); err != nil {
 				run.append("warning: could not store the review result: " + err.Error())
 			}
@@ -229,4 +242,44 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 		run.finish(outcome)
 	}()
 	return run
+}
+
+// autoPublish posts a fresh record's accepted findings straight to GitLab,
+// mirroring the TUI's publish.auto_comment behaviour, and updates their
+// states in place (the caller saves the record). It reports whether a
+// draft review was created and left pending publication.
+func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, rec *resultstore.Record, emit func(string)) bool {
+	var accepted []int
+	for i := range rec.Findings {
+		if rec.Findings[i].State == review.StateAccepted {
+			accepted = append(accepted, i)
+		}
+	}
+	if len(accepted) == 0 {
+		return false
+	}
+	pub, tmplErr := publisher.New(d.Svc, detail, diffs, cfg.Publish)
+	if tmplErr != nil {
+		emit("warning: comment template ignored: " + tmplErr.Error())
+	}
+	pub.Draft = cfg.Publish.Mode == "draft"
+	emit(fmt.Sprintf("auto-publishing %d accepted finding(s) in %s mode…", len(accepted), cfg.Publish.Mode))
+	published := 0
+	for _, i := range accepted {
+		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		state, err := pub.PublishOne(pctx, rec.Findings[i])
+		cancel()
+		rec.Findings[i].State = state
+		if err != nil {
+			emit(fmt.Sprintf("warning: publishing %q failed: %v", findingTitle(rec.Findings[i]), err))
+			continue
+		}
+		published++
+	}
+	if pub.Draft && published > 0 {
+		emit(fmt.Sprintf("%d draft note(s) created — publish the review to make them visible", published))
+		return true
+	}
+	emit(fmt.Sprintf("auto-published %d comment(s)", published))
+	return false
 }

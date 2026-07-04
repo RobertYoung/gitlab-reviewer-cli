@@ -4,20 +4,42 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · gitlab-reviewer</title>
+<script>(function () {
+  // Resolve the theme before first paint so the page never flashes: the
+  // stored choice wins, then the OS preference, then dark.
+  var t = null;
+  try { t = localStorage.getItem("theme"); } catch (e) { /* storage disabled */ }
+  if (t !== "light" && t !== "dark") {
+    t = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  }
+  document.documentElement.dataset.theme = t;
+})()</script>
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/chroma.css">
 <script src="/static/app.js" defer></script>
 </head>
 <body>
+{{template "iconsprite"}}
 <header class="topbar">
   <a class="brand" href="/">gitlab-reviewer</a>
   {{if and .Instance .Instances}}<span class="crumb">{{.Instance}}</span>{{end}}
   <span class="page-title">{{.Title}}</span>
   <span class="spacer"></span>
+  <button type="button" class="iconbtn" id="help-toggle" title="keyboard shortcuts (?)" hidden>?</button>
+  <button type="button" class="iconbtn" id="theme-toggle" title="switch between light and dark theme">
+    <svg class="icon only-dark" aria-hidden="true"><use href="#i-sun"/></svg>
+    <svg class="icon only-light" aria-hidden="true"><use href="#i-moon"/></svg>
+  </button>
   {{if .Version}}<span class="version">{{.Version}}</span>{{end}}
 </header>
 <main>
 {{template "content" .}}
 </main>
+<div class="toast-host" id="toast-host" aria-live="polite"></div>
+<dialog id="help-dialog" class="help-dialog">
+  <h3>Keyboard shortcuts</h3>
+  <div id="help-body"></div>
+  <form method="dialog"><button class="button">Close</button></form>
+</dialog>
 </body>
 </html>

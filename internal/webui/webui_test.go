@@ -561,7 +561,7 @@ func TestApproveAndUnapprove(t *testing.T) {
 
 	// The detail page offers approval while the user has not approved.
 	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
-	if code != http.StatusOK || !strings.Contains(body, ">✓ Approve<") {
+	if code != http.StatusOK || !strings.Contains(body, "> Approve</button>") {
 		t.Fatalf("detail before approving: %d\n%s", code, body)
 	}
 
@@ -674,7 +674,7 @@ func TestSplitDiffView(t *testing.T) {
 
 func TestSplitLinesPairing(t *testing.T) {
 	diff := "@@ -1,3 +1,3 @@\n ctx1\n-old1\n-old2\n+new1\n ctx2\n"
-	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil)
+	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil, nil)
 	rows := splitLines(lines)
 	if len(rows) != 5 {
 		t.Fatalf("got %d rows, want 5: %+v", len(rows), rows)
@@ -701,7 +701,7 @@ func TestBuildExplorerTree(t *testing.T) {
 		{NewPath: "internal/tui/app.go", Diff: sampleDiff},
 		{NewPath: "README.md", Diff: sampleDiff},
 		{NewPath: "internal/config/load.go", Diff: sampleDiff},
-	}, nil, nil, false)
+	}, nil, nil, nil, false)
 	tree := buildExplorer(files)
 
 	// Directories sort before files, alphabetically within each level.
@@ -952,7 +952,7 @@ func TestSafeStoreFile(t *testing.T) {
 }
 
 func TestParseDiffLines(t *testing.T) {
-	lines := parseDiffLines(sampleDiffs()[0], nil)
+	lines := parseDiffLines(sampleDiffs()[0], nil, nil)
 	if len(lines) != 5 {
 		t.Fatalf("got %d lines, want 5: %+v", len(lines), lines)
 	}

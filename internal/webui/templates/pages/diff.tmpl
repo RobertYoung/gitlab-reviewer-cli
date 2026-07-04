@@ -10,9 +10,9 @@
   </details>
   {{end}}
 </header>
-<div class="diff-layout">
+<div class="diff-layout" data-viewed-key="viewed:{{$c.Nav.Project}}!{{$c.Nav.IID}}@{{$c.Detail.HeadSHA}}">
   <aside class="filetree">
-    <h3>{{len $c.Files}} changed file{{if ne (len $c.Files) 1}}s{{end}}</h3>
+    <h3>{{len $c.Files}} changed file{{if ne (len $c.Files) 1}}s{{end}} <span class="viewed-progress" id="viewed-progress"></span></h3>
     <ul>
       {{range $c.Explorer}}{{template "explorernode" .}}{{end}}
     </ul>
@@ -21,21 +21,33 @@
       {{else}}<strong>unified</strong> · <a href="{{$c.SplitURL}}">split</a>{{end}}
     </p>
     <div class="actions column">
-      <form method="post" action="{{$c.Nav.ReviewURL}}">
-        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-        <button type="submit" class="button review">▶ Run AI review</button>
-      </form>
+      {{template "reviewform" (reviewformargs $c.Nav $c.AgentOptions $c.AgentWarnings $c.PrevReviewHead)}}
       <form method="post" action="{{$c.Nav.ChatURL}}">
         <input type="hidden" name="project" value="{{$c.Nav.Project}}">
         <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-        <button type="submit" class="button">💬 Chat about this MR</button>
+        <button type="submit" class="button">{{template "icon" "chat"}} Chat about this MR</button>
       </form>
       {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
     </div>
   </aside>
 
   <section class="diff-files">
+    {{if $c.RecordName}}
+    <p class="findings-banner subtle">
+      Findings from the review of {{reltime $c.RecordTime}} are shown inline.
+      <a href="{{$c.FindingsURL}}">Open the findings page</a> to edit or publish them.
+    </p>
+    {{end}}
+
+    {{if $c.GeneralFindings}}
+    <div class="panel">
+      <h3>MR-level findings</h3>
+      {{range $c.GeneralFindings}}
+      {{template "difffinding" (findingrow . $c)}}
+      {{end}}
+    </div>
+    {{end}}
+
     {{if $c.General}}
     <div class="panel">
       <h3>Pending MR-level comments</h3>
@@ -48,8 +60,16 @@
     {{end}}
 
     {{range $c.Files}}
-    <article class="diff-file" id="file-{{.Index}}">
-      <header><span class="fstatus fstatus-{{.Status}}">{{.Letter}}</span> <span class="fpath">{{.Path}}</span></header>
+    <article class="diff-file" id="file-{{.Index}}" data-path="{{.NewPath}}">
+      <header class="file-header">
+        <button type="button" class="file-fold" title="collapse / expand this file" aria-label="collapse or expand"></button>
+        <span class="fstatus fstatus-{{.Status}}">{{.Letter}}</span> <span class="fpath">{{.Path}}</span>
+        {{if .Comments}}<span class="badge comments">{{template "icon" "chat"}} {{.Comments}}</span>{{end}}
+        {{if .Findings}}<span class="badge findingcount">{{template "icon" "warn"}} {{.Findings}}</span>{{end}}
+        <span class="spacer"></span>
+        <label class="viewed-label subtle"><input type="checkbox" class="viewed-box"> viewed</label>
+      </header>
+      <div class="file-body">
       {{if .TooLarge}}<p class="note">This file's diff is too large to display.</p>{{end}}
       {{$file := .}}
       {{if $c.Split}}
@@ -72,6 +92,9 @@
           <td class="gutter {{.Right.Kind}}">{{if eq .Right.Kind "add"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="" data-new="{{.Right.Num}}">+</button>{{else if eq .Right.Kind "ctx"}}<button type="button" class="add-comment" title="add a comment on this line" data-file="{{$file.NewPath}}" data-old="{{.Left.Num}}" data-new="{{.Right.Num}}">+</button>{{end}}</td>
           <td class="code {{.Right.Kind}}">{{.Right.HTML}}</td>
         </tr>
+        {{range .Findings}}
+        <tr class="inline-comment"><td colspan="2" class="ln"></td><td colspan="4">{{template "difffinding" (findingrow . $c)}}</td></tr>
+        {{end}}
         {{range .Threads}}
         <tr class="inline-comment"><td colspan="2" class="ln"></td><td colspan="4">{{template "diffthread" (threadrow . $c)}}</td></tr>
         {{end}}
@@ -90,6 +113,9 @@
           <td class="gutter">{{if .CanComment}}<button type="button" class="add-comment" title="add a comment on this line">+</button>{{end}}</td>
           <td class="code">{{.HTML}}</td>
         </tr>
+        {{range .Findings}}
+        <tr class="inline-comment"><td colspan="3" class="ln"></td><td>{{template "difffinding" (findingrow . $c)}}</td></tr>
+        {{end}}
         {{range .Threads}}
         <tr class="inline-comment"><td colspan="3" class="ln"></td><td>{{template "diffthread" (threadrow . $c)}}</td></tr>
         {{end}}
@@ -97,6 +123,7 @@
         {{end}}
       </table>
       {{end}}
+      </div>
     </article>
     {{end}}
   </section>
@@ -114,7 +141,7 @@
       <textarea name="body" rows="3" placeholder="posted verbatim as your own comment — markdown supported"></textarea>
       <div class="actions">
         <button type="submit" class="button primary">Add comment</button>
-        <button type="submit" class="button" formaction="{{$c.Nav.ChatURL}}" title="open a chat with Claude about this line — your text becomes the first message">💬 Ask Claude</button>
+        <button type="submit" class="button" formaction="{{$c.Nav.ChatURL}}" title="open a chat with Claude about this line — your text becomes the first message">{{template "icon" "chat"}} Ask Claude</button>
         <button type="button" class="button cancel-comment">Cancel</button>
       </div>
     </form>
@@ -124,7 +151,7 @@
 
 {{define "explorernode"}}
 {{if .File}}
-<li><a href="#file-{{.File.Index}}" title="{{.File.Path}}"><span class="fstatus fstatus-{{.File.Status}}">{{.File.Letter}}</span><span class="fname">{{.Name}}</span>{{if .File.Comments}}<span class="badge comments">💬 {{.File.Comments}}</span>{{end}}</a></li>
+<li class="file-entry" data-path="{{.File.NewPath}}"><a href="#file-{{.File.Index}}" title="{{.File.Path}}"><span class="fstatus fstatus-{{.File.Status}}">{{.File.Letter}}</span><span class="fname">{{.Name}}</span>{{if .File.Comments}}<span class="badge comments">{{template "icon" "chat"}} {{.File.Comments}}</span>{{end}}{{if .File.Findings}}<span class="badge findingcount">{{template "icon" "warn"}} {{.File.Findings}}</span>{{end}}<span class="viewed-tick">{{template "icon" "check"}}</span></a></li>
 {{else}}
 <li>
   <details open>
@@ -137,11 +164,33 @@
 {{end}}
 {{end}}
 
+{{define "difffinding"}}
+<div class="finding inline state-{{fstate .F.State}}" data-finding="{{.F.ID}}">
+  <header>
+    {{template "sevbadge" .F}}
+    <strong class="ftitle">{{ftitle .F}}</strong>
+    <span class="spacer"></span>
+    {{template "statebadge" .F.State}}
+  </header>
+  <pre class="prose">{{.F.Body}}</pre>
+  {{if .F.Suggestion}}
+  <div class="suggestion">
+    <span class="subtle">suggested replacement:</span>
+    <pre class="prose add">+{{.F.Suggestion}}</pre>
+  </div>
+  {{end}}
+  <footer class="actions">
+    {{template "findingactions" .}}
+    {{if .FindingsURL}}<a class="subtle" href="{{.FindingsURL}}#f-{{.F.ID}}">open in findings</a>{{end}}
+  </footer>
+</div>
+{{end}}
+
 {{define "diffthread"}}
 {{$content := .Content}}
 <details class="thread{{if .T.Resolved}} resolved{{end}}"{{if not .T.Resolved}} open{{end}}>
   <summary>
-    <span class="who">💬 {{with .T.First}}{{if .Pending}}yours{{else}}{{.Author}}{{end}}{{end}}</span>
+    <span class="who">{{template "icon" "chat"}} {{with .T.First}}{{if .Pending}}yours{{else}}{{.Author}}{{end}}{{end}}</span>
     {{if gt (len .T.Comments) 1}}<span class="subtle">· {{len .T.Comments}} comments</span>{{end}}
     {{with .T.First}}{{if not .When.IsZero}}<span class="subtle">· {{reltime .When}}</span>{{end}}{{end}}
     {{if .T.Resolved}}<span class="badge resolved">resolved</span>{{end}}

@@ -35,6 +35,22 @@ var tmplFuncs = template.FuncMap{
 	"threadrow": func(t inlineThread, content diffContent) map[string]any {
 		return map[string]any{"T": t, "Content": content}
 	},
+	"findingrow": func(f review.Finding, content diffContent) map[string]any {
+		return map[string]any{
+			"F": f, "Nav": content.Nav, "StateURL": content.StateURL,
+			"RecordName": content.RecordName, "BackURL": content.BackURL,
+			"FindingsURL": content.FindingsURL,
+		}
+	},
+	"reviewformargs": func(nav mrNav, opts []agentOption, warnings []string, prevReviewHead string) map[string]any {
+		return map[string]any{"Nav": nav, "AgentOptions": opts, "AgentWarnings": warnings, "PrevReviewHead": prevReviewHead}
+	},
+	"triagerow": func(f review.Finding, content findingsContent) map[string]any {
+		return map[string]any{
+			"F": f, "Nav": content.Nav, "StateURL": content.StateURL,
+			"RecordName": content.RecordName, "BackURL": "",
+		}
+	},
 	"ftitle":   findingTitle,
 	"floc":     findingLocation,
 	"fstate":   func(s review.FindingState) string { return s.String() },

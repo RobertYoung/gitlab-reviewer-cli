@@ -28,13 +28,13 @@
 
   {{else}}
   <h2>{{if $c.DraftReady}}Draft review ready{{else}}Publish complete{{end}}</h2>
-  {{if $c.TmplErr}}<p class="warning">⚠ {{$c.TmplErr}}</p>{{end}}
+  {{if $c.TmplErr}}<p class="warning">{{template "icon" "warn"}} {{$c.TmplErr}}</p>{{end}}
   <ul class="publish-items">
     {{range $c.Results}}
     <li>
-      {{if .Err}}<span class="badge state-failed">✗ failed</span>
-      {{else if eq (fstate .State) "published"}}<span class="badge state-published">✓ {{if .F.File}}inline{{else}}note{{end}}</span>
-      {{else if eq (fstate .State) "note"}}<span class="badge state-note">✓ note (no inline position)</span>
+      {{if .Err}}<span class="badge state-failed">{{template "icon" "cross"}} failed</span>
+      {{else if eq (fstate .State) "published"}}<span class="badge state-published">{{template "icon" "check"}} {{if .F.File}}inline{{else}}note{{end}}</span>
+      {{else if eq (fstate .State) "note"}}<span class="badge state-note">{{template "icon" "check"}} note (no inline position)</span>
       {{else}}<span class="badge">{{fstate .State}}</span>{{end}}
       <span class="subtle">{{floc .F}}</span> {{ftitle .F}}
       {{if .Err}}<div class="error">{{.Err}}</div>{{end}}
@@ -56,7 +56,7 @@
   {{else}}
   <div class="actions">
     <a class="button primary" href="{{$c.Nav.DetailURL}}">Back to MR</a>
-    {{if $c.Detail.WebURL}}<a class="button" href="{{$c.Detail.WebURL}}" target="_blank" rel="noopener">Open in GitLab ↗</a>{{end}}
+    {{if $c.Detail.WebURL}}<a class="button" href="{{$c.Detail.WebURL}}" target="_blank" rel="noopener">Open in GitLab {{template "icon" "external"}}</a>{{end}}
   </div>
   {{end}}
   {{end}}
