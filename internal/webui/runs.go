@@ -195,11 +195,19 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 		if out.Err == nil && out.Rec != nil {
 			rec := out.Rec
 			// Same curation bootstrap as the TUI findings screen: findings
-			// at or above the auto-comment threshold arrive accepted, and
-			// pending manual comments join the record.
+			// below the publish floor are marked (they never reach GitLab),
+			// findings at or above the auto-comment threshold arrive
+			// accepted, and pending manual comments join the record.
+			floor := review.Severity(cfg.Publish.MinSeverity)
+			for i := range rec.Findings {
+				if rec.Findings[i].Severity.Valid() && !rec.Findings[i].Severity.AtLeast(floor) {
+					rec.Findings[i].State = review.StateBelowThreshold
+				}
+			}
 			if cfg.Publish.AutoComment {
 				for i := range rec.Findings {
-					if rec.Findings[i].Severity.AtLeast(review.Severity(cfg.Publish.AutoMinSeverity)) {
+					if rec.Findings[i].State == review.StatePending &&
+						rec.Findings[i].Severity.AtLeast(review.Severity(cfg.Publish.AutoMinSeverity)) {
 						rec.Findings[i].State = review.StateAccepted
 					}
 				}

@@ -36,6 +36,9 @@ The GUI mirrors the TUI screen for screen:
 - **MR detail** — title, branches, approval status with
   approve/unapprove, the description rendered as markdown, the commit
   list, and a needs-rebase warning when the branch is behind its target.
+  With a [severity gate](Publishing.md#severity-gate) configured, blocking
+  findings show a warning banner; `warn` relabels the button "Approve
+  anyway" and `block` disables it (the server refuses direct POSTs too).
 - **Diff view** — syntax-highlighted, soft-wrapped diffs in unified or
   side-by-side layout (default from `ui.diff_view`, switchable via the
   sidebar links), a persistent file-explorer tree with collapsible

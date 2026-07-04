@@ -50,6 +50,52 @@ publish:
   auto_min_severity: critical   # only auto-publish the most severe
 ```
 
+## Publish floor: `publish.min_severity`
+
+`publish.min_severity` (default `info`, i.e. everything publishes) is a
+hard floor: findings below it are **never posted to GitLab**, from any
+frontend or headless mode. They stay visible on the findings screens,
+marked `below-threshold`, so triage still sees the full picture — accepting
+one changes nothing, the publisher skips it regardless.
+
+This is different from auto-publish: `auto_min_severity` decides what gets
+accepted *for you*, `min_severity` decides what is allowed out at all.
+
+```yaml
+publish:
+  min_severity: minor       # keep info-level nits off the MR
+  auto_comment: true
+  auto_min_severity: major  # auto-accept the strong ones
+```
+
+## Severity gate
+
+The `gate` section ties the review outcome to approvals. With
+`gate.min_severity` set, findings at or above it are **blocking** while
+they have not been rejected in triage (manual comments never block); the
+MR's newest stored review is what counts.
+
+```yaml
+gate:
+  min_severity: major
+  approvals: block   # off | warn | block
+```
+
+`gate.approvals` controls approving *from this tool* while blocking
+findings remain:
+
+- **`warn`** (default) — the TUI asks for a confirming second press of
+  `a`; the GUI shows the warning on the MR page and relabels the button
+  "Approve anyway".
+- **`block`** — both frontends refuse the approval until the findings are
+  rejected in triage or a re-review comes back clean.
+- **`off`** — approvals ignore the gate.
+
+In [headless mode](Headless-Mode.md#output-and-exit-codes) the same gate
+drives the exit code, so CI can fail the job. The gate is advisory from
+GitLab's perspective — it restricts this tool, not the GitLab UI or API —
+so treat it as a team convention, not an enforcement boundary.
+
 ## Comment layout: `publish.template`
 
 `publish.template` is a Go

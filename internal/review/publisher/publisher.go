@@ -50,9 +50,16 @@ func New(svc gitlabx.Service, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff,
 
 // PublishOne posts a single finding and returns its new state: Published
 // for a positioned comment or deliberate MR-level note, FellBack when the
-// position did not resolve and the body went out as a general note, or
+// position did not resolve and the body went out as a general note,
+// BelowThreshold when the publish floor kept it off GitLab entirely, or
 // Pending (with the error) when nothing was posted.
 func (p *Publisher) PublishOne(ctx context.Context, f review.Finding) (review.FindingState, error) {
+	// The publish floor is enforced here, at the shared choke point, so no
+	// frontend can post a below-floor finding. Manual comments are the
+	// reviewer's own words and always publish.
+	if !f.Manual && f.Severity.Valid() && !f.Severity.AtLeast(review.Severity(p.cfg.MinSeverity)) {
+		return review.StateBelowThreshold, nil
+	}
 	project := p.detail.Project()
 	body := f.RenderBody(p.tmpl, p.cfg.Attribution)
 

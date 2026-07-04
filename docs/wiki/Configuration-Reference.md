@@ -211,13 +211,29 @@ your working tree.
 | `publish.mode` | `GITLAB_REVIEWER_PUBLISH_MODE` | `--publish-mode` | `draft` | `draft` \| `immediate` |
 | `publish.auto_comment` | `GITLAB_REVIEWER_PUBLISH_AUTO_COMMENT` | `--auto-comment` | `false` | auto-publish strong findings |
 | `publish.auto_min_severity` | `GITLAB_REVIEWER_PUBLISH_AUTO_MIN_SEVERITY` | `--auto-min-severity` | `major` | `info` \| `minor` \| `major` \| `critical` |
+| `publish.min_severity` | `GITLAB_REVIEWER_PUBLISH_MIN_SEVERITY` | `--publish-min-severity` | `info` | publish floor: findings below it are never posted |
 | `publish.fallback_to_note` | `GITLAB_REVIEWER_PUBLISH_FALLBACK_TO_NOTE` | `--fallback-to-note` | `true` | general note when no position resolves |
 | `publish.attribution` | `GITLAB_REVIEWER_PUBLISH_ATTRIBUTION` | `--attribution` | `false` | AI-suggested footer |
 | `publish.template` | `GITLAB_REVIEWER_PUBLISH_TEMPLATE` | `--publish-template` | built-in layout | Go text/template; fields `{{.severity}}`, `{{.category}}`, `{{.agent}}`, `{{.title}}`, `{{.body}}`, `{{.file}}` |
 
 See [Publishing](Publishing.md) for the modes, auto-publish behaviour, the
-note fallback, and template examples. Templates are syntax-checked at
-config validation and fail early on unknown fields.
+publish floor, the note fallback, and template examples. Templates are
+syntax-checked at config validation and fail early on unknown fields.
+
+## gate
+
+| File key | Environment variable | Flag | Default | Notes |
+|---|---|---|---|---|
+| `gate.min_severity` | `GITLAB_REVIEWER_GATE_MIN_SEVERITY` | `--gate-min-severity` | unset (gate off) | findings at/above this severity are blocking |
+| `gate.approvals` | `GITLAB_REVIEWER_GATE_APPROVALS` | `--gate-approvals` | `warn` | `off` \| `warn` \| `block`; only consulted when the gate is on |
+
+With the gate on, a finding is **blocking** while it is at or above
+`gate.min_severity` and has not been rejected in triage (manual comments
+never block). The `review` command exits with code 2 while the review has
+blocking findings (see [Headless Mode](Headless-Mode.md#output-and-exit-codes)),
+and approving from the TUI/GUI warns or refuses per `gate.approvals` (see
+[Publishing](Publishing.md#severity-gate)). The gate is advisory from
+GitLab's perspective: it restricts this tool, not the GitLab UI or API.
 
 ## ui
 
@@ -245,9 +261,9 @@ browsable in both frontends via the past-reviews screen.
 
 ## Per-project overrides
 
-The `review`, `checkout`, and `publish` sections — and only those — can be
-overridden per project in the settings file, keyed by the full project
-path:
+The `review`, `checkout`, `publish`, and `gate` sections — and only those —
+can be overridden per project in the settings file, keyed by the full
+project path:
 
 ```yaml
 review:

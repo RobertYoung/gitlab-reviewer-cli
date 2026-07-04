@@ -134,6 +134,37 @@ func TestListMissingDir(t *testing.T) {
 	}
 }
 
+func TestLatestBlocking(t *testing.T) {
+	store := NewStore(t.TempDir())
+
+	// Older review with a critical finding, newer one with a rejected major
+	// and a pending minor: only the newest record counts, and rejected or
+	// too-weak findings never block.
+	older := record(1, "a/b!1", time.Unix(100, 0))
+	older.Findings[0].Severity = review.SeverityCritical
+	newer := record(1, "a/b!1", time.Unix(200, 0))
+	newer.Findings = []review.Finding{
+		{ID: "f1", Severity: review.SeverityMajor, State: review.StateRejected, Body: "b"},
+		{ID: "f2", Severity: review.SeverityMinor, State: review.StatePending, Body: "b"},
+		{ID: "m1", Manual: true, State: review.StatePending, Body: "manual"},
+	}
+	for _, r := range []Record{older, newer} {
+		if err := store.Save(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if n, err := store.LatestBlocking("a/b!1", review.SeverityMajor); n != 0 || err != nil {
+		t.Errorf("major gate: n=%d err=%v; want 0 (rejected finding must not block)", n, err)
+	}
+	if n, err := store.LatestBlocking("a/b!1", review.SeverityMinor); n != 1 || err != nil {
+		t.Errorf("minor gate: n=%d err=%v; want 1", n, err)
+	}
+	if n, err := store.LatestBlocking("x/y!9", review.SeverityInfo); n != 0 || err != nil {
+		t.Errorf("unreviewed MR: n=%d err=%v; want 0", n, err)
+	}
+}
+
 func TestNilStoreIsNoOp(t *testing.T) {
 	var store *Store
 	if err := store.Save(record(1, "a/b!1", time.Unix(100, 0))); err != nil {

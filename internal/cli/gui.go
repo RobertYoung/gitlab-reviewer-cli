@@ -115,7 +115,7 @@ func newGUICmd(st *state) *cobra.Command {
 							if err != nil {
 								return icfg
 							}
-							// Per-project overrides cover review/checkout/publish
+							// Per-project overrides cover review/checkout/publish/gate
 							// only; keep the resolved instance's gitlab settings.
 							projectCfg.GitLab = icfg.GitLab
 							return projectCfg

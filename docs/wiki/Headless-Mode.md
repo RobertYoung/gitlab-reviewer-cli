@@ -68,12 +68,26 @@ Progress (the same lines the TUI review screen shows) streams to
 - `--output json` — the stored review record as JSON: `ref`, `title`,
   `summary`, `warnings`, `cost_usd`, `findings` (each with file, line,
   severity, category, agent, body, and its publish `state`), `log_path`,
-  and `record_path`.
+  `record_path`, and — when the gate is configured — a `gate` object
+  (`min_severity`, `blocking`, `passed`).
 
-Exit codes: `0` on a completed review (with or without findings), `1` on
-any failure — configuration errors, GitLab/API errors, a failed review
-run, or any finding that failed to publish. Findings do **not** affect the
-exit code; severity-based gating is a planned enhancement.
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| `0` | review completed; no gate configured, or the gate passed |
+| `1` | any failure: configuration errors, GitLab/API errors, a failed review run, or a finding that failed to publish |
+| `2` | the review completed but the [severity gate](Configuration-Reference.md#gate) failed: at least one finding at or above `gate.min_severity` |
+
+Set `gate.min_severity` (flag `--gate-min-severity`) to make blocking
+findings fail the CI job:
+
+```sh
+gitlab-reviewer review "$CI_PROJECT_PATH!$CI_MERGE_REQUEST_IID" \
+    --gate-min-severity major   # exits 2 if any major/critical finding
+```
+
+Without a configured gate, findings do not affect the exit code.
 
 ## Multiple GitLab instances
 

@@ -89,7 +89,7 @@ columns wide and hides itself below that.
 
 | Key | Action |
 |---|---|
-| `a` | approve, or remove your approval. The approval is pinned to the head commit you reviewed; the header shows who has approved |
+| `a` | approve, or remove your approval. The approval is pinned to the head commit you reviewed; the header shows who has approved. With a [severity gate](Publishing.md#severity-gate) configured, blocking findings in the last review make `warn` ask for a confirming second press and `block` refuse |
 | `c` | comment on the selected line (`ctrl+s` saves, `esc` discards) |
 | `C` | general MR-level comment |
 | `P` | publish pending manual comments on their own |
@@ -151,6 +151,10 @@ category, and the agent that produced it.
 
 Curation state is saved on every change — you can leave and reopen the
 review later (`L` on the MR detail) without losing decisions.
+
+Findings below [`publish.min_severity`](Publishing.md#publish-floor-publishmin_severity)
+are marked `below-threshold`: they stay visible here for context but are
+never posted to GitLab, even if accepted.
 
 With `publish.auto_comment` enabled, findings at or above
 `publish.auto_min_severity` are published automatically when this screen

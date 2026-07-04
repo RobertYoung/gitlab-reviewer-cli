@@ -145,3 +145,18 @@ func (s *Store) List(ref string) ([]Entry, error) {
 	})
 	return out, nil
 }
+
+// LatestBlocking counts the findings in the MR's newest stored review that
+// block a severity gate at min (see review.Finding.Blocking). Zero when no
+// review is stored, so an unreviewed MR is never gated.
+func (s *Store) LatestBlocking(ref string, min review.Severity) (int, error) {
+	entries, err := s.List(ref)
+	if err != nil || len(entries) == 0 {
+		return 0, err
+	}
+	rec, err := s.Load(entries[0].Path)
+	if err != nil {
+		return 0, err
+	}
+	return review.CountBlocking(rec.Findings, min), nil
+}
