@@ -42,6 +42,14 @@ type (
 		approvals *gitlabx.Approvals
 		err       error
 	}
+	// approvalGateMsg reports that the severity gate stopped an approval:
+	// warn asks for a confirming second press, block refuses outright.
+	approvalGateMsg struct {
+		iid      int64
+		blocking int
+		min      string
+		block    bool
+	}
 )
 
 // mrDetail shows one MR: metadata header plus a navigable, coloured diff.
@@ -60,6 +68,10 @@ type mrDetail struct {
 	approvals    *gitlabx.Approvals
 	approvalBusy bool
 	approvalErr  error
+	// gateNotice is the severity gate's message in the header; gateConfirmed
+	// lets the next approval press through a warn-mode gate.
+	gateNotice    string
+	gateConfirmed bool
 
 	vp        viewport.Model
 	spin      spinner.Model
@@ -193,13 +205,25 @@ func (s *mrDetail) Init() tea.Cmd {
 }
 
 // toggleApproval approves the MR, or removes the user's approval when one
-// is already recorded, then refetches the approval state.
+// is already recorded, then refetches the approval state. Approving first
+// consults the severity gate: with blocking findings in the MR's last stored
+// review, warn requires a confirming second press and block refuses.
 func (s *mrDetail) toggleApproval() tea.Cmd {
 	svc, mr, sha := s.svc, s.mr, s.detail.HeadSHA
 	unapprove := s.approvals != nil && s.approvals.UserHasApproved
+	gate := s.deps.cfgFor(s.detail.ProjectPath).Gate
+	checkGate := !unapprove && gate.Enabled() && gate.Approvals != "off" && !s.gateConfirmed
+	results, ref := s.deps.Results, s.detail.Ref()
+	s.gateConfirmed = false
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), listRequestTimeout)
 		defer cancel()
+		if checkGate {
+			// Best-effort: an unreadable store must not wedge approvals.
+			if n, err := results.LatestBlocking(ref, review.Severity(gate.MinSeverity)); err == nil && n > 0 {
+				return approvalGateMsg{iid: mr.IID, blocking: n, min: gate.MinSeverity, block: gate.Approvals == "block"}
+			}
+		}
 		var err error
 		if unapprove {
 			err = svc.Unapprove(ctx, mr.Project(), mr.IID)
@@ -293,8 +317,24 @@ func (s *mrDetail) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		}
 		s.approvalBusy = false
 		s.approvalErr = msg.err
+		if msg.err == nil {
+			s.gateNotice = ""
+		}
 		if msg.approvals != nil {
 			s.approvals = msg.approvals
+		}
+		return s, nil
+
+	case approvalGateMsg:
+		if msg.iid != s.mr.IID {
+			return s, nil
+		}
+		s.approvalBusy = false
+		if msg.block {
+			s.gateNotice = fmt.Sprintf("approval blocked: %d finding(s) ≥ %s in the last review", msg.blocking, msg.min)
+		} else {
+			s.gateNotice = fmt.Sprintf("%d finding(s) ≥ %s in the last review — press a again to approve anyway", msg.blocking, msg.min)
+			s.gateConfirmed = true
 		}
 		return s, nil
 
@@ -772,6 +812,8 @@ func (s *mrDetail) approvalStatus() string {
 		return " · " + subtleStyle.Render("updating approval…")
 	case s.approvalErr != nil:
 		return " · " + errorStyle.Render(truncate("approval failed: "+s.approvalErr.Error(), 60))
+	case s.gateNotice != "":
+		return " · " + errorStyle.Render(truncate(s.gateNotice, 80))
 	case s.approvals != nil && s.approvals.UserHasApproved:
 		others := len(s.approvals.ApprovedBy) - 1
 		status := "✓ approved by you"

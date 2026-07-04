@@ -212,6 +212,12 @@ type mrDetailContent struct {
 	HasAccepted   bool
 	AgentOptions  []agentOption
 	AgentWarnings []string
+	// GateBlocking is how many findings in the last stored review block the
+	// severity gate (0 when the gate is off or satisfied); GateSeverity is
+	// its threshold and GateBlocked whether approval is refused outright.
+	GateBlocking int
+	GateSeverity string
+	GateBlocked  bool
 }
 
 // agentOption is one review agent offered on the run-review form.
@@ -327,6 +333,15 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 	if detail.NeedsRebase() {
 		content.RebaseWarning = runner.RebaseWarning(*detail)
 	}
+	// Severity gate status for the approve action; best-effort, an
+	// unreadable store must not break the page.
+	if gate := d.cfgFor(detail.ProjectPath).Gate; gate.Enabled() && gate.Approvals != "off" {
+		if n, err := d.Results.LatestBlocking(detail.Ref(), review.Severity(gate.MinSeverity)); err == nil && n > 0 {
+			content.GateBlocking = n
+			content.GateSeverity = gate.MinSeverity
+			content.GateBlocked = gate.Approvals == "block"
+		}
+	}
 	s.render(w, http.StatusOK, "mrdetail", pageData{Title: detail.Ref(), Instance: inst, Content: content})
 }
 
@@ -436,7 +451,8 @@ func (s *Server) handleCommentDelete(w http.ResponseWriter, r *http.Request, _ *
 // handleApprove approves the MR, or removes the user's approval when the
 // form says so. The head SHA posted from the detail page rides along on
 // approval, so an MR that gained commits since the page was rendered is
-// rejected by GitLab rather than silently approved.
+// rejected by GitLab rather than silently approved. A block-mode severity
+// gate is enforced here too, so it cannot be sidestepped with a direct POST.
 func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request, d *Deps) {
 	inst := r.PathValue("inst")
 	project, iid, err := mrQuery(r)
@@ -447,6 +463,14 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request, d *Deps) 
 	if r.FormValue("action") == "unapprove" {
 		err = d.Svc.Unapprove(r.Context(), parseProject(project), iid)
 	} else {
+		if gate := d.cfgFor(project).Gate; gate.Enabled() && gate.Approvals == "block" {
+			ref := fmt.Sprintf("%s!%d", project, iid)
+			if n, gerr := d.Results.LatestBlocking(ref, review.Severity(gate.MinSeverity)); gerr == nil && n > 0 {
+				s.renderError(w, http.StatusConflict, fmt.Errorf(
+					"approval blocked: %d finding(s) at or above %s in the last review (gate.approvals: block)", n, gate.MinSeverity))
+				return
+			}
+		}
 		err = d.Svc.Approve(r.Context(), parseProject(project), iid, r.FormValue("sha"))
 	}
 	if err != nil {

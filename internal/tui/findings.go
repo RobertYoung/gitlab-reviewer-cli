@@ -27,9 +27,10 @@ var severityStyles = map[review.Severity]lipgloss.Style{
 var manualStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Padding(0, 1)
 
 var stateStyles = map[review.FindingState]lipgloss.Style{
-	review.StateAccepted: lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
-	review.StateRejected: lipgloss.NewStyle().Faint(true).Strikethrough(true),
-	review.StatePending:  lipgloss.NewStyle(),
+	review.StateAccepted:       lipgloss.NewStyle().Foreground(lipgloss.Color("10")),
+	review.StateRejected:       lipgloss.NewStyle().Faint(true).Strikethrough(true),
+	review.StateBelowThreshold: lipgloss.NewStyle().Faint(true),
+	review.StatePending:        lipgloss.NewStyle(),
 }
 
 // findings lets the engineer curate the review result: view each finding
@@ -71,12 +72,23 @@ func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, r
 	items := make([]review.Finding, len(result.Findings))
 	copy(items, result.Findings)
 
+	// The publish floor: findings below publish.min_severity are marked up
+	// front so triage shows they will never reach GitLab; the publisher
+	// enforces the floor again at publish time.
+	floor := review.Severity(cfg.Publish.MinSeverity)
+	for i := range items {
+		if items[i].Severity.Valid() && !items[i].Severity.AtLeast(floor) {
+			items[i].State = review.StateBelowThreshold
+		}
+	}
+
 	// auto_comment: findings at or above the severity threshold are
 	// accepted up front and published without confirmation; weaker ones
 	// still go through interactive curation.
 	if cfg.Publish.AutoComment {
 		for i := range items {
-			if items[i].Severity.AtLeast(review.Severity(cfg.Publish.AutoMinSeverity)) {
+			if items[i].State == review.StatePending &&
+				items[i].Severity.AtLeast(review.Severity(cfg.Publish.AutoMinSeverity)) {
 				items[i].State = review.StateAccepted
 			}
 		}

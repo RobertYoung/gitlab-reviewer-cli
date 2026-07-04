@@ -125,7 +125,7 @@ func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output s
 	if err != nil {
 		projectCfg = cfg
 	} else {
-		// Per-project overrides cover review/checkout/publish only; keep the
+		// Per-project overrides cover review/checkout/publish/gate only; keep the
 		// resolved instance's gitlab settings.
 		projectCfg.GitLab = cfg.GitLab
 	}
@@ -173,23 +173,51 @@ func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output s
 		}
 	}
 
+	gate := gateOutcome(projectCfg.Gate, rec.Findings)
+
 	if output == "json" {
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		if err := enc.Encode(struct {
 			resultstore.Record
-			RecordPath string `json:"record_path,omitempty"`
-		}{*rec, results.Path(*rec)}); err != nil {
+			RecordPath string      `json:"record_path,omitempty"`
+			Gate       *gateReport `json:"gate,omitempty"`
+		}{*rec, results.Path(*rec), gate}); err != nil {
 			return err
 		}
 	} else {
-		writeTextSummary(cmd, rec, results.Path(*rec), publishMode)
+		writeTextSummary(cmd, rec, results.Path(*rec), publishMode, gate)
 	}
 
 	if pubFailed > 0 {
 		return fmt.Errorf("%d finding(s) failed to publish", pubFailed)
 	}
+	if gate != nil && !gate.Passed {
+		return &exitError{code: gateExitCode, msg: fmt.Sprintf(
+			"gate failed: %d finding(s) at or above %s (gate.min_severity)", gate.Blocking, gate.MinSeverity)}
+	}
 	return nil
+}
+
+// gateExitCode distinguishes "the review found blocking findings" (the gate)
+// from ordinary failures (exit 1), so CI pipelines can tell them apart.
+const gateExitCode = 2
+
+// gateReport is the gate section of the review command's output.
+type gateReport struct {
+	MinSeverity string `json:"min_severity"`
+	Blocking    int    `json:"blocking"`
+	Passed      bool   `json:"passed"`
+}
+
+// gateOutcome evaluates the severity gate over a completed review's
+// findings; nil when no gate is configured.
+func gateOutcome(gate config.Gate, findings []review.Finding) *gateReport {
+	if !gate.Enabled() {
+		return nil
+	}
+	blocking := review.CountBlocking(findings, review.Severity(gate.MinSeverity))
+	return &gateReport{MinSeverity: gate.MinSeverity, Blocking: blocking, Passed: blocking == 0}
 }
 
 // publishHeadless posts every finding through the shared publisher, updating
@@ -216,7 +244,9 @@ func publishHeadless(ctx context.Context, svc gitlabx.Service, detail gitlabx.MR
 			emit(fmt.Sprintf("publish failed: %s: %v", findingRef(f), err))
 			continue
 		}
-		posted++
+		if state != review.StateBelowThreshold {
+			posted++
+		}
 	}
 	if draft && posted > 0 {
 		pubCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -229,9 +259,16 @@ func publishHeadless(ctx context.Context, svc gitlabx.Service, detail gitlabx.MR
 	return failed
 }
 
-func writeTextSummary(cmd *cobra.Command, rec *resultstore.Record, recordPath, publishMode string) {
+func writeTextSummary(cmd *cobra.Command, rec *resultstore.Record, recordPath, publishMode string, gate *gateReport) {
 	w := cmd.OutOrStdout()
 	_, _ = fmt.Fprintf(w, "review complete: %d finding(s)%s\n", len(rec.Findings), severityBreakdown(rec.Findings))
+	if gate != nil {
+		if gate.Passed {
+			_, _ = fmt.Fprintf(w, "gate: passed (no findings at or above %s)\n", gate.MinSeverity)
+		} else {
+			_, _ = fmt.Fprintf(w, "gate: failed — %d finding(s) at or above %s\n", gate.Blocking, gate.MinSeverity)
+		}
+	}
 	if rec.Summary != "" {
 		_, _ = fmt.Fprintln(w, rec.Summary)
 	}

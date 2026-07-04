@@ -31,6 +31,7 @@ other modality (keyboard-driven vs browser-native).
 | Needs-rebase / conflict warning | ✅ | ✅ | |
 | Approval status (who approved, approvals outstanding) | ✅ | ✅ | |
 | Approve / unapprove | ✅ | ✅ | Approval is pinned to the head commit that was on screen; TUI: `a` |
+| Severity-gated approvals (`gate.approvals`: warn/block) | ✅ | ✅ | TUI: warn asks for a confirming second press; GUI: warning banner and "Approve anyway", block disables the button |
 
 ## Diff
 

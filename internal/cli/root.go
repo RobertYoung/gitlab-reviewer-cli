@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -125,7 +126,7 @@ func newRoot(st *state) *cobra.Command {
 					if err != nil {
 						return cfg
 					}
-					// Per-project overrides cover review/checkout/publish
+					// Per-project overrides cover review/checkout/publish/gate
 					// only; keep the resolved instance's gitlab settings.
 					projectCfg.GitLab = cfg.GitLab
 					return projectCfg
@@ -204,9 +205,13 @@ func addSettingFlags(root *cobra.Command) {
 	f.String("publish-mode", "", "publish mode: draft|immediate")
 	f.Bool("auto-comment", false, "publish findings at/above --auto-min-severity without confirmation")
 	f.String("auto-min-severity", "", "severity threshold for --auto-comment (info|minor|major|critical)")
+	f.String("publish-min-severity", "", "publish floor: findings below it are never posted (info|minor|major|critical)")
 	f.Bool("fallback-to-note", true, "post a general MR note when an inline position cannot be resolved")
 	f.Bool("attribution", false, "append an attribution footer to published comments")
 	f.String("publish-template", "", "comment body template ({{.severity}} {{.category}} {{.agent}} {{.title}} {{.body}} {{.file}}); e.g. '{{.body}}' for plain comments")
+
+	f.String("gate-min-severity", "", "findings at/above this severity are blocking: the review command exits 2 and approvals warn or block (info|minor|major|critical)")
+	f.String("gate-approvals", "", "approving while blocking findings remain: off|warn|block")
 
 	f.String("diff-view", "", "diff layout in the MR detail screen: unified|split")
 	f.String("file-explorer", "", "initial state of the changed-files explorer in the MR detail screen: open|closed")
@@ -258,6 +263,15 @@ func setupLogging(cfg config.Log, redactor *secret.Redactor) error {
 	return nil
 }
 
+// exitError carries a distinct process exit code through cobra's error path;
+// plain errors exit 1.
+type exitError struct {
+	code int
+	msg  string
+}
+
+func (e *exitError) Error() string { return e.msg }
+
 // Execute runs the CLI and returns a process exit code. Errors are printed
 // with secrets redacted through the same redactor that learned the token
 // during config loading.
@@ -266,6 +280,9 @@ func Execute() int {
 	root := newRoot(st)
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "Error:", st.redactor.Redact(err.Error()))
+		if ee, ok := errors.AsType[*exitError](err); ok {
+			return ee.code
+		}
 		return 1
 	}
 	return 0

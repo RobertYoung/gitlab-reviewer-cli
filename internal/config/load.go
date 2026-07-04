@@ -59,9 +59,12 @@ var envToKey = map[string]string{
 	"PUBLISH_MODE":              "publish.mode",
 	"PUBLISH_AUTO_COMMENT":      "publish.auto_comment",
 	"PUBLISH_AUTO_MIN_SEVERITY": "publish.auto_min_severity",
+	"PUBLISH_MIN_SEVERITY":      "publish.min_severity",
 	"PUBLISH_FALLBACK_TO_NOTE":  "publish.fallback_to_note",
 	"PUBLISH_ATTRIBUTION":       "publish.attribution",
 	"PUBLISH_TEMPLATE":          "publish.template",
+	"GATE_MIN_SEVERITY":         "gate.min_severity",
+	"GATE_APPROVALS":            "gate.approvals",
 	"UI_DIFF_VIEW":              "ui.diff_view",
 	"UI_FILE_EXPLORER":          "ui.file_explorer",
 	"LOG_LEVEL":                 "log.level",
@@ -89,48 +92,51 @@ var envFallbacks = map[string]string{
 
 // flagToKey maps pflag names to config keys; only changed flags are applied.
 var flagToKey = map[string]string{
-	"gitlab-base-url":   "gitlab.base_url",
-	"gitlab-token":      "gitlab.token",
-	"instance":          "gitlab.default_instance",
-	"project":           "gitlab.projects",
-	"group":             "gitlab.groups",
-	"per-page":          "gitlab.per_page",
-	"provider":          "review.provider",
-	"model":             "review.model",
-	"models":            "review.models",
-	"claude-path":       "review.claude_path",
-	"review-timeout":    "review.timeout",
-	"max-budget-usd":    "review.max_budget_usd",
-	"agents":            "review.agents",
-	"agent-concurrency": "review.agent_concurrency",
-	"categories":        "review.categories",
-	"instructions":      "review.instructions",
-	"instructions-file": "review.instructions_file",
-	"max-diff-kb":       "review.max_diff_kb",
-	"exclude":           "review.exclude",
-	"bare":              "review.bare",
-	"use-agents":        "review.use_agents",
-	"review-env":        "review.env",
-	"aws-region":        "bedrock.region",
-	"aws-profile":       "bedrock.profile",
-	"checkout-mode":     "checkout.mode",
-	"repo-path":         "checkout.path",
-	"git-root":          "checkout.root",
-	"clone-transport":   "checkout.transport",
-	"cache-dir":         "checkout.cache_dir",
-	"cache-max-mb":      "checkout.cache_max_mb",
-	"keep-worktree":     "checkout.keep",
-	"local-overlay":     "checkout.local_overlay",
-	"publish-mode":      "publish.mode",
-	"auto-comment":      "publish.auto_comment",
-	"auto-min-severity": "publish.auto_min_severity",
-	"fallback-to-note":  "publish.fallback_to_note",
-	"attribution":       "publish.attribution",
-	"publish-template":  "publish.template",
-	"diff-view":         "ui.diff_view",
-	"file-explorer":     "ui.file_explorer",
-	"log-level":         "log.level",
-	"log-file":          "log.file",
+	"gitlab-base-url":      "gitlab.base_url",
+	"gitlab-token":         "gitlab.token",
+	"instance":             "gitlab.default_instance",
+	"project":              "gitlab.projects",
+	"group":                "gitlab.groups",
+	"per-page":             "gitlab.per_page",
+	"provider":             "review.provider",
+	"model":                "review.model",
+	"models":               "review.models",
+	"claude-path":          "review.claude_path",
+	"review-timeout":       "review.timeout",
+	"max-budget-usd":       "review.max_budget_usd",
+	"agents":               "review.agents",
+	"agent-concurrency":    "review.agent_concurrency",
+	"categories":           "review.categories",
+	"instructions":         "review.instructions",
+	"instructions-file":    "review.instructions_file",
+	"max-diff-kb":          "review.max_diff_kb",
+	"exclude":              "review.exclude",
+	"bare":                 "review.bare",
+	"use-agents":           "review.use_agents",
+	"review-env":           "review.env",
+	"aws-region":           "bedrock.region",
+	"aws-profile":          "bedrock.profile",
+	"checkout-mode":        "checkout.mode",
+	"repo-path":            "checkout.path",
+	"git-root":             "checkout.root",
+	"clone-transport":      "checkout.transport",
+	"cache-dir":            "checkout.cache_dir",
+	"cache-max-mb":         "checkout.cache_max_mb",
+	"keep-worktree":        "checkout.keep",
+	"local-overlay":        "checkout.local_overlay",
+	"publish-mode":         "publish.mode",
+	"auto-comment":         "publish.auto_comment",
+	"auto-min-severity":    "publish.auto_min_severity",
+	"publish-min-severity": "publish.min_severity",
+	"fallback-to-note":     "publish.fallback_to_note",
+	"attribution":          "publish.attribution",
+	"publish-template":     "publish.template",
+	"gate-min-severity":    "gate.min_severity",
+	"gate-approvals":       "gate.approvals",
+	"diff-view":            "ui.diff_view",
+	"file-explorer":        "ui.file_explorer",
+	"log-level":            "log.level",
+	"log-file":             "log.file",
 }
 
 // Options control loading; zero value means real environment and default paths.
@@ -300,14 +306,14 @@ func flagLayer(fs *pflag.FlagSet) map[string]any {
 
 // ForProject returns the configuration with per-project overrides from the
 // settings file's projects.<full/project/path> section merged over the
-// review, checkout, and publish sections.
+// review, checkout, publish, and gate sections.
 func (r *Result) ForProject(projectPath string) (Config, error) {
 	sub := r.k.Cut("projects" + delim + projectPath)
 	if len(sub.Keys()) == 0 {
 		return r.Config, nil
 	}
 	merged := r.k.Copy()
-	for _, section := range []string{"review", "checkout", "publish"} {
+	for _, section := range []string{"review", "checkout", "publish", "gate"} {
 		s := sub.Cut(section)
 		for _, key := range s.Keys() {
 			if err := merged.Set(section+delim+key, s.Get(key)); err != nil {

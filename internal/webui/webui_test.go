@@ -231,6 +231,7 @@ type testEnv struct {
 	ts     *httptest.Server
 	client *http.Client
 	svc    *fakeService
+	dir    string // reviews dir: run logs and stored records
 }
 
 func newTestEnv(t *testing.T, rev review.Reviewer, cfgOpts ...func(*config.Config)) *testEnv {
@@ -277,7 +278,7 @@ func newTestEnv(t *testing.T, rev review.Reviewer, cfgOpts ...func(*config.Confi
 	}
 	_ = resp.Body.Close()
 
-	return &testEnv{t: t, srv: srv, ts: ts, client: client, svc: svc}
+	return &testEnv{t: t, srv: srv, ts: ts, client: client, svc: svc, dir: dir}
 }
 
 func (e *testEnv) get(path string) (int, string) {
@@ -576,6 +577,74 @@ func TestApproveAndUnapprove(t *testing.T) {
 	if code != http.StatusOK || env.svc.approved {
 		t.Fatalf("unapprove: %d approved=%v", code, env.svc.approved)
 	}
+}
+
+// TestApproveGate covers gate.approvals: with a blocking finding in the MR's
+// last stored review, warn relabels the approve button and block refuses the
+// approval outright — including a direct POST around the disabled button.
+func TestApproveGate(t *testing.T) {
+	storeBlocking := func(env *testEnv) {
+		rec := resultstore.Record{
+			IID: 5, Ref: "group/app!5", Started: time.Now(),
+			Findings: []review.Finding{{ID: "f1", Severity: review.SeverityMajor, Body: "b"}},
+		}
+		if err := resultstore.NewStore(env.dir).Save(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("warn", func(t *testing.T) {
+		env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+			c.Gate.MinSeverity = "major"
+			c.Gate.Approvals = "warn"
+		})
+		storeBlocking(env)
+
+		code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+		if code != http.StatusOK || !strings.Contains(body, "1 finding(s) at or above major") {
+			t.Fatalf("detail missing gate warning: %d\n%s", code, body)
+		}
+		if !strings.Contains(body, "Approve anyway") {
+			t.Fatalf("approve button not relabelled:\n%s", body)
+		}
+
+		// Warn is advisory: the approval still goes through.
+		code, _ = env.post("/i/default/mr/approve", mrForm(url.Values{"sha": {"head"}}))
+		if code != http.StatusOK || !env.svc.approved {
+			t.Fatalf("approve under warn: %d approved=%v", code, env.svc.approved)
+		}
+	})
+
+	t.Run("block", func(t *testing.T) {
+		env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+			c.Gate.MinSeverity = "major"
+			c.Gate.Approvals = "block"
+		})
+		storeBlocking(env)
+
+		code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+		if code != http.StatusOK || !strings.Contains(body, "approval is blocked") {
+			t.Fatalf("detail missing block notice: %d\n%s", code, body)
+		}
+
+		code, _ = env.post("/i/default/mr/approve", mrForm(url.Values{"sha": {"head"}}))
+		if code != http.StatusConflict || env.svc.approved {
+			t.Fatalf("approve under block: %d approved=%v; want %d and no approval", code, env.svc.approved, http.StatusConflict)
+		}
+
+		// Rejecting the finding lifts the gate.
+		rec := resultstore.Record{
+			IID: 5, Ref: "group/app!5", Started: time.Now(),
+			Findings: []review.Finding{{ID: "f1", Severity: review.SeverityMajor, Body: "b", State: review.StateRejected}},
+		}
+		if err := resultstore.NewStore(env.dir).Save(rec); err != nil {
+			t.Fatal(err)
+		}
+		code, _ = env.post("/i/default/mr/approve", mrForm(url.Values{"sha": {"head"}}))
+		if code != http.StatusOK || !env.svc.approved {
+			t.Fatalf("approve after rejecting: %d approved=%v", code, env.svc.approved)
+		}
+	})
 }
 
 func TestSplitDiffView(t *testing.T) {

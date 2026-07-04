@@ -349,13 +349,33 @@ func TestValidateRejectsBadValues(t *testing.T) {
 	cfg.Publish.Mode = "yolo"
 	cfg.Checkout.Mode = "teleport"
 	cfg.GitLab.PerPage = 0
+	cfg.Publish.MinSeverity = "harsh"
+	cfg.Gate.MinSeverity = "fatal"
+	cfg.Gate.Approvals = "maybe"
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	for _, want := range []string{"publish.mode", "checkout.mode", "per_page"} {
+	for _, want := range []string{"publish.mode", "checkout.mode", "per_page", "publish.min_severity", "gate.min_severity", "gate.approvals"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %q: %v", want, err)
 		}
+	}
+}
+
+func TestValidateGateDisabledByDefault(t *testing.T) {
+	cfg := Default()
+	if cfg.Gate.Enabled() {
+		t.Error("gate enabled by default")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("defaults invalid: %v", err)
+	}
+	cfg.Gate.MinSeverity = "major"
+	if !cfg.Gate.Enabled() {
+		t.Error("gate not enabled with min_severity set")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("enabled gate invalid: %v", err)
 	}
 }

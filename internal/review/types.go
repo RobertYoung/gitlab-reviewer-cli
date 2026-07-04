@@ -49,7 +49,8 @@ const (
 	StateAccepted
 	StateRejected
 	StatePublished
-	StateFellBack // published, but as a general note because no position resolved
+	StateFellBack       // published, but as a general note because no position resolved
+	StateBelowThreshold // below publish.min_severity: visible in triage, never published
 )
 
 func (s FindingState) String() string {
@@ -62,6 +63,8 @@ func (s FindingState) String() string {
 		return "published"
 	case StateFellBack:
 		return "note"
+	case StateBelowThreshold:
+		return "below-threshold"
 	default:
 		return "pending"
 	}
@@ -84,6 +87,8 @@ func (s *FindingState) UnmarshalText(text []byte) error {
 		*s = StatePublished
 	case "note":
 		*s = StateFellBack
+	case "below-threshold":
+		*s = StateBelowThreshold
 	default:
 		return fmt.Errorf("unknown finding state %q", text)
 	}
@@ -118,6 +123,24 @@ type Finding struct {
 	// produced by the model: it publishes verbatim, without the body
 	// template or the attribution footer.
 	Manual bool `json:"manual,omitempty"`
+}
+
+// Blocking reports whether f counts against a severity gate at min: a model
+// finding at or above the threshold that has not been rejected in curation.
+// Manual comments carry no severity and never block.
+func (f Finding) Blocking(min Severity) bool {
+	return !f.Manual && f.Severity.Valid() && f.Severity.AtLeast(min) && f.State != StateRejected
+}
+
+// CountBlocking counts the findings that block a severity gate at min.
+func CountBlocking(findings []Finding, min Severity) int {
+	n := 0
+	for _, f := range findings {
+		if f.Blocking(min) {
+			n++
+		}
+	}
+	return n
 }
 
 // DiffFile points the reviewer at an on-disk diff for a changed file whose

@@ -10,6 +10,7 @@
     {{if .ApprovedBy}}<p class="ok">✓ Approved by {{join .ApprovedBy ", "}}</p>
     {{else if .ApprovalsRequired}}<p class="subtle">{{.ApprovalsLeft}} of {{.ApprovalsRequired}} required approval(s) outstanding</p>{{end}}
   {{end}}
+  {{if $c.GateBlocking}}<p class="warning">⚠ {{$c.GateBlocking}} finding(s) at or above {{$c.GateSeverity}} in the last review{{if $c.GateBlocked}} — approval is blocked until they are resolved or rejected{{end}}</p>{{end}}
 
   <div class="actions">
     <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
@@ -48,9 +49,11 @@
       {{if $c.Approvals.UserHasApproved}}
       <input type="hidden" name="action" value="unapprove">
       <button type="submit" class="button">Unapprove</button>
+      {{else if $c.GateBlocked}}
+      <button type="button" class="button" disabled title="blocked by gate.min_severity ({{$c.GateSeverity}})">✓ Approve</button>
       {{else}}
       <input type="hidden" name="sha" value="{{$c.Detail.HeadSHA}}">
-      <button type="submit" class="button ok">✓ Approve</button>
+      <button type="submit" class="button ok">{{if $c.GateBlocking}}✓ Approve anyway{{else}}✓ Approve{{end}}</button>
       {{end}}
     </form>
     {{end}}

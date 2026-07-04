@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -254,11 +255,46 @@ func TestReviewCmdFlagValidation(t *testing.T) {
 	}
 }
 
-// TestHeadlessReviewEndToEnd drives the real `review` command — gitlabx
-// against an httptest GitLab, a path-mode checkout against a local git
-// origin, and the claudecli backend against a scripted claude — and asserts
-// the JSON outcome on stdout plus the discussion posted to GitLab.
-func TestHeadlessReviewEndToEnd(t *testing.T) {
+// headlessFixture is the shared harness for headless review command tests:
+// an httptest GitLab serving MR group/app!7, a local git origin with the MR
+// head, a clone for checkout-mode=path, and a scripted claude reporting one
+// major finding on feature.go:1.
+type headlessFixture struct {
+	srvURL     string
+	baseSHA    string
+	headSHA    string
+	localClone string
+	claudePath string
+
+	// posted captures the last discussion POSTed to the fake GitLab, and how
+	// many arrived in total.
+	posted struct {
+		Count    int
+		Body     string `json:"body"`
+		Position *struct {
+			BaseSHA string `json:"base_sha"`
+			HeadSHA string `json:"head_sha"`
+			NewPath string `json:"new_path"`
+			NewLine int    `json:"new_line"`
+		} `json:"position"`
+	}
+}
+
+// args builds the command line for one run against the fixture.
+func (f *headlessFixture) args(target string, extra ...string) []string {
+	return append([]string{
+		"review", target,
+		"--gitlab-base-url", f.srvURL,
+		"--gitlab-token", "e2e-token",
+		"--checkout-mode", "path",
+		"--repo-path", f.localClone,
+		"--claude-path", f.claudePath,
+		"--agents", "bug",
+	}, extra...)
+}
+
+func newHeadlessFixture(t *testing.T) *headlessFixture {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
@@ -267,6 +303,7 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	f := &headlessFixture{}
 
 	// --- fixture git origin with an MR head commit, plus a local clone for
 	// checkout-mode=path ---
@@ -292,45 +329,36 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 	}
 	git(work, "add", ".")
 	git(work, "commit", "-q", "-m", "initial")
-	baseSHA := git(work, "rev-parse", "HEAD")
+	f.baseSHA = git(work, "rev-parse", "HEAD")
 	git(work, "checkout", "-q", "-b", "feature")
 	if err := os.WriteFile(filepath.Join(work, "feature.go"), []byte("package main // feature\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	git(work, "add", ".")
 	git(work, "commit", "-q", "-m", "feature")
-	headSHA := git(work, "rev-parse", "HEAD")
+	f.headSHA = git(work, "rev-parse", "HEAD")
 
 	origin := filepath.Join(gitBase, "group", "app.git")
 	if err := os.MkdirAll(filepath.Dir(origin), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	git("", "clone", "-q", "--bare", work, origin)
-	git(origin, "update-ref", "refs/merge-requests/7/head", headSHA)
-	localClone := filepath.Join(gitBase, "clone")
-	git("", "clone", "-q", origin, localClone)
+	git(origin, "update-ref", "refs/merge-requests/7/head", f.headSHA)
+	f.localClone = filepath.Join(gitBase, "clone")
+	git("", "clone", "-q", origin, f.localClone)
 
 	// --- httptest GitLab ---
 	featureDiff := "@@ -0,0 +1 @@\n+package main // feature\n"
-	var postedBody struct {
-		Body     string `json:"body"`
-		Position *struct {
-			BaseSHA string `json:"base_sha"`
-			HeadSHA string `json:"head_sha"`
-			NewPath string `json:"new_path"`
-			NewLine int    `json:"new_line"`
-		} `json:"position"`
-	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v4/projects/{p}/merge_requests/7", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(t, w, map[string]any{
 			"id": 1, "iid": 7, "project_id": 3,
 			"title": "Add feature", "state": "opened",
-			"source_branch": "feature", "target_branch": "main", "sha": headSHA,
+			"source_branch": "feature", "target_branch": "main", "sha": f.headSHA,
 			"references": map[string]any{"full": "group/app!7"},
 			"author":     map[string]any{"username": "alice"},
 			"web_url":    "https://gitlab.example.com/group/app/-/merge_requests/7",
-			"diff_refs":  map[string]any{"base_sha": baseSHA, "head_sha": headSHA, "start_sha": baseSHA},
+			"diff_refs":  map[string]any{"base_sha": f.baseSHA, "head_sha": f.headSHA, "start_sha": f.baseSHA},
 		})
 	})
 	mux.HandleFunc("GET /api/v4/projects/{p}/merge_requests/7/diffs", func(w http.ResponseWriter, r *http.Request) {
@@ -340,7 +368,8 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 		}})
 	})
 	mux.HandleFunc("POST /api/v4/projects/{p}/merge_requests/7/discussions", func(w http.ResponseWriter, r *http.Request) {
-		if err := json.NewDecoder(r.Body).Decode(&postedBody); err != nil {
+		f.posted.Count++
+		if err := json.NewDecoder(r.Body).Decode(&f.posted); err != nil {
 			t.Errorf("decoding posted discussion: %v", err)
 		}
 		w.WriteHeader(http.StatusCreated)
@@ -348,6 +377,7 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
+	f.srvURL = srv.URL
 
 	// --- scripted claude returning one finding on feature.go:1 ---
 	transcript := `{"type":"system","subtype":"init","session_id":"e2e","model":"m"}
@@ -357,36 +387,34 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 	if err := os.WriteFile(tPath, []byte(transcript), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	claudeDir := t.TempDir()
 	script := fmt.Sprintf("#!/bin/sh\nfor a in \"$@\"; do [ \"$a\" = --version ] && echo 2.1.0 && exit 0; done\ncat >/dev/null\ncat %q\n", tPath)
-	claudePath := filepath.Join(claudeDir, "claude")
-	if err := os.WriteFile(claudePath, []byte(script), 0o700); err != nil { //nolint:gosec // test script
+	f.claudePath = filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(f.claudePath, []byte(script), 0o700); err != nil { //nolint:gosec // test script
 		t.Fatal(err)
 	}
+	return f
+}
+
+// TestHeadlessReviewEndToEnd drives the real `review` command — gitlabx
+// against an httptest GitLab, a path-mode checkout against a local git
+// origin, and the claudecli backend against a scripted claude — and asserts
+// the JSON outcome on stdout plus the discussion posted to GitLab.
+func TestHeadlessReviewEndToEnd(t *testing.T) {
+	f := newHeadlessFixture(t)
 
 	// --- run the real command, once per target form; the MR URL's host
 	// (the httptest server) matches --gitlab-base-url ---
 	targets := []struct{ name, target string }{
 		{"ref", "group/app!7"},
-		{"url", srv.URL + "/group/app/-/merge_requests/7"},
+		{"url", f.srvURL + "/group/app/-/merge_requests/7"},
 	}
 	for _, tc := range targets {
 		t.Run(tc.name, func(t *testing.T) {
-			postedBody.Body, postedBody.Position = "", nil
+			f.posted.Count, f.posted.Body, f.posted.Position = 0, "", nil
 
 			var stdout, stderr bytes.Buffer
 			root := newRoot(&state{redactor: secret.NewRedactor()})
-			root.SetArgs([]string{
-				"review", tc.target,
-				"--publish", "immediate",
-				"--output", "json",
-				"--gitlab-base-url", srv.URL,
-				"--gitlab-token", "e2e-token",
-				"--checkout-mode", "path",
-				"--repo-path", localClone,
-				"--claude-path", claudePath,
-				"--agents", "bug",
-			})
+			root.SetArgs(f.args(tc.target, "--publish", "immediate", "--output", "json"))
 			root.SetOut(&stdout)
 			root.SetErr(&stderr)
 			if err := root.Execute(); err != nil {
@@ -431,17 +459,17 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 			}
 
 			// --- the inline discussion landed with the right position ---
-			if postedBody.Position == nil {
-				t.Fatalf("no position posted; body=%q", postedBody.Body)
+			if f.posted.Position == nil {
+				t.Fatalf("no position posted; body=%q", f.posted.Body)
 			}
-			if postedBody.Position.NewPath != "feature.go" || postedBody.Position.NewLine != 1 {
-				t.Errorf("position: %+v", postedBody.Position)
+			if f.posted.Position.NewPath != "feature.go" || f.posted.Position.NewLine != 1 {
+				t.Errorf("position: %+v", f.posted.Position)
 			}
-			if postedBody.Position.BaseSHA != baseSHA || postedBody.Position.HeadSHA != headSHA {
-				t.Errorf("SHAs: %+v (want %s / %s)", postedBody.Position, baseSHA, headSHA)
+			if f.posted.Position.BaseSHA != f.baseSHA || f.posted.Position.HeadSHA != f.headSHA {
+				t.Errorf("SHAs: %+v (want %s / %s)", f.posted.Position, f.baseSHA, f.headSHA)
 			}
-			if !strings.Contains(postedBody.Body, "E2E finding") {
-				t.Errorf("body: %q", postedBody.Body)
+			if !strings.Contains(f.posted.Body, "E2E finding") {
+				t.Errorf("body: %q", f.posted.Body)
 			}
 
 			// Progress streamed to stderr, not stdout.
@@ -449,6 +477,92 @@ func TestHeadlessReviewEndToEnd(t *testing.T) {
 				t.Errorf("expected progress on stderr, got:\n%s", stderr.String())
 			}
 		})
+	}
+}
+
+// TestHeadlessReviewGateExitCode covers gate.min_severity in headless mode:
+// blocking findings turn into the distinct gate exit code, a satisfied gate
+// exits clean, and both report the gate in the JSON output.
+func TestHeadlessReviewGateExitCode(t *testing.T) {
+	f := newHeadlessFixture(t)
+
+	run := func(t *testing.T, extra ...string) (gate *gateReport, err error) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		root := newRoot(&state{redactor: secret.NewRedactor()})
+		root.SetArgs(f.args("group/app!7", append([]string{"--output", "json"}, extra...)...))
+		root.SetOut(&stdout)
+		root.SetErr(&stderr)
+		err = root.Execute()
+		var got struct {
+			Gate *gateReport `json:"gate"`
+		}
+		if jerr := json.Unmarshal(stdout.Bytes(), &got); jerr != nil {
+			t.Fatalf("decoding stdout: %v\n%s\nstderr:\n%s", jerr, stdout.String(), stderr.String())
+		}
+		return got.Gate, err
+	}
+
+	t.Run("blocking finding fails the gate", func(t *testing.T) {
+		gate, err := run(t, "--gate-min-severity", "major")
+		var ee *exitError
+		if !errors.As(err, &ee) || ee.code != gateExitCode {
+			t.Fatalf("err = %v; want exit code %d", err, gateExitCode)
+		}
+		if !strings.Contains(err.Error(), "gate failed") {
+			t.Errorf("err = %v", err)
+		}
+		if gate == nil || gate.MinSeverity != "major" || gate.Blocking != 1 || gate.Passed {
+			t.Errorf("gate = %+v", gate)
+		}
+	})
+
+	t.Run("satisfied gate passes", func(t *testing.T) {
+		gate, err := run(t, "--gate-min-severity", "critical")
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if gate == nil || gate.Blocking != 0 || !gate.Passed {
+			t.Errorf("gate = %+v", gate)
+		}
+	})
+
+	t.Run("no gate configured reports none", func(t *testing.T) {
+		gate, err := run(t)
+		if err != nil {
+			t.Fatalf("err = %v", err)
+		}
+		if gate != nil {
+			t.Errorf("gate = %+v; want omitted", gate)
+		}
+	})
+}
+
+// TestHeadlessReviewPublishFloor covers publish.min_severity: a finding
+// below the floor is never posted to GitLab and comes back marked
+// below-threshold.
+func TestHeadlessReviewPublishFloor(t *testing.T) {
+	f := newHeadlessFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	root := newRoot(&state{redactor: secret.NewRedactor()})
+	root.SetArgs(f.args("group/app!7",
+		"--publish", "immediate", "--output", "json", "--publish-min-severity", "critical"))
+	root.SetOut(&stdout)
+	root.SetErr(&stderr)
+	if err := root.Execute(); err != nil {
+		t.Fatalf("review command failed: %v\nstderr:\n%s", err, stderr.String())
+	}
+
+	if f.posted.Count != 0 {
+		t.Errorf("posted %d discussion(s); the major finding is below the critical floor", f.posted.Count)
+	}
+	var got resultstore.Record
+	if err := json.Unmarshal(stdout.Bytes(), &got); err != nil {
+		t.Fatalf("decoding stdout: %v\n%s", err, stdout.String())
+	}
+	if len(got.Findings) != 1 || got.Findings[0].State != review.StateBelowThreshold {
+		t.Errorf("findings: %+v; want one below-threshold", got.Findings)
 	}
 }
 

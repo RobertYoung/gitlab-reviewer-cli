@@ -25,6 +25,7 @@ type Config struct {
 	Bedrock  Bedrock  `koanf:"bedrock"`
 	Checkout Checkout `koanf:"checkout"`
 	Publish  Publish  `koanf:"publish"`
+	Gate     Gate     `koanf:"gate"`
 	UI       UI       `koanf:"ui"`
 	Log      Log      `koanf:"log"`
 }
@@ -142,14 +143,35 @@ type Publish struct {
 	Mode            string `koanf:"mode"` // draft | immediate
 	AutoComment     bool   `koanf:"auto_comment"`
 	AutoMinSeverity string `koanf:"auto_min_severity"`
-	FallbackToNote  bool   `koanf:"fallback_to_note"`
-	Attribution     bool   `koanf:"attribution"`
+	// MinSeverity is the publish floor: findings below it are never posted
+	// to GitLab — they stay visible in triage, marked below-threshold. The
+	// default (info) publishes everything.
+	MinSeverity    string `koanf:"min_severity"`
+	FallbackToNote bool   `koanf:"fallback_to_note"`
+	Attribution    bool   `koanf:"attribution"`
 	// Template is a Go text/template for the comment body with fields
 	// severity, category, title, body, file. Empty means the built-in
 	// "**[severity · category] title**" layout; set e.g. "{{.body}}" for
 	// comments with no machine-looking header.
 	Template string `koanf:"template"`
 }
+
+// Gate ties the review outcome to a severity policy: findings at or above
+// min_severity are "blocking". The headless review command exits non-zero
+// while blocking findings remain, and approvals controls how the TUI/GUI
+// approve action behaves. Advisory only: GitLab itself is not restricted.
+type Gate struct {
+	// MinSeverity marks findings at or above it as blocking; empty disables
+	// the gate entirely.
+	MinSeverity string `koanf:"min_severity"`
+	// Approvals is what approving from the tool does while blocking findings
+	// remain: off (ignore the gate), warn (ask for confirmation), or block
+	// (refuse). Only consulted when min_severity is set.
+	Approvals string `koanf:"approvals"`
+}
+
+// Enabled reports whether a gate severity is configured.
+func (g Gate) Enabled() bool { return g.MinSeverity != "" }
 
 type UI struct {
 	// DiffView is the diff layout in the MR detail screen: unified or
@@ -201,7 +223,11 @@ func Default() Config {
 		Publish: Publish{
 			Mode:            "draft",
 			AutoMinSeverity: "major",
+			MinSeverity:     "info",
 			FallbackToNote:  true,
+		},
+		Gate: Gate{
+			Approvals: "warn",
 		},
 		UI: UI{
 			DiffView:     "unified",
@@ -294,6 +320,17 @@ func (c Config) Validate() error {
 		errs = append(errs, err)
 	}
 	if err := oneOf("publish.auto_min_severity", c.Publish.AutoMinSeverity, Severities...); err != nil {
+		errs = append(errs, err)
+	}
+	if err := oneOf("publish.min_severity", c.Publish.MinSeverity, Severities...); err != nil {
+		errs = append(errs, err)
+	}
+	if c.Gate.MinSeverity != "" {
+		if err := oneOf("gate.min_severity", c.Gate.MinSeverity, Severities...); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := oneOf("gate.approvals", c.Gate.Approvals, "off", "warn", "block"); err != nil {
 		errs = append(errs, err)
 	}
 	if c.Publish.Template != "" {
