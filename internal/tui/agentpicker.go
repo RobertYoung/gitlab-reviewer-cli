@@ -61,6 +61,13 @@ type agentPicker struct {
 	// localRepo is the user's local clone (path/root checkout modes); when
 	// set, repo agents are read from it instead of the API.
 	localRepo string
+
+	// prevHead is the head commit of the MR's newest stored review; when set
+	// the run defaults to an incremental re-review of the changes since it,
+	// carrying the previous findings (and their curation states) forward.
+	// full is the user's override to scan the whole diff again.
+	prevHead string
+	full     bool
 }
 
 // projectAgentsMsg delivers the catalog extended with repo-fetched agents,
@@ -90,6 +97,12 @@ func newAgentPicker(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff
 
 	cfg := deps.cfgFor(detail.ProjectPath)
 	p.localRepo, _ = checkout.LocalRepoDir(cfg.Checkout, cfg.GitLab.BaseURL, detail.ProjectPath)
+
+	// A stored review with a tracked head makes an incremental run possible;
+	// the runner re-verifies (and falls back) when the run actually starts.
+	if prev, err := deps.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
+		p.prevHead = prev.HeadSHA
+	}
 
 	// Per-agent model overrides: the remembered picks for this project, plus
 	// the "" default entry ahead of the configured model list for the chooser.
@@ -130,6 +143,9 @@ func (p *agentPicker) Title() string {
 func (p *agentPicker) Hints() string {
 	if p.choosing {
 		return "↑/↓ move · enter choose model · esc cancel"
+	}
+	if p.prevHead != "" {
+		return "space toggle · m model · a all · n none · f full/incremental · enter start review · esc back"
 	}
 	return "space toggle · m model · a all · n none · enter start review · esc back"
 }
@@ -237,6 +253,10 @@ func (p *agentPicker) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			}
 		case "n":
 			p.checked = map[string]bool{}
+		case "f":
+			if p.prevHead != "" {
+				p.full = !p.full
+			}
 		case "enter":
 			selected := p.selected()
 			if len(selected) == 0 {
@@ -245,7 +265,8 @@ func (p *agentPicker) Update(msg tea.Msg) (Screen, tea.Cmd) {
 			models := p.selectedModels(selected)
 			p.deps.Selection.Save(p.detail.ProjectPath, selected)
 			p.deps.Selection.SaveModels(p.detail.ProjectPath, models)
-			return p, popScreens(1, newReviewRun(p.deps, p.detail, p.diffs, p.commits, p.manual, p.manualReport, selected, models))
+			incremental := p.prevHead != "" && !p.full
+			return p, popScreens(1, newReviewRun(p.deps, p.detail, p.diffs, p.commits, p.manual, p.manualReport, selected, models, incremental))
 		case "esc", "q":
 			return p, popScreen
 		}
@@ -372,6 +393,13 @@ func (p *agentPicker) View() string {
 		b.WriteString(truncate(line, max(p.width-2, 20)) + "\n")
 	}
 	fmt.Fprintf(&b, "\n%s\n", subtleStyle.Render(fmt.Sprintf("%d of %d selected", len(p.selected()), len(p.agents))))
+	if p.prevHead != "" {
+		scope := fmt.Sprintf("incremental: reviewing the changes since %.8s, carrying previous findings forward (f to scan the full diff)", p.prevHead)
+		if p.full {
+			scope = "full re-review: the whole diff will be scanned (f for incremental)"
+		}
+		b.WriteString(subtleStyle.Render(truncate(scope, max(p.width-2, 20))) + "\n")
+	}
 	if p.fetching {
 		b.WriteString(subtleStyle.Render("looking for agents shipped in the repo…") + "\n")
 	}

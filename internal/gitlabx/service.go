@@ -33,6 +33,12 @@ type Service interface {
 	// (paginating internally), for commit-message hygiene checks.
 	ListCommits(ctx context.Context, project any, iid int64) ([]Commit, error)
 
+	// CompareRevisions returns the file diffs between two commits (a direct
+	// two-dot comparison, not merge-base). Used by incremental re-review to
+	// diff the MR's new head against the last reviewed one; an unreachable
+	// from-commit (force-push, GC) surfaces as an error.
+	CompareRevisions(ctx context.Context, project any, from, to string) ([]FileDiff, error)
+
 	// GetMergeRequestTemplate resolves the project's default MR description
 	// template (including group-inherited ones), or "" if none is set.
 	GetMergeRequestTemplate(ctx context.Context, project any) (string, error)

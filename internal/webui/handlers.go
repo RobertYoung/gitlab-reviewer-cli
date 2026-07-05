@@ -218,6 +218,10 @@ type mrDetailContent struct {
 	GateBlocking int
 	GateSeverity string
 	GateBlocked  bool
+	// PrevReviewHead is the head commit of the MR's newest stored review;
+	// when set the review form offers the full-re-review override (the run
+	// defaults to reviewing only the changes pushed since that commit).
+	PrevReviewHead string
 }
 
 // agentOption is one review agent offered on the run-review form.
@@ -341,6 +345,9 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 			content.GateSeverity = gate.MinSeverity
 			content.GateBlocked = gate.Approvals == "block"
 		}
+	}
+	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
+		content.PrevReviewHead = prev.HeadSHA
 	}
 	s.render(w, http.StatusOK, "mrdetail", pageData{Title: detail.Ref(), Instance: inst, Content: content})
 }

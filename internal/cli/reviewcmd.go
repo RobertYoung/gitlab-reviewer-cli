@@ -33,6 +33,7 @@ func newReviewCmd(st *state) *cobra.Command {
 	var (
 		publishMode string
 		output      string
+		full        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "review <project!iid | MR URL>",
@@ -48,18 +49,26 @@ func newReviewCmd(st *state) *cobra.Command {
 			"By default nothing is posted to GitLab (--publish none): findings are\n" +
 			"only stored and reported. --publish immediate posts every finding as\n" +
 			"it resolves; --publish draft collects them into a draft review and\n" +
-			"publishes it in one action.",
+			"publishes it in one action.\n\n" +
+			"When the MR already has a stored review, the run is incremental: only\n" +
+			"the changes pushed since the last reviewed commit go through the review\n" +
+			"passes, and the previous findings — including their accepted, rejected,\n" +
+			"and published states — carry forward (findings whose code changed are\n" +
+			"dropped). It falls back to a full review after a rebase or when the\n" +
+			"last reviewed commit is unreachable. Pass --full to scan the entire\n" +
+			"diff again regardless.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHeadlessReview(cmd, st, args[0], publishMode, output)
+			return runHeadlessReview(cmd, st, args[0], publishMode, output, full)
 		},
 	}
 	cmd.Flags().StringVar(&publishMode, "publish", "none", "publish findings to the MR: none|draft|immediate")
 	cmd.Flags().StringVar(&output, "output", "text", "result format on stdout: text|json")
+	cmd.Flags().BoolVar(&full, "full", false, "review the whole diff even when a stored review allows an incremental run")
 	return cmd
 }
 
-func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output string) error {
+func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output string, full bool) error {
 	switch publishMode {
 	case "none", "draft", "immediate":
 	default:
@@ -145,9 +154,10 @@ func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output s
 			}
 			return co.Path, co.Close, nil
 		},
-		Catalog: agents.NewCatalog(config.DefaultAgentsDir()),
-		Logs:    runlog.NewStore(reviewsDir),
-		Results: results,
+		Catalog:     agents.NewCatalog(config.DefaultAgentsDir()),
+		Logs:        runlog.NewStore(reviewsDir),
+		Results:     results,
+		Incremental: !full,
 	}
 	out := r.Run(ctx, *detail, diffs, commits, emit)
 
@@ -220,10 +230,13 @@ func gateOutcome(gate config.Gate, findings []review.Finding) *gateReport {
 	return &gateReport{MinSeverity: gate.MinSeverity, Blocking: blocking, Passed: blocking == 0}
 }
 
-// publishHeadless posts every finding through the shared publisher, updating
-// each finding's state in place, and returns how many failed. In draft mode
-// the pending review is published in one action at the end — the draft
-// grouping is used for atomicity, not for later human confirmation; use
+// publishHeadless posts every publishable finding through the shared
+// publisher, updating each finding's state in place, and returns how many
+// failed. Findings carried forward from a previous review in a decided
+// state (already published, fell back to a note, or rejected) are left
+// alone, so an incremental run only posts what is new. In draft mode the
+// pending review is published in one action at the end — the draft grouping
+// is used for atomicity, not for later human confirmation; use
 // --publish none when a human should stay in the loop.
 func publishHeadless(ctx context.Context, svc gitlabx.Service, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, cfg config.Config, rec *resultstore.Record, draft bool, emit func(string)) int {
 	pub, err := publisher.New(svc, detail, diffs, cfg.Publish)
@@ -235,6 +248,10 @@ func publishHeadless(ctx context.Context, svc gitlabx.Service, detail gitlabx.MR
 	failed, posted := 0, 0
 	// Sequential on purpose: GitLab rate limits are unkind to bursts.
 	for i, f := range rec.Findings {
+		switch f.State {
+		case review.StatePublished, review.StateFellBack, review.StateRejected:
+			continue
+		}
 		postCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		state, err := pub.PublishOne(postCtx, f)
 		cancel()

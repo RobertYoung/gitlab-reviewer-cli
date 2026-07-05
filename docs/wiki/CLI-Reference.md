@@ -59,13 +59,14 @@ gitlab-reviewer review https://gitlab.example.com/mygroup/myapp/-/merge_requests
 |---|---|---|
 | `--publish` | `none` | `none` (store/report only), `draft` (one review, published in one action), `immediate` |
 | `--output` | `text` | `text` or `json` on stdout |
+| `--full` | off | scan the whole diff; without it a stored review makes the run incremental (only changes since the last reviewed commit, previous findings carried forward) |
 
 With [`gate.min_severity`](Configuration-Reference.md#gate) configured
 (flag `--gate-min-severity`), the command exits `2` when the review finds
 blocking findings, so CI pipelines can fail the job.
 
-See [Headless Mode](Headless-Mode.md) for publish semantics, exit codes,
-and a GitLab CI example.
+See [Headless Mode](Headless-Mode.md) for incremental re-review, publish
+semantics, exit codes, and a GitLab CI example.
 
 ## `gitlab-reviewer config`
 

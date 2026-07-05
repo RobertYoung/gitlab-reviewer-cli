@@ -33,6 +33,11 @@
         </fieldset>
         {{range $c.AgentWarnings}}<p class="warning">⚠ {{.}}</p>{{end}}
       </details>
+      {{if $c.PrevReviewHead}}
+      <label class="full-review" title="A stored review exists at {{printf "%.8s" $c.PrevReviewHead}}. By default only the changes pushed since then are reviewed and the previous findings — with their accepted/rejected states — carry forward; tick to scan the entire diff again.">
+        <input type="checkbox" name="full" value="1"> full re-review
+      </label>
+      {{end}}
     </form>
     <form method="post" action="{{$c.Nav.ChatURL}}">
       <input type="hidden" name="project" value="{{$c.Nav.Project}}">

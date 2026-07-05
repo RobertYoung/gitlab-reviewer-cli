@@ -106,6 +106,10 @@ func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit
 	return []gitlabx.Commit{{ShortID: "abc1234", Title: "add import"}}, nil
 }
 
+func (f *fakeService) CompareRevisions(context.Context, any, string, string) ([]gitlabx.FileDiff, error) {
+	return nil, errors.New("no comparison available")
+}
+
 func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) { return "", nil }
 
 func (f *fakeService) ListDirectoryFiles(_ context.Context, _ any, dir, _ string) ([]gitlabx.RepoFile, error) {
@@ -1214,5 +1218,23 @@ func TestChatUnavailableWithoutChatter(t *testing.T) {
 	code, body := env.post("/i/default/mr/chat/start", mrForm(nil))
 	if code != http.StatusNotImplemented || !strings.Contains(body, "chat is not available") {
 		t.Fatalf("want 501, got %d\n%s", code, body)
+	}
+}
+
+func TestMRDetailOffersFullReReview(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	// No stored review yet: nothing to be incremental against, no override.
+	_, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if strings.Contains(body, `name="full"`) {
+		t.Fatalf("full re-review offered without a stored review:\n%s", body)
+	}
+
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
+	waitRun(t, env.srv)
+
+	_, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	if !strings.Contains(body, `name="full"`) || !strings.Contains(body, "full re-review") {
+		t.Fatalf("full re-review override missing once a review is stored:\n%s", body)
 	}
 }

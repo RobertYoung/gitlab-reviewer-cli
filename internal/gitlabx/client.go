@@ -293,6 +293,35 @@ func (c *Client) ListDiffs(ctx context.Context, project any, iid int64) ([]FileD
 	return out, nil
 }
 
+// CompareRevisions diffs two commits directly (straight/two-dot, so the
+// result is exactly what changed between the trees, even after an amend or
+// force-push where from is no longer an ancestor of to).
+func (c *Client) CompareRevisions(ctx context.Context, project any, from, to string) ([]FileDiff, error) {
+	cmp, _, err := c.gl.Repositories.Compare(project, &gitlab.CompareOptions{
+		From:     gitlab.Ptr(from),
+		To:       gitlab.Ptr(to),
+		Straight: gitlab.Ptr(true),
+	}, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("comparing %s..%s: %w", from, to, err)
+	}
+	if cmp.CompareTimeout {
+		return nil, fmt.Errorf("comparing %s..%s: GitLab timed out computing the comparison", from, to)
+	}
+	out := make([]FileDiff, 0, len(cmp.Diffs))
+	for _, d := range cmp.Diffs {
+		out = append(out, FileDiff{
+			OldPath:     d.OldPath,
+			NewPath:     d.NewPath,
+			Diff:        d.Diff,
+			NewFile:     d.NewFile,
+			RenamedFile: d.RenamedFile,
+			DeletedFile: d.DeletedFile,
+		})
+	}
+	return out, nil
+}
+
 func (c *Client) ListCommits(ctx context.Context, project any, iid int64) ([]Commit, error) {
 	var out []Commit
 	opts := &gitlab.GetMergeRequestCommitsOptions{

@@ -184,6 +184,11 @@ type Request struct {
 	// AgentPrompt is the agent's persona/focus text, appended to the shared
 	// system prompt by the backend.
 	AgentPrompt string
+	// Incremental marks a delta review: Diffs holds only the changes pushed
+	// since LastReviewedSHA (the previous review's head commit) instead of
+	// the whole MR diff.
+	Incremental     bool
+	LastReviewedSHA string
 
 	Model        string
 	Timeout      time.Duration

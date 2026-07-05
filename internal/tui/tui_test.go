@@ -32,6 +32,8 @@ type fakeService struct {
 	lastPage        gitlabx.Page
 	detail          *gitlabx.MRDetail
 	diffs           []gitlabx.FileDiff
+	compareDiffs    []gitlabx.FileDiff
+	compareErr      error
 	commits         []gitlabx.Commit
 	template        string
 	repoFiles       []gitlabx.RepoFile
@@ -70,6 +72,10 @@ func (f *fakeService) ListDiffs(context.Context, any, int64) ([]gitlabx.FileDiff
 
 func (f *fakeService) ListCommits(context.Context, any, int64) ([]gitlabx.Commit, error) {
 	return f.commits, nil
+}
+
+func (f *fakeService) CompareRevisions(context.Context, any, string, string) ([]gitlabx.FileDiff, error) {
+	return f.compareDiffs, f.compareErr
 }
 
 func (f *fakeService) GetMergeRequestTemplate(context.Context, any) (string, error) {
@@ -914,7 +920,7 @@ func TestReviewRunHappyFlow(t *testing.T) {
 		return "/tmp/worktree", func(context.Context) error { cleanedUp = true; return nil }, nil
 	}
 
-	s := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil)
+	s := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil, false)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 
@@ -1115,7 +1121,7 @@ func TestOpenBrowserOnMRScreens(t *testing.T) {
 	deps.Logs = runlog.NewStore(t.TempDir())
 
 	screens := map[string]Screen{
-		"reviewrun": newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil),
+		"reviewrun": newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil, false),
 		"findings":  newFindings(deps, *detail, diffs, result, nil, nil, nil),
 		"publish":   newPublish(deps, *detail, diffs, result.Findings, publishOpts{}),
 		"history":   newReviewHistory(deps, *detail, diffs),
@@ -1190,7 +1196,7 @@ func TestReviewRunRebaseWarning(t *testing.T) {
 		return "/tmp/worktree", func(context.Context) error { return nil }, nil
 	}
 
-	s := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil)
+	s := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil, false)
 	var screen Screen = s
 	screen, _ = screen.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
 	screen.Init()
@@ -1227,7 +1233,7 @@ func TestReviewRunCheckoutFailure(t *testing.T) {
 	deps.Checkout = func(context.Context, gitlabx.MRDetail, func(string)) (string, func(context.Context) error, error) {
 		return "", nil, errors.New("clone exploded")
 	}
-	s := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil)
+	s := newReviewRun(deps, *detail, diffs, nil, nil, nil, []string{"bug"}, nil, false)
 	var screen Screen = s
 	screen.Init()
 	for range 10 {

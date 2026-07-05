@@ -16,6 +16,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 )
 
 func testCfg() config.Config {
@@ -128,10 +129,18 @@ func TestBuildRequestsMultiPassDiffFilesOnce(t *testing.T) {
 	}
 }
 
-// fakeSvc satisfies gitlabx.Service for the one method the runner calls.
-type fakeSvc struct{ gitlabx.Service }
+// fakeSvc satisfies gitlabx.Service for the methods the runner calls.
+type fakeSvc struct {
+	gitlabx.Service
+	compareDiffs []gitlabx.FileDiff
+	compareErr   error
+}
 
 func (fakeSvc) GetMergeRequestTemplate(context.Context, any) (string, error) { return "", nil }
+
+func (f fakeSvc) CompareRevisions(context.Context, any, string, string) ([]gitlabx.FileDiff, error) {
+	return f.compareDiffs, f.compareErr
+}
 
 // fakeReviewer records requests and can fail per agent, tracking the
 // maximum number of concurrent Review calls.
@@ -142,6 +151,8 @@ type fakeReviewer struct {
 	maxIn    atomic.Int32
 	fail     map[string]bool
 	delay    time.Duration
+	// findings overrides the single default finding each pass returns.
+	findings []review.Finding
 }
 
 func (f *fakeReviewer) Name() string                         { return "fake" }
@@ -167,9 +178,13 @@ func (f *fakeReviewer) Review(_ context.Context, req review.Request, onEvent fun
 	if f.fail[req.AgentName] {
 		return nil, errors.New("boom")
 	}
+	findings := f.findings
+	if findings == nil {
+		findings = []review.Finding{{ID: "f001", File: "a.go", Title: "t-" + req.AgentName, Body: "b"}}
+	}
 	return &review.Result{
 		Summary:  "summary from " + req.AgentName,
-		Findings: []review.Finding{{ID: "f001", File: "a.go", Title: "t-" + req.AgentName, Body: "b"}},
+		Findings: append([]review.Finding(nil), findings...),
 		CostUSD:  0.10,
 	}, nil
 }
@@ -376,6 +391,239 @@ func TestRunProjectAgents(t *testing.T) {
 		t.Errorf("expected a note about the unselected repo agent, got %v", lines)
 	}
 }
+
+func intp(n int) *int { return &n }
+
+// incrementalDetail is an MR whose diff refs distinguish the baseline SHAs.
+func incrementalDetail(headSHA string) gitlabx.MRDetail {
+	return gitlabx.MRDetail{
+		MRSummary: gitlabx.MRSummary{ProjectPath: "group/app", IID: 7, Title: "T"},
+		DiffRefs:  gitlabx.DiffRefs{BaseSHA: "base1", HeadSHA: headSHA, StartSHA: "start1"},
+	}
+}
+
+// previousRecord is a stored review at head1 with one finding that survives
+// the delta below (kept.go) and one whose line the delta changes (touched.go:5).
+func previousRecord() resultstore.Record {
+	return resultstore.Record{
+		IID: 7, Ref: "group/app!7", Title: "T", Started: time.Unix(100, 0),
+		BaseSHA: "base1", HeadSHA: "head1",
+		Findings: []review.Finding{
+			{ID: "f001", File: "kept.go", Line: review.LineRef{NewLine: intp(3)}, State: review.StatePublished, Title: "carried"},
+			{ID: "f002", File: "touched.go", Line: review.LineRef{NewLine: intp(5)}, State: review.StateAccepted, Title: "stale"},
+		},
+	}
+}
+
+func mrDiffsForIncremental() []gitlabx.FileDiff {
+	return []gitlabx.FileDiff{
+		{OldPath: "kept.go", NewPath: "kept.go", Diff: "@@ -3 +3 @@\n-y\n+z\n"},
+		{OldPath: "touched.go", NewPath: "touched.go", Diff: "@@ -5 +5 @@\n-old\n+new\n"},
+	}
+}
+
+func TestRunIncrementalReviewsOnlyTheDelta(t *testing.T) {
+	rev := &fakeReviewer{}
+	r := fanOutRunner(t, rev, []string{"bug"})
+	r.Results = resultstore.NewStore(t.TempDir())
+	r.Incremental = true
+	if err := r.Results.Save(previousRecord()); err != nil {
+		t.Fatal(err)
+	}
+	r.Svc = fakeSvc{compareDiffs: []gitlabx.FileDiff{
+		{OldPath: "touched.go", NewPath: "touched.go", Diff: "@@ -5 +5 @@\n-old\n+new\n"},
+	}}
+
+	out := r.Run(context.Background(), incrementalDetail("head2"), mrDiffsForIncremental(), nil, nil)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	// The agent pass sees only the delta, flagged as incremental.
+	if len(rev.reqs) != 1 {
+		t.Fatalf("review calls = %d, want 1", len(rev.reqs))
+	}
+	req := rev.reqs[0]
+	if len(req.Diffs) != 1 || req.Diffs[0].NewPath != "touched.go" {
+		t.Errorf("reviewed diffs: %+v", req.Diffs)
+	}
+	if !req.Incremental || req.LastReviewedSHA != "head1" {
+		t.Errorf("incremental request markers: %+v/%q", req.Incremental, req.LastReviewedSHA)
+	}
+	// Findings: the carried one first (state intact), then the agent's new
+	// one; the stale one is dropped. IDs renumbered to stay unique.
+	fs := out.Result.Findings
+	if len(fs) != 2 {
+		t.Fatalf("findings = %+v", fs)
+	}
+	if fs[0].Title != "carried" || fs[0].State != review.StatePublished || fs[0].File != "kept.go" {
+		t.Errorf("carried finding: %+v", fs[0])
+	}
+	if fs[1].Title != "t-bug" || fs[1].State != review.StatePending {
+		t.Errorf("new finding: %+v", fs[1])
+	}
+	if fs[0].ID == fs[1].ID {
+		t.Errorf("finding IDs collide: %v / %v", fs[0].ID, fs[1].ID)
+	}
+	// The record is keyed to the new head, ready to baseline the next run.
+	if out.Rec == nil || out.Rec.HeadSHA != "head2" || out.Rec.BaseSHA != "base1" {
+		t.Errorf("record SHAs: %+v", out.Rec)
+	}
+	var noted bool
+	for _, w := range out.Result.Warnings {
+		if strings.Contains(w, "incremental review") && strings.Contains(w, "1 dropped") {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("warnings = %v, want an incremental note", out.Result.Warnings)
+	}
+}
+
+// TestRunIncrementalDropsOldSideAnchors: an incremental pass reviews the
+// delta diff, whose old side counts lines of the last reviewed head — not
+// of the MR diff's base — so a removed-line anchor from such a pass cannot
+// name a GitLab position. The runner strips it (the finding falls back to a
+// file-level note) while leaving carried base-relative anchors alone.
+func TestRunIncrementalDropsOldSideAnchors(t *testing.T) {
+	rev := &fakeReviewer{findings: []review.Finding{
+		{ID: "f001", File: "touched.go", Line: review.LineRef{OldLine: intp(5)}, Title: "on a removed line", Body: "b"},
+		{ID: "f002", File: "touched.go", Line: review.LineRef{NewLine: intp(5)}, Title: "on a new line", Body: "b"},
+	}}
+	r := fanOutRunner(t, rev, []string{"bug"})
+	r.Results = resultstore.NewStore(t.TempDir())
+	r.Incremental = true
+	prev := previousRecord()
+	prev.Findings = append(prev.Findings, review.Finding{
+		ID: "f003", File: "kept.go", Line: review.LineRef{OldLine: intp(9)}, State: review.StateRejected, Title: "carried removed-line",
+	})
+	if err := r.Results.Save(prev); err != nil {
+		t.Fatal(err)
+	}
+	r.Svc = fakeSvc{compareDiffs: []gitlabx.FileDiff{
+		{OldPath: "touched.go", NewPath: "touched.go", Diff: "@@ -5 +5 @@\n-old\n+new\n"},
+	}}
+
+	out := r.Run(context.Background(), incrementalDetail("head2"), mrDiffsForIncremental(), nil, nil)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	byTitle := map[string]review.Finding{}
+	for _, f := range out.Result.Findings {
+		byTitle[f.Title] = f
+	}
+	if f := byTitle["on a removed line"]; f.Line.OldLine != nil || f.Line.NewLine != nil {
+		t.Errorf("old-side anchor not stripped: %+v", f)
+	}
+	if f := byTitle["on a new line"]; f.Line.NewLine == nil || *f.Line.NewLine != 5 {
+		t.Errorf("new-side anchor lost: %+v", f)
+	}
+	// The carried finding's old line references the MR base and stays.
+	if f := byTitle["carried removed-line"]; f.Line.OldLine == nil || *f.Line.OldLine != 9 || f.State != review.StateRejected {
+		t.Errorf("carried anchor: %+v", f)
+	}
+}
+
+func TestRunIncrementalUnchangedHeadSkipsAgents(t *testing.T) {
+	rev := &fakeReviewer{}
+	r := fanOutRunner(t, rev, []string{"bug"})
+	r.Results = resultstore.NewStore(t.TempDir())
+	r.Incremental = true
+	if err := r.Results.Save(previousRecord()); err != nil {
+		t.Fatal(err)
+	}
+
+	out := r.Run(context.Background(), incrementalDetail("head1"), mrDiffsForIncremental(), nil, nil)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	if len(rev.reqs) != 0 {
+		t.Fatalf("review calls = %d, want none for an unchanged head", len(rev.reqs))
+	}
+	if len(out.Result.Findings) != 2 || out.Result.Findings[0].State != review.StatePublished {
+		t.Errorf("carried findings: %+v", out.Result.Findings)
+	}
+	if !strings.Contains(out.Result.Summary, "No reviewable changes") {
+		t.Errorf("summary = %q", out.Result.Summary)
+	}
+}
+
+func TestRunIncrementalFallsBackToFull(t *testing.T) {
+	rebasedPrev := previousRecord()
+	rebasedPrev.BaseSHA = "otherbase"
+	untrackedPrev := previousRecord()
+	untrackedPrev.BaseSHA, untrackedPrev.HeadSHA = "", ""
+
+	tests := []struct {
+		name   string
+		prev   *resultstore.Record
+		svc    fakeSvc
+		reason string
+	}{
+		{"no stored review", nil, fakeSvc{}, "no stored review"},
+		{"record without SHAs", &untrackedPrev, fakeSvc{}, "predates commit tracking"},
+		{"rebased since last review", &rebasedPrev, fakeSvc{}, "rebased"},
+		{"stored head unreachable", ptr(previousRecord()), fakeSvc{compareErr: errors.New("404 not found")}, "cannot compare"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rev := &fakeReviewer{}
+			r := fanOutRunner(t, rev, []string{"bug"})
+			r.Results = resultstore.NewStore(t.TempDir())
+			r.Incremental = true
+			r.Svc = tt.svc
+			if tt.prev != nil {
+				if err := r.Results.Save(*tt.prev); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var lines []string
+			out := r.Run(context.Background(), incrementalDetail("head2"), mrDiffsForIncremental(), nil, func(s string) { lines = append(lines, s) })
+			if out.Err != nil {
+				t.Fatal(out.Err)
+			}
+			// Full review: the agent sees the whole MR diff, unmarked.
+			if len(rev.reqs) != 1 || len(rev.reqs[0].Diffs) != 2 || rev.reqs[0].Incremental {
+				t.Errorf("requests: %+v", rev.reqs)
+			}
+			var explained bool
+			for _, l := range lines {
+				if strings.Contains(l, tt.reason) && strings.Contains(l, "full review") {
+					explained = true
+				}
+			}
+			if !explained {
+				t.Errorf("progress lines %v missing fallback reason %q", lines, tt.reason)
+			}
+		})
+	}
+}
+
+func TestRunIncrementalDeltaAllExcluded(t *testing.T) {
+	rev := &fakeReviewer{}
+	r := fanOutRunner(t, rev, []string{"bug"})
+	r.Cfg.Review.Exclude = []string{"**/go.sum"}
+	r.Results = resultstore.NewStore(t.TempDir())
+	r.Incremental = true
+	if err := r.Results.Save(previousRecord()); err != nil {
+		t.Fatal(err)
+	}
+	r.Svc = fakeSvc{compareDiffs: []gitlabx.FileDiff{
+		{OldPath: "go.sum", NewPath: "go.sum", Diff: "@@ -1 +1 @@\n-a\n+b\n"},
+	}}
+
+	out := r.Run(context.Background(), incrementalDetail("head2"), mrDiffsForIncremental(), nil, nil)
+	if out.Err != nil {
+		t.Fatal(out.Err)
+	}
+	if len(rev.reqs) != 0 {
+		t.Fatalf("review calls = %d, want none when the delta is fully excluded", len(rev.reqs))
+	}
+	if len(out.Result.Findings) != 2 {
+		t.Errorf("carried findings: %+v", out.Result.Findings)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
 
 func TestRunSeverityHintInPrompt(t *testing.T) {
 	a := agents.Agent{Name: "x", Prompt: "P", Severity: review.SeverityMajor}

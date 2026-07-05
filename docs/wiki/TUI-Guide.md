@@ -114,12 +114,21 @@ to `review.agents`), and saved when you start the review.
 | `↑/↓` `j/k` | move |
 | `space` | toggle agent |
 | `a` / `n` | select all / none |
+| `f` | toggle full re-review ↔ incremental (shown when the MR has a stored review) |
 | `enter` | start the review |
 | `esc` / `q` | back |
 
 In `clone` checkout mode, repo-shipped agents are fetched over the GitLab
 API in the background and appear in the picker when they arrive; invalid
 definitions are listed with a warning.
+
+When the MR already has a stored review, the run defaults to an
+**incremental re-review**: only the changes pushed since the last reviewed
+commit go through the review passes, and the previous findings — with
+their accepted/rejected/published states — carry forward (findings whose
+code changed are dropped). It falls back to a full review automatically
+after a rebase or when the stored commit is unreachable; press `f` to
+force scanning the entire diff.
 
 ## Review run
 

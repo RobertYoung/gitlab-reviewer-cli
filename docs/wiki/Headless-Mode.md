@@ -25,6 +25,7 @@ straight from the browser (a trailing `/diffs`, query string, or
 |---|---|---|
 | `--publish` | `none` | what to do with findings: `none`, `draft`, or `immediate` |
 | `--output` | `text` | result format on stdout: `text` or `json` |
+| `--full` | off | review the whole diff even when a stored review allows an [incremental run](#incremental-re-review) |
 
 Every configuration setting is also available as a persistent flag,
 environment variable, or settings-file key with the usual precedence
@@ -33,6 +34,30 @@ entirely by environment variables — see the
 [Configuration Reference](Configuration-Reference.md). `--agents`,
 `--max-budget-usd`, and `--review-timeout` are the ones most worth pinning
 in automation.
+
+## Incremental re-review
+
+When the MR already has a stored review, the run is **incremental by
+default**: the new head is compared against the last reviewed commit and
+only the changed files go through the review passes — faster, cheaper, and
+it does not re-surface findings a human already triaged.
+
+- Findings from the previous review **carry forward with their curation
+  states** (pending, accepted, rejected, published). Findings whose anchor
+  lines were changed or removed since the last review are dropped (each
+  drop is reported on stderr).
+- Already-published or rejected findings are never re-posted by
+  `--publish`; only new (and still-pending) findings are.
+- If the head has not moved at all, no review passes run: the previous
+  findings simply carry into a fresh record.
+- The run **falls back to a full review** — with the reason on stderr —
+  when there is no stored review yet, the MR was rebased (the diff base
+  moved), the stored record predates commit tracking, or the last reviewed
+  commit is unreachable (force-push, GC).
+
+`--full` forces a full scan of the entire diff regardless. Pushed-commit
+pipeline jobs stay cheap and low-noise with the default; use `--full` for
+a periodic deep pass or after changing agents/instructions.
 
 ## Publish semantics
 

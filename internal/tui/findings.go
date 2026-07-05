@@ -74,17 +74,22 @@ func newFindings(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, r
 
 	// The publish floor: findings below publish.min_severity are marked up
 	// front so triage shows they will never reach GitLab; the publisher
-	// enforces the floor again at publish time.
+	// enforces the floor again at publish time. Only pending findings are
+	// marked — an incremental run carries forward already-curated
+	// (published, rejected) findings whose states must survive.
 	floor := review.Severity(cfg.Publish.MinSeverity)
 	for i := range items {
-		if items[i].Severity.Valid() && !items[i].Severity.AtLeast(floor) {
+		if items[i].State == review.StatePending &&
+			items[i].Severity.Valid() && !items[i].Severity.AtLeast(floor) {
 			items[i].State = review.StateBelowThreshold
 		}
 	}
 
 	// auto_comment: findings at or above the severity threshold are
 	// accepted up front and published without confirmation; weaker ones
-	// still go through interactive curation.
+	// still go through interactive curation. Only pending findings qualify:
+	// an incremental run carries forward already-curated (published,
+	// rejected) findings whose states must survive.
 	if cfg.Publish.AutoComment {
 		for i := range items {
 			if items[i].State == review.StatePending &&

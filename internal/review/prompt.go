@@ -96,6 +96,14 @@ func BuildUserPrompt(req Request) string {
 		b.WriteString("\n")
 	}
 
+	if req.Incremental {
+		sha := req.LastReviewedSHA
+		if len(sha) > 8 {
+			sha = sha[:8]
+		}
+		fmt.Fprintf(&b, "\nThis is an incremental re-review: an earlier review already covered this\nMR up to commit %s and its findings were carried forward. The diff below\nshows only the changes pushed since that commit; report findings only on\nthese changes. The checkout is at the new head, so the full context is on\ndisk as usual.\n", sha)
+	}
+
 	if len(req.Diffs) > 0 {
 		b.WriteString("\nThe diff under review follows. Each hunk header shows old and new line\nnumbers; report line numbers consistent with these headers.\n")
 		for _, d := range req.Diffs {

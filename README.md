@@ -147,9 +147,12 @@ gitlab-reviewer review "$CI_PROJECT_PATH!$CI_MERGE_REQUEST_IID" --publish draft
 Progress streams to stderr, the outcome to stdout (`text` or `json`), and
 the exit code is non-zero on failure. Publishing is off by default
 (`--publish none`): the stored review can be reopened later in the TUI or
-GUI to curate and publish with a human in the loop. See
-[Headless mode](docs/wiki/Headless-Mode.md) for publish semantics, exit
-codes, and a GitLab CI job example.
+GUI to curate and publish with a human in the loop. Re-runs are
+incremental by default — only the changes pushed since the last reviewed
+commit are reviewed, and triaged findings carry forward (`--full`
+overrides). See [Headless mode](docs/wiki/Headless-Mode.md) for
+incremental re-review, publish semantics, exit codes, and a GitLab CI job
+example.
 
 ## Configuration
 
