@@ -1,0 +1,591 @@
+@import "tailwindcss";
+@import "./vendor/daisyui.css";
+@source "../../templates";
+
+/* Registers the DaisyUI color/radius names as Tailwind design tokens so
+ * `@apply bg-base-100` etc. resolve to utilities below. The vendored
+ * daisyui.css is precompiled CSS, not a Tailwind plugin, so nothing else
+ * tells the compiler these names exist. The actual values are irrelevant —
+ * every one of them is overridden at runtime by the [data-theme="..."]
+ * blocks further down, which load later in the cascade and win.
+ *
+ * Note: only Tailwind's own core utilities and the color/radius utilities
+ * generated from this @theme block are usable via @apply. DaisyUI's
+ * component classes (.btn, .badge, .input, .modal, .toast, .alert, .kbd,
+ * .loading, ...) are plain CSS in the vendored file, not registered
+ * Tailwind utilities, so they can't be @apply'd — they only take effect
+ * where their exact class name is literally present in template markup. */
+@theme {
+  --color-base-100: oklch(100% 0 0);
+  --color-base-200: oklch(98% 0 0);
+  --color-base-300: oklch(95% 0 0);
+  --color-base-content: oklch(21% 0.006 285.885);
+  --color-primary: oklch(58% 0.158 241.966);
+  --color-primary-content: oklch(100% 0 0);
+  --color-secondary: oklch(65% 0.241 354.308);
+  --color-secondary-content: oklch(94% 0.028 342.258);
+  --color-accent: oklch(77% 0.152 181.912);
+  --color-accent-content: oklch(38% 0.063 188.416);
+  --color-neutral: oklch(14% 0.005 285.823);
+  --color-neutral-content: oklch(92% 0.004 286.32);
+  --color-info: oklch(74% 0.16 232.661);
+  --color-info-content: oklch(29% 0.066 243.157);
+  --color-success: oklch(76% 0.177 163.223);
+  --color-success-content: oklch(37% 0.077 168.94);
+  --color-warning: oklch(82% 0.189 84.429);
+  --color-warning-content: oklch(41% 0.112 45.904);
+  --color-error: oklch(71% 0.194 13.428);
+  --color-error-content: oklch(27% 0.105 12.094);
+  --radius-box: 0.5rem;
+  --radius-field: 0.25rem;
+  --radius-selector: 0.5rem;
+}
+
+/* Theme tokens ------------------------------------------------------------
+ * DaisyUI resolves colors from --color-* custom properties scoped to
+ * [data-theme="..."]. The JS theme toggle (app.js) always sets
+ * document.documentElement.dataset.theme to exactly "dark" or "light" (never
+ * leaves it unset), so we override DaisyUI's own built-in dark/light themes
+ * in place rather than registering new theme names.
+ *
+ * A handful of app-specific tokens (diff add/del backgrounds, review-action
+ * color, shadow) have no DaisyUI semantic equivalent and stay as plain custom
+ * properties alongside the DaisyUI ones. */
+@layer base {
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --color-base-100: #0d1117;
+    --color-base-200: #161b22;
+    --color-base-300: #1f2630;
+    --color-base-content: #c9d1d9;
+    --color-primary: #58a6ff;
+    --color-primary-content: #04101c;
+    --color-secondary: #d2a8ff;
+    --color-secondary-content: #1f1030;
+    --color-accent: #3fb950;
+    --color-accent-content: #04170a;
+    --color-neutral: #21262d;
+    --color-neutral-content: #c9d1d9;
+    --color-info: #58a6ff;
+    --color-info-content: #04101c;
+    --color-success: #3fb950;
+    --color-success-content: #04170a;
+    --color-warning: #d29922;
+    --color-warning-content: #271c02;
+    --color-error: #f85149;
+    --color-error-content: #2b0503;
+    --radius-box: 0.5rem;
+    --radius-field: 0.375rem;
+    --radius-selector: 0.625rem;
+
+    --fg-subtle: #8b949e;
+    --add-bg: rgba(46, 160, 67, 0.15);
+    --del-bg: rgba(248, 81, 73, 0.15);
+    --add-emph: rgba(46, 160, 67, 0.42);
+    --del-emph: rgba(248, 81, 73, 0.42);
+    --hunk-bg: rgba(56, 139, 253, 0.1);
+    --btn-review: #238636;
+    --shadow: rgba(0, 0, 0, 0.45);
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  [data-theme="light"] {
+    color-scheme: light;
+    --color-base-100: #ffffff;
+    --color-base-200: #f6f8fa;
+    --color-base-300: #eaeef2;
+    --color-base-content: #1f2328;
+    --color-primary: #0969da;
+    --color-primary-content: #ffffff;
+    --color-secondary: #8250df;
+    --color-secondary-content: #ffffff;
+    --color-accent: #1a7f37;
+    --color-accent-content: #ffffff;
+    --color-neutral: #eaeef2;
+    --color-neutral-content: #1f2328;
+    --color-info: #0969da;
+    --color-info-content: #ffffff;
+    --color-success: #1a7f37;
+    --color-success-content: #ffffff;
+    --color-warning: #9a6700;
+    --color-warning-content: #ffffff;
+    --color-error: #d1242f;
+    --color-error-content: #ffffff;
+
+    --fg-subtle: #59636e;
+    --add-bg: rgba(31, 136, 61, 0.12);
+    --del-bg: rgba(209, 36, 47, 0.1);
+    --add-emph: rgba(31, 136, 61, 0.3);
+    --del-emph: rgba(209, 36, 47, 0.28);
+    --hunk-bg: rgba(9, 105, 218, 0.08);
+    --btn-review: #1a7f37;
+    --shadow: rgba(140, 149, 159, 0.3);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    @apply bg-base-100 text-base-content;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { @apply text-primary no-underline hover:underline; }
+  h2 { margin-top: 0; }
+  code { font-family: var(--mono); }
+}
+
+/* Everything below is written unlayered on purpose: DaisyUI ships its
+ * component recipes inside nested @layer blocks (e.g. `.badge`, `.diff`,
+ * `.list`, `.toast` all collide by name with classes this app already uses
+ * for unrelated markup). Per the CSS cascade, unlayered rules always beat
+ * layered ones regardless of specificity or source order, so writing our
+ * overrides here guarantees they fully control any property we set, while
+ * properties we *don't* set (e.g. DaisyUI's badge padding/radius/shape) still
+ * fall through from the DaisyUI layer for free — no renaming needed anywhere
+ * the Go templates or webui_test.go assertions depend on today's classes. */
+
+/* inline SVG icons */
+.iconsprite { display: none; }
+/* Tailwind's preflight resets svg to display:block (for layout-svg use
+   cases), which would otherwise force every inline icon-then-text button
+   ("Run AI review", "Chat about this MR", ...) to wrap the icon onto its
+   own line. Restore inline flow explicitly. */
+.icon { display: inline-block; width: 1em; height: 1em; fill: currentColor; vertical-align: -0.125em; }
+[data-theme="light"] .only-dark { display: none; }
+[data-theme="dark"] .only-light { display: none; }
+
+.topbar {
+  @apply flex items-center gap-3 bg-base-200 border-b border-base-300 sticky top-0 z-10 px-4 py-2;
+}
+.topbar .brand { @apply font-bold text-base-content; }
+.topbar .crumb { color: var(--color-secondary); }
+.topbar .page-title { @apply text-base-content/60 overflow-hidden text-ellipsis whitespace-nowrap; }
+.topbar .spacer, .spacer { flex: 1; }
+.topbar .version { @apply text-base-content/60 text-xs; }
+.iconbtn {
+  @apply text-base-content/70 rounded-selector w-8 h-8 border border-transparent transition-colors;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+.iconbtn:hover { @apply text-base-content border-base-300 bg-base-300; }
+
+main { @apply p-4 max-w-[1400px] mx-auto; }
+/* the diff page gets the full window width — split mode needs it */
+main:has(.diff-layout) { max-width: none; }
+
+.panel { @apply bg-base-200 border border-base-300 rounded-box p-4 mb-4 shadow-sm; }
+.panel.narrow { max-width: 480px; margin: 4rem auto; }
+
+.mrnav { display: flex; gap: 1rem; padding: 0 0 0.75rem 0.25rem; }
+
+.button {
+  @apply inline-block bg-base-300 border border-base-300 text-base-content rounded-field text-[13px] px-3 py-1.5 transition-colors;
+  cursor: pointer;
+}
+.button:hover { @apply border-base-content/40 no-underline; }
+.button.primary { @apply bg-primary border-primary text-primary-content; }
+.button.review { @apply text-white border-none; background: var(--btn-review); }
+.button.ok { @apply text-success; }
+.button.danger { @apply text-error; }
+.button.disabled { @apply opacity-50 pointer-events-none; }
+button.link { @apply bg-transparent border-none text-primary cursor-pointer p-0; font: inherit; }
+button.link.danger { @apply text-error; }
+
+.actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.75rem 0; }
+.actions.column { flex-direction: column; align-items: stretch; }
+.actions form { margin: 0; }
+.inline-form { display: inline; }
+
+.subtle { @apply text-base-content/60; }
+.note { @apply text-base-content/60; }
+.error { @apply text-error whitespace-pre-wrap; }
+.warning { @apply text-warning; }
+.ok { @apply text-success; }
+
+/* .badge gets its pill shape/size/layout for free from DaisyUI's own
+   .badge{} rule (same class name, matched by the cascade) — we only need to
+   set the color here, not re-declare the box model. */
+.badge { @apply text-base-content/80 whitespace-nowrap; background: transparent; border-color: var(--color-base-300); }
+.badge.draft { @apply text-warning; border-color: var(--color-warning); }
+.badge.manual { border-color: var(--color-secondary); color: var(--color-secondary); }
+.badge.comments { @apply text-primary; border: none; }
+.badge.findingcount { @apply text-warning; border: none; }
+.badge.reviewed { @apply text-success; border-color: var(--color-success); }
+a.badge.reviewed:hover { @apply no-underline bg-base-300; }
+.badge.sev-critical { @apply text-white font-semibold border-none; background: var(--color-error); }
+.badge.sev-major { @apply text-error font-semibold; border-color: var(--color-error); }
+.badge.sev-minor { @apply text-warning; border-color: var(--color-warning); }
+.badge.sev-info { @apply text-info; border-color: var(--color-info); }
+.badge.state-accepted, .badge.state-published { @apply text-success; border-color: var(--color-success); }
+.badge.state-rejected { @apply text-base-content/50 line-through; }
+.badge.state-note { @apply text-warning; border-color: var(--color-warning); }
+.badge.state-failed { @apply text-error; border-color: var(--color-error); }
+.badge.state-below-threshold { @apply text-base-content/50; }
+.finding.state-below-threshold { opacity: 0.7; }
+
+/* lists */
+table.list { width: 100%; border-collapse: collapse; }
+table.list th { @apply text-base-content/60 font-medium border-b border-base-300; text-align: left; padding: 0.3rem 0.5rem; }
+table.list td { @apply border-b border-base-300; padding: 0.4rem 0.5rem; }
+table.list tbody tr:hover { @apply bg-base-200; }
+.actions-cell { white-space: nowrap; }
+.actions-cell .button { margin-left: 0.3rem; }
+
+.filters { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.filters input, .filters select, textarea {
+  @apply bg-base-100 border border-base-300 text-base-content rounded-field;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+}
+.filters input[type="search"] { min-width: 220px; }
+textarea { width: 100%; font-family: var(--mono); font-size: 13px; }
+
+.pager { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+
+.instance-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
+.instance-list .button { display: block; text-align: center; padding: 0.7rem; }
+
+pre.prose {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: inherit;
+  margin: 0.4rem 0;
+}
+
+/* rendered markdown (MR descriptions) */
+.md { word-break: break-word; }
+.md > :first-child { margin-top: 0.4rem; }
+.md > :last-child { margin-bottom: 0.4rem; }
+.md h1, .md h2, .md h3, .md h4 { margin: 0.8rem 0 0.4rem; font-size: 1.05em; }
+.md h1 { font-size: 1.25em; }
+.md h2 { font-size: 1.15em; }
+.md p, .md ul, .md ol { margin: 0.4rem 0; }
+.md ul, .md ol { padding-left: 1.5rem; }
+.md li.task-list-item { list-style: none; margin-left: -1.2rem; }
+.md pre { @apply bg-base-100 border border-base-300 rounded-field p-3 overflow-x-auto text-[12.5px]; }
+.md code { font-size: 0.95em; }
+.md :not(pre) > code { @apply bg-base-100 border border-base-300 rounded px-1; }
+.md blockquote { @apply border-l-2 border-base-300 text-base-content/60 pl-3 my-2; }
+.md table { border-collapse: collapse; margin: 0.4rem 0; }
+.md th, .md td { @apply border border-base-300 px-3 py-1; }
+.md img { max-width: 100%; }
+.md hr { @apply border-t border-base-300 border-none; }
+pre.prose.add { @apply text-success; font-family: var(--mono); }
+pre.prose.summary { @apply border-l-2 border-primary pl-3; }
+
+.commits { list-style: none; padding: 0; }
+.commits code { color: var(--color-primary); margin-right: 0.4rem; }
+
+.pending-comments { list-style: none; padding: 0; }
+.pending-comments li { padding: 0.3rem 0; display: flex; gap: 0.5rem; align-items: baseline; }
+
+.new-comment summary { cursor: pointer; color: var(--color-primary); }
+.new-comment form { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+
+/* agent selection on the review form */
+.review-form { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+.agent-select summary { cursor: pointer; color: var(--color-primary); font-size: 0.9rem; }
+.agent-select fieldset { @apply border border-base-300 rounded-field mt-1 px-3 py-2 flex flex-col gap-1; }
+.agent-select label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; }
+.agent-select .agent-model { @apply bg-base-100 border border-base-300 rounded-field ml-auto text-xs px-1; }
+
+/* diff view */
+.mr-header { margin-bottom: 0.75rem; }
+.mr-header .mrhead { margin: 0 0 0.5rem 0.25rem; }
+.mr-description { @apply bg-base-200 border border-base-300 rounded-box px-3 py-2 mb-0; }
+.mr-description summary { cursor: pointer; font-weight: 600; }
+.mr-description .md { max-height: 40vh; overflow-y: auto; padding: 0 0.25rem; }
+
+.findings-banner { margin: 0 0 0.75rem 0.25rem; }
+
+.diff-layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: start; }
+.filetree {
+  @apply bg-base-200 border border-base-300 rounded-box p-3;
+  position: sticky;
+  top: 3.2rem;
+  max-height: calc(100vh - 4.5rem);
+  overflow-y: auto;
+}
+.filetree h3 { @apply text-base-content/60 text-[13px]; margin: 0 0 0.5rem; display: flex; }
+.filetree .viewed-progress { margin-left: auto; font-weight: 400; }
+.filetree ul { list-style: none; margin: 0; padding: 0; }
+.filetree li a {
+  @apply text-base-content hover:bg-base-300 hover:no-underline rounded;
+  display: flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  padding: 0.15rem 0.25rem;
+  font-size: 13px;
+}
+.filetree .fname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.filetree ul ul { padding-left: 0.8rem; }
+.filetree summary {
+  @apply text-base-content/60 hover:bg-base-300 rounded;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0.1rem 0.25rem;
+  user-select: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.filetree .viewed-tick { display: none; @apply text-success; }
+.filetree li.viewed > a { @apply text-base-content/60; }
+.filetree li.viewed .viewed-tick { display: inline; }
+
+.fstatus { font-family: var(--mono); font-weight: 700; }
+.fstatus-added { @apply text-success; }
+.fstatus-deleted { @apply text-error; }
+.fstatus-renamed { @apply text-warning; }
+.fstatus-modified { @apply text-primary; }
+
+.diff-file {
+  @apply bg-base-200 border border-base-300 rounded-box mb-4;
+  /* clip, not hidden: overflow:hidden would make the card the sticky
+     header's scrollport, wedging it 2.6rem down inside the card */
+  overflow: clip;
+}
+.diff-file > header {
+  @apply border-b border-base-300 bg-base-200;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--mono);
+  font-size: 13px;
+  position: sticky;
+  top: 2.6rem;
+  z-index: 1;
+}
+.file-fold { @apply text-base-content/60; background: none; border: none; cursor: pointer; padding: 0 0.1rem; font-size: 11px; }
+.file-fold::before { content: "▾"; display: inline-block; transition: transform 0.12s ease; }
+.diff-file.collapsed .file-fold::before { transform: rotate(-90deg); }
+.diff-file.collapsed > .file-body { display: none; }
+.diff-file.collapsed > header { border-bottom: none; }
+.viewed-label { display: flex; align-items: center; gap: 0.3rem; font-family: system-ui, sans-serif; cursor: pointer; user-select: none; white-space: nowrap; }
+
+table.diff {
+  display: table;
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+table.diff td { padding: 0 0.4rem; vertical-align: top; }
+table.diff td.ln {
+  @apply text-base-content/60 border-r border-base-300;
+  width: 1%;
+  min-width: 2.5em;
+  text-align: right;
+  user-select: none;
+}
+table.diff td.gutter { width: 1.4em; padding: 0; text-align: center; user-select: none; }
+table.diff td.code { white-space: pre-wrap; overflow-wrap: anywhere; width: 99%; }
+table.diff tr.add { background: var(--add-bg); }
+table.diff tr.del { background: var(--del-bg); }
+table.diff tr.hunk { background: var(--hunk-bg); color: var(--color-primary); }
+table.diff.excerpt { @apply border border-base-300 rounded-field; margin: 0.5rem 0; }
+
+/* word-level emphasis inside changed line pairs */
+.dchg { border-radius: 2px; }
+tr.add .dchg, td.add .dchg { background: var(--add-emph); }
+tr.del .dchg, td.del .dchg { background: var(--del-emph); }
+
+/* split (side-by-side) layout: colouring is per cell, not per row.
+   Column widths come from the <colgroup> — with table-layout: fixed they
+   would otherwise be derived from the first row, usually a colspan'd hunk
+   header, which collapses the code columns. DaisyUI's own `.diff` component
+   (an image-compare slider) is unrelated and would otherwise fight this
+   layout via `display:grid`/`overflow:hidden`; the `display: table` above
+   and `overflow: visible`/`position: static` below neutralize it since this
+   stylesheet is unlayered and always wins the cascade over DaisyUI's
+   layered rules for any property declared on both sides. */
+table.diff.split { table-layout: fixed; overflow: visible; position: static; }
+table.diff.split col.c-ln { width: 3.5em; }
+table.diff.split col.c-gutter { width: 1.6em; }
+table.diff.split td.code { width: auto; }
+table.diff.split td.add { background: var(--add-bg); }
+table.diff.split td.del { background: var(--del-bg); }
+/* filler cell opposite an unpaired add/del */
+table.diff.split tr.line td.code:not(.add):not(.del):not(.ctx) { background: rgba(110, 118, 129, 0.08); }
+table.diff.split tr.line td:nth-child(3) { @apply border-r border-base-300; }
+
+.view-toggle { font-size: 13px; margin: 0.75rem 0 0; }
+
+.add-comment {
+  @apply bg-primary text-primary-content;
+  visibility: hidden;
+  border: none;
+  border-radius: 3px;
+  width: 1.2em;
+  height: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+tr.line:hover .add-comment { visibility: visible; }
+
+tr.inline-comment td { @apply border-t border-b border-base-300; }
+.thread summary {
+  cursor: pointer;
+  padding: 0.35rem 0.6rem;
+  font-family: system-ui, sans-serif;
+  user-select: none;
+}
+.thread summary .who { font-weight: 600; }
+.thread[open] summary { @apply border-b border-base-300; }
+.thread.resolved summary .who { @apply text-base-content/60 font-medium; }
+.badge.resolved { @apply text-success; border-color: var(--color-success); }
+.comment { padding: 0.5rem 0.6rem; font-family: system-ui, sans-serif; }
+.comment.pending { border-left: 3px solid var(--color-secondary); }
+.comment .meta { margin-bottom: 0.2rem; }
+.comment-form { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.5rem; font-family: system-ui, sans-serif; }
+
+/* findings */
+.finding { @apply border border-base-300 rounded-box p-3 my-3; }
+.finding.state-rejected { opacity: 0.55; }
+.finding.state-accepted, .finding.state-published { border-left: 3px solid var(--color-success); }
+.finding > header { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.finding .edit summary { list-style: none; }
+.finding .edit form { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; width: 100%; }
+.finding:focus, .finding.kfocus { @apply outline-2 outline-primary outline-offset-1; }
+.finding.filtered { display: none; }
+.finding.inline { @apply bg-base-200; margin: 0.35rem 0.5rem; font-family: system-ui, sans-serif; }
+.suggestion { margin: 0.5rem 0; }
+
+/* filter chips — .chip is app-specific (no DaisyUI collision), styled to
+   look like a compact outline badge. */
+.filter-chips { display: inline-flex; gap: 0.35rem; align-items: center; flex-wrap: wrap; }
+.chip {
+  @apply text-base-content/60 rounded-selector cursor-pointer;
+  background: none;
+  border: 1px solid var(--color-base-300);
+  font-size: 12px;
+  padding: 0 0.55rem;
+}
+.chip:hover { @apply border-base-content/40; }
+.chip.active { @apply text-primary; border-color: var(--color-primary); }
+.chip-sep { @apply bg-base-300; width: 1px; height: 1rem; }
+
+/* sticky triage bar on the findings page */
+.triage-bar {
+  @apply bg-base-200 border border-base-300 shadow-lg;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  border-radius: var(--radius-box) var(--radius-box) 0 0;
+  padding: 0.5rem 1rem;
+  margin: 0 -0.25rem;
+}
+.triage-bar .counts { display: inline-flex; gap: 0.9rem; }
+.triage-bar .count b { font-weight: 600; }
+.triage-bar .count.ok b { @apply text-success; }
+.triage-bar .count.danger b { @apply text-error; }
+.kbd-hint { font-size: 12px; }
+
+.publish-items { list-style: none; padding: 0; }
+.publish-items li { padding: 0.25rem 0; }
+.publish-form { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; margin-top: 1rem; }
+.publish-form .mode { display: block; }
+
+/* run page */
+.runlog {
+  @apply bg-base-100 border border-base-300 rounded-field;
+  padding: 0.75rem;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* per-agent progress chips above the run log — same free-shape trick as
+   .badge, since .agent-chip doesn't collide with any DaisyUI class name we
+   just define the look directly. */
+.agent-chip {
+  @apply rounded-selector border border-base-300;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0.7rem;
+  font-size: 12.5px;
+}
+.agent-strip { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+.agent-chip .icon { flex: none; }
+.agent-chip.running { border-color: var(--color-primary); }
+.agent-chip.done { @apply border-success text-success; }
+.agent-chip.failed { @apply border-error text-error; }
+.agent-chip .findings { @apply text-base-content; }
+
+/* chat page */
+.chatlog { display: flex; flex-direction: column; gap: 0.6rem; margin: 0.75rem 0; }
+.chat-msg { @apply border border-base-300 rounded-box; padding: 0.5rem 0.75rem; }
+.chat-msg.you { border-left: 3px solid var(--color-secondary); }
+.chat-msg.claude { border-left: 3px solid var(--color-primary); }
+.chat-msg .meta { @apply text-base-content/60; font-size: 12px; margin-bottom: 0.2rem; }
+.chat-form { display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
+.chatstatus { max-height: 30vh; margin: 0.3rem 0 0; }
+
+.spinner {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border: 2px solid var(--fg-subtle);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -0.1em;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* toasts: renamed from the old app-specific .toast to .alert-msg to avoid a
+   name collision with DaisyUI's own .toast (a positioning container role,
+   not a per-message style) — #toast-host plays that container role instead,
+   using plain CSS rather than DaisyUI's .toast component class so its
+   fixed-position rules can't clash with anything else named .toast. */
+#toast-host {
+  position: fixed;
+  bottom: 1rem;
+  right: 1rem;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.alert-msg {
+  @apply bg-base-200 border border-base-300 rounded-field shadow-lg;
+  border-left: 3px solid var(--color-primary);
+  padding: 0.5rem 0.9rem;
+  font-size: 13px;
+  animation: toast-in 0.15s ease;
+}
+.alert-msg.error { border-left-color: var(--color-error); }
+.alert-msg.ok { border-left-color: var(--color-success); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(4px); } }
+
+/* help dialog */
+.help-dialog { @apply bg-base-200 text-base-content border border-base-300 rounded-box shadow-2xl; padding: 1rem 1.25rem; min-width: 320px; }
+.help-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.help-dialog h3 { margin: 0 0 0.6rem; }
+.help-dialog table { border-collapse: collapse; margin-bottom: 0.75rem; }
+.help-dialog td { padding: 0.15rem 0.6rem 0.15rem 0; }
+.help-dialog kbd {
+  @apply bg-base-100 border border-base-300 rounded;
+  font-family: var(--mono);
+  font-size: 12px;
+  border-bottom-width: 2px;
+  padding: 0 0.35rem;
+}
+
+@media (max-width: 900px) {
+  .diff-layout { grid-template-columns: 1fr; }
+  .filetree { position: static; max-height: 30vh; }
+}

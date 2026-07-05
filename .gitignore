@@ -8,3 +8,6 @@ coverage.out
 
 # Editor/OS noise
 .DS_Store
+
+# Downloaded standalone Tailwind CLI (fetched by `make css`, not vendored)
+/.tools/

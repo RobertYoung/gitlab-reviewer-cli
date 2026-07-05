@@ -12,7 +12,7 @@
     var host = $("#toast-host");
     if (!host) return;
     var el = document.createElement("div");
-    el.className = "toast" + (kind ? " " + kind : "");
+    el.className = "alert-msg" + (kind ? " " + kind : "");
     el.textContent = message;
     host.appendChild(el);
     setTimeout(function () { el.remove(); }, 4000);
