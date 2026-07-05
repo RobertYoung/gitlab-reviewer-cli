@@ -223,8 +223,11 @@ a.badge.reviewed:hover { @apply no-underline bg-base-300; }
 .badge.state-below-threshold { @apply text-base-content/50; }
 .finding.state-below-threshold { opacity: 0.7; }
 
-/* lists */
-table.list { width: 100%; border-collapse: collapse; }
+/* lists — DaisyUI's own .list component (an unrelated vertical-list-with-
+   dividers pattern) sets display:flex, which would otherwise break the
+   table's column layout since thead/tbody stop being laid out as a table.
+   display: table restores it, the same fix applied to table.diff above. */
+table.list { display: table; width: 100%; border-collapse: collapse; }
 table.list th { @apply text-base-content/60 font-medium border-b border-base-300; text-align: left; padding: 0.3rem 0.5rem; }
 table.list td { @apply border-b border-base-300; padding: 0.4rem 0.5rem; }
 table.list tbody tr:hover { @apply bg-base-200; }
