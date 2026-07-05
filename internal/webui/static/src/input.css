@@ -129,7 +129,12 @@
     font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   a { @apply text-primary no-underline hover:underline; }
-  h2 { margin-top: 0; }
+  /* Tailwind's preflight resets all headings to font-size/weight: inherit
+     (so they read as plain text unless a utility class is added). The
+     templates use bare <h2>/<h3> and rely on the browser's default heading
+     scale, so restore it explicitly instead of adding classes everywhere. */
+  h2 { margin-top: 0; font-size: 1.5em; font-weight: 600; }
+  h3 { font-size: 1.17em; font-weight: 600; }
   code { font-family: var(--mono); }
 }
 
@@ -188,7 +193,10 @@ main:has(.diff-layout) { max-width: none; }
 .button.ok { @apply text-success; }
 .button.danger { @apply text-error; }
 .button.disabled { @apply opacity-50 pointer-events-none; }
-button.link { @apply bg-transparent border-none text-primary cursor-pointer p-0; font: inherit; }
+/* DaisyUI's own .link class (underline on hover-ish text links) would
+   otherwise apply its underline here too since it matches by class alone;
+   override explicitly rather than relying on our properties not colliding. */
+button.link { @apply bg-transparent border-none text-primary cursor-pointer p-0 no-underline; font: inherit; }
 button.link.danger { @apply text-error; }
 
 .actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.75rem 0; }
@@ -455,7 +463,12 @@ tr.inline-comment td { @apply border-t border-b border-base-300; }
 .finding .edit form { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; width: 100%; }
 .finding:focus, .finding.kfocus { @apply outline-2 outline-primary outline-offset-1; }
 .finding.filtered { display: none; }
-.finding.inline { @apply bg-base-200; margin: 0.35rem 0.5rem; font-family: system-ui, sans-serif; }
+/* named f-inline, not "inline": Tailwind ships a real .inline utility
+   (display:inline) that would otherwise apply here uncontested (this rule
+   never sets display, so nothing overrides it) — an inline box can't
+   properly contain the block-level <header>/<pre>/<footer> children, so
+   they'd break out, leaving only a collapsed sliver of border/background. */
+.finding.f-inline { @apply bg-base-200; margin: 0.35rem 0.5rem; font-family: system-ui, sans-serif; }
 .suggestion { margin: 0.5rem 0; }
 
 /* filter chips — .chip is app-specific (no DaisyUI collision), styled to
