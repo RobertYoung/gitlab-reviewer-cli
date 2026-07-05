@@ -2,7 +2,7 @@
 {{$c := .Content}}
 {{template "mrnav" (navargs $c.Nav $c.WebURL)}}
 <section class="panel chatpage" data-events="{{$c.EventsURL}}"{{if not $c.State.Busy}} data-idle="1"{{end}}>
-  <h2>💬 Chat about {{if $c.FocusLabel}}<code>{{$c.FocusLabel}}</code>{{else}}{{$c.Ref}}{{end}}</h2>
+  <h2>{{template "icon" "chat"}} Chat about {{if $c.FocusLabel}}<code>{{$c.FocusLabel}}</code>{{else}}{{$c.Ref}}{{end}}</h2>
   <p class="subtle">{{$c.Title}} — Claude answers from a checkout of the MR branch and can read the
   surrounding code. Nothing here is posted to GitLab.</p>
 

@@ -1,11 +1,13 @@
 package webui
 
 import (
+	"bytes"
 	"fmt"
 	"html/template"
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alecthomas/chroma/v2"
 	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
@@ -16,9 +18,46 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 )
 
-// chromaStyleName is the syntax theme; its stylesheet is generated at
-// startup and served as /static/chroma.css.
-const chromaStyleName = "github-dark"
+// chromaStyleName and chromaLightStyleName are the syntax themes for the
+// dark and light UI themes; their stylesheets are generated at startup and
+// served together as /static/chroma.css.
+const (
+	chromaStyleName      = "github-dark"
+	chromaLightStyleName = "github"
+)
+
+// syntaxCSS builds the stylesheet for both syntax themes. Chroma emits bare
+// token spans (PreventSurroundingPre), so its default ".chroma" scope never
+// matches the rendered markup; rules are rescoped to the diff code cells,
+// with the light theme's rules behind the data-theme attribute.
+func syntaxCSS() ([]byte, error) {
+	var out bytes.Buffer
+	if err := writeSyntaxCSS(&out, chromaStyleName, ""); err != nil {
+		return nil, err
+	}
+	if err := writeSyntaxCSS(&out, chromaLightStyleName, `:root[data-theme="light"] `); err != nil {
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+func writeSyntaxCSS(out *bytes.Buffer, style, prefix string) error {
+	var css bytes.Buffer
+	if err := chromahtml.New(chromahtml.WithClasses(true)).WriteCSS(&css, chromastyles.Get(style)); err != nil {
+		return err
+	}
+	for _, line := range strings.Split(css.String(), "\n") {
+		i := strings.Index(line, ".chroma .")
+		if i < 0 {
+			continue // background and wrapper rules; app.css owns those
+		}
+		out.WriteString(prefix)
+		out.WriteString("td.code")
+		out.WriteString(strings.TrimPrefix(line[i:], ".chroma"))
+		out.WriteByte('\n')
+	}
+	return nil
+}
 
 // inlineComment is a comment rendered under a diff line: an existing GitLab
 // discussion note, or a pending manual comment composed in this session.
@@ -47,6 +86,7 @@ type diffLine struct {
 	Old, New int    // 1-based; 0 when not applicable
 	HTML     template.HTML
 	Threads  []inlineThread
+	Findings []review.Finding // stored review findings anchored on this line
 }
 
 // CanComment reports whether a manual comment can anchor on this line.
@@ -61,6 +101,7 @@ type diffFile struct {
 	Lines    []diffLine
 	Rows     []splitRow // side-by-side pairing; only built for the split layout
 	Comments int        // anchored comment count, for the file explorer badge
+	Findings int        // anchored review findings, for the file explorer badge
 	TooLarge bool
 }
 
@@ -143,10 +184,12 @@ func commentKey(path, side string, line int) string {
 }
 
 // buildDiffFiles parses and highlights every file diff and attaches the
-// anchored GitLab discussions plus this session's pending manual comments.
-// With split set, each file also gets its side-by-side row pairing.
-func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, pending []review.Finding, split bool) []diffFile {
+// anchored GitLab discussions, this session's pending manual comments, and
+// a stored review's findings. With split set, each file also gets its
+// side-by-side row pairing.
+func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, pending, findings []review.Finding, split bool) []diffFile {
 	anchored := anchorComments(discussions, pending)
+	anchoredFindings := anchorFindings(findings)
 	files := make([]diffFile, 0, len(diffs))
 	for i, fd := range diffs {
 		f := diffFile{
@@ -156,11 +199,12 @@ func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, 
 			Status:   fileStatus(fd),
 			TooLarge: fd.TooLarge,
 		}
-		f.Lines = parseDiffLines(fd, anchored)
+		f.Lines = parseDiffLines(fd, anchored, anchoredFindings)
 		for _, l := range f.Lines {
 			for _, t := range l.Threads {
 				f.Comments += len(t.Comments)
 			}
+			f.Findings += len(l.Findings)
 		}
 		if split {
 			f.Rows = splitLines(f.Lines)
@@ -234,38 +278,90 @@ func anchorComments(discussions []gitlabx.Discussion, pending []review.Finding) 
 	return out
 }
 
+// anchorFindings indexes a stored review's line-anchored findings by diff
+// line, using the same addressing as comment threads.
+func anchorFindings(findings []review.Finding) map[string][]review.Finding {
+	out := map[string][]review.Finding{}
+	for _, f := range findings {
+		if f.File == "" {
+			continue
+		}
+		switch {
+		case f.Line.NewLine != nil:
+			key := commentKey(f.File, "new", *f.Line.NewLine)
+			out[key] = append(out[key], f)
+		case f.Line.OldLine != nil:
+			key := commentKey(f.File, "old", *f.Line.OldLine)
+			out[key] = append(out[key], f)
+		}
+	}
+	return out
+}
+
+// rawDiffLine is one parsed, not yet highlighted, row of a unified diff.
+type rawDiffLine struct {
+	kind     string // add | del | ctx | hunk
+	old, new int
+	text     string // source text without the +/-/space prefix
+	from, to int    // byte range emphasised as this line pair's changed span
+}
+
 // parseDiffLines walks one unified diff, tracking old/new line numbers the
-// same way the TUI and position resolution do.
-func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineThread) []diffLine {
-	if strings.TrimSpace(fd.Diff) == "" {
+// same way the TUI and position resolution do, then highlights each line
+// with the changed span of paired del/add lines emphasised.
+func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineThread, findings map[string][]review.Finding) []diffLine {
+	raw := parseRawLines(fd.Diff)
+	if len(raw) == 0 {
 		return nil
 	}
+	markLinePairs(raw)
 	h := newLineHighlighter(fd.NewPath)
-	var lines []diffLine
+	lines := make([]diffLine, 0, len(raw))
+	for _, rl := range raw {
+		l := diffLine{Kind: rl.kind, Old: rl.old, New: rl.new}
+		var key string
+		switch rl.kind {
+		case "hunk":
+			l.HTML = template.HTML(template.HTMLEscapeString(rl.text)) //nolint:gosec // escaped
+			lines = append(lines, l)
+			continue
+		case "del":
+			key = commentKey(fd.OldPath, "old", rl.old)
+		default: // add | ctx anchor on the new side
+			key = commentKey(fd.NewPath, "new", rl.new)
+		}
+		l.HTML = h.line(rl.text, rl.from, rl.to)
+		l.Threads = anchored[key]
+		l.Findings = findings[key]
+		lines = append(lines, l)
+	}
+	return lines
+}
+
+// parseRawLines splits a unified diff into typed rows with line numbers.
+func parseRawLines(diff string) []rawDiffLine {
+	if strings.TrimSpace(diff) == "" {
+		return nil
+	}
+	var lines []rawDiffLine
 	oldLine, newLine := 0, 0
-	for _, raw := range strings.Split(strings.TrimSuffix(fd.Diff, "\n"), "\n") {
+	for _, raw := range strings.Split(strings.TrimSuffix(diff, "\n"), "\n") {
 		switch {
 		case strings.HasPrefix(raw, "@@"):
 			if o, n, ok := parseHunkHeader(raw); ok {
 				oldLine, newLine = o, n
 			}
-			lines = append(lines, diffLine{Kind: "hunk", HTML: template.HTML(template.HTMLEscapeString(raw))}) //nolint:gosec // escaped
+			lines = append(lines, rawDiffLine{kind: "hunk", text: raw})
 		case strings.HasPrefix(raw, "+"):
-			l := diffLine{Kind: "add", New: newLine, HTML: h.line(raw[1:])}
-			l.Threads = anchored[commentKey(fd.NewPath, "new", newLine)]
-			lines = append(lines, l)
+			lines = append(lines, rawDiffLine{kind: "add", new: newLine, text: raw[1:]})
 			newLine++
 		case strings.HasPrefix(raw, "-"):
-			l := diffLine{Kind: "del", Old: oldLine, HTML: h.line(strings.TrimPrefix(raw, "-"))}
-			l.Threads = anchored[commentKey(fd.OldPath, "old", oldLine)]
-			lines = append(lines, l)
+			lines = append(lines, rawDiffLine{kind: "del", old: oldLine, text: strings.TrimPrefix(raw, "-")})
 			oldLine++
 		case strings.HasPrefix(raw, `\`):
-			lines = append(lines, diffLine{Kind: "hunk", HTML: template.HTML(template.HTMLEscapeString(raw))}) //nolint:gosec // escaped
+			lines = append(lines, rawDiffLine{kind: "hunk", text: raw})
 		default:
-			l := diffLine{Kind: "ctx", Old: oldLine, New: newLine, HTML: h.line(strings.TrimPrefix(raw, " "))}
-			l.Threads = anchored[commentKey(fd.NewPath, "new", newLine)]
-			lines = append(lines, l)
+			lines = append(lines, rawDiffLine{kind: "ctx", old: oldLine, new: newLine, text: strings.TrimPrefix(raw, " ")})
 			oldLine++
 			newLine++
 		}
@@ -273,13 +369,87 @@ func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineThread) []d
 	return lines
 }
 
+// markLinePairs emphasises the changed span within paired del/add lines:
+// each run of deletions aligns row-by-row against the run of additions
+// that follows it (the same pairing the split layout uses), and each pair
+// keeping a meaningful common prefix/suffix gets its differing middle
+// marked for the word-level highlight.
+func markLinePairs(lines []rawDiffLine) {
+	for i := 0; i < len(lines); {
+		if lines[i].kind != "del" {
+			i++
+			continue
+		}
+		start := i
+		for i < len(lines) && lines[i].kind == "del" {
+			i++
+		}
+		addStart := i
+		for i < len(lines) && lines[i].kind == "add" {
+			i++
+		}
+		for j := range min(addStart-start, i-addStart) {
+			d, a := &lines[start+j], &lines[addStart+j]
+			if dFrom, dTo, aFrom, aTo, ok := changedSpan(d.text, a.text); ok {
+				d.from, d.to = dFrom, dTo
+				a.from, a.to = aFrom, aTo
+			}
+		}
+	}
+}
+
+// changedSpan returns the byte ranges of a and b left after trimming their
+// common prefix and suffix — what actually changed between the two versions
+// of a line. ok is false when the lines are equal or share too little for
+// the emphasis to mean anything (whole-line emphasis is just noise).
+func changedSpan(a, b string) (aFrom, aTo, bFrom, bTo int, ok bool) {
+	if a == b {
+		return 0, 0, 0, 0, false
+	}
+	p := commonPrefix(a, b)
+	s := commonSuffix(a[p:], b[p:])
+	// Require the shared ends to make up at least a quarter of the shorter
+	// line, so unrelated replacement lines stay unmarked.
+	if 4*(p+s) < min(len(a), len(b)) {
+		return 0, 0, 0, 0, false
+	}
+	return p, len(a) - s, p, len(b) - s, true
+}
+
+// commonPrefix returns the length of the longest shared prefix of a and b,
+// backed off to a rune boundary.
+func commonPrefix(a, b string) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[n] == b[n] {
+		n++
+	}
+	for n > 0 && n < len(a) && !utf8.RuneStart(a[n]) {
+		n--
+	}
+	return n
+}
+
+// commonSuffix returns the length of the longest shared suffix of a and b,
+// backed off to a rune boundary.
+func commonSuffix(a, b string) int {
+	n := 0
+	for n < len(a) && n < len(b) && a[len(a)-1-n] == b[len(b)-1-n] {
+		n++
+	}
+	for n > 0 && !utf8.RuneStart(a[len(a)-n]) {
+		n--
+	}
+	return n
+}
+
 // splitCell is one side of a side-by-side diff row; Kind "" renders as the
 // empty filler opposite an unpaired addition or deletion.
 type splitCell struct {
-	Kind    string // add | del | ctx | ""
-	Num     int    // old line on the left, new line on the right
-	HTML    template.HTML
-	Threads []inlineThread
+	Kind     string // add | del | ctx | ""
+	Num      int    // old line on the left, new line on the right
+	HTML     template.HTML
+	Threads  []inlineThread
+	Findings []review.Finding
 }
 
 // splitRow is one row of the side-by-side layout: a hunk header spanning
@@ -297,6 +467,14 @@ func (r splitRow) Threads() []inlineThread {
 	return append(append([]inlineThread{}, r.Left.Threads...), r.Right.Threads...)
 }
 
+// Findings merges both sides' findings; they render full-width underneath.
+func (r splitRow) Findings() []review.Finding {
+	if len(r.Left.Findings) == 0 {
+		return r.Right.Findings
+	}
+	return append(append([]review.Finding{}, r.Left.Findings...), r.Right.Findings...)
+}
+
 // splitLines pairs a unified diff's lines side by side: context on both
 // sides, and each run of deletions aligned row-by-row against the run of
 // additions that follows it, the shorter side padded with empty cells.
@@ -310,7 +488,7 @@ func splitLines(lines []diffLine) []splitRow {
 		case "ctx":
 			rows = append(rows, splitRow{
 				Left:  splitCell{Kind: "ctx", Num: l.Old, HTML: l.HTML},
-				Right: splitCell{Kind: "ctx", Num: l.New, HTML: l.HTML, Threads: l.Threads},
+				Right: splitCell{Kind: "ctx", Num: l.New, HTML: l.HTML, Threads: l.Threads, Findings: l.Findings},
 			})
 			i++
 		default:
@@ -324,10 +502,10 @@ func splitLines(lines []diffLine) []splitRow {
 			for j := range max(len(dels), len(adds)) {
 				var row splitRow
 				if j < len(dels) {
-					row.Left = splitCell{Kind: "del", Num: dels[j].Old, HTML: dels[j].HTML, Threads: dels[j].Threads}
+					row.Left = splitCell{Kind: "del", Num: dels[j].Old, HTML: dels[j].HTML, Threads: dels[j].Threads, Findings: dels[j].Findings}
 				}
 				if j < len(adds) {
-					row.Right = splitCell{Kind: "add", Num: adds[j].New, HTML: adds[j].HTML, Threads: adds[j].Threads}
+					row.Right = splitCell{Kind: "add", Num: adds[j].New, HTML: adds[j].HTML, Threads: adds[j].Threads, Findings: adds[j].Findings}
 				}
 				rows = append(rows, row)
 			}
@@ -374,20 +552,84 @@ func newLineHighlighter(filename string) *lineHighlighter {
 }
 
 // line returns the syntax-highlighted rendering of one source line, or the
-// escaped input if highlighting is unavailable.
-func (h *lineHighlighter) line(code string) template.HTML {
+// escaped input if highlighting is unavailable. A non-empty [from, to) byte
+// range is wrapped in the word-level change emphasis marker.
+func (h *lineHighlighter) line(code string, from, to int) template.HTML {
+	emph := from < to && to <= len(code)
 	if h == nil || code == "" {
-		return template.HTML(template.HTMLEscapeString(code)) //nolint:gosec // escaped
+		return escapedLine(code, from, to, emph)
 	}
 	iter, err := h.lexer.Tokenise(nil, code)
 	if err != nil {
+		return escapedLine(code, from, to, emph)
+	}
+	tokens := iter.Tokens()
+	// Some lexers append the newline the source line does not have; keep
+	// offsets aligned with the input.
+	if n := len(tokens); n > 0 {
+		tokens[n-1].Value = strings.TrimSuffix(tokens[n-1].Value, "\n")
+		if tokens[n-1].Value == "" {
+			tokens = tokens[:n-1]
+		}
+	}
+	if !emph {
+		return template.HTML(h.format(tokens)) //nolint:gosec // chroma escapes token text
+	}
+	pre, mid, post := splitTokens(tokens, from, to)
+	return template.HTML(h.format(pre) + `<span class="dchg">` + h.format(mid) + `</span>` + h.format(post)) //nolint:gosec // chroma escapes token text
+}
+
+// escapedLine renders one line as escaped plain text, with the optional
+// change-emphasis wrapper.
+func escapedLine(code string, from, to int, emph bool) template.HTML {
+	if !emph {
 		return template.HTML(template.HTMLEscapeString(code)) //nolint:gosec // escaped
+	}
+	return template.HTML(template.HTMLEscapeString(code[:from]) + //nolint:gosec // escaped
+		`<span class="dchg">` + template.HTMLEscapeString(code[from:to]) + `</span>` +
+		template.HTMLEscapeString(code[to:]))
+}
+
+// format renders tokens to HTML, falling back to escaped plain text.
+func (h *lineHighlighter) format(tokens []chroma.Token) string {
+	if len(tokens) == 0 {
+		return ""
 	}
 	var b strings.Builder
-	if err := h.formatter.Format(&b, h.style, iter); err != nil {
-		return template.HTML(template.HTMLEscapeString(code)) //nolint:gosec // escaped
+	if err := h.formatter.Format(&b, h.style, chroma.Literator(tokens...)); err != nil {
+		b.Reset()
+		for _, t := range tokens {
+			b.WriteString(template.HTMLEscapeString(t.Value))
+		}
+		return b.String()
 	}
-	return template.HTML(strings.TrimSuffix(b.String(), "\n")) //nolint:gosec // chroma escapes token text
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// splitTokens cuts a token stream at two byte offsets, splitting any token
+// that straddles a boundary, so a range of the source line can be wrapped
+// without breaking the highlight markup.
+func splitTokens(tokens []chroma.Token, from, to int) (pre, mid, post []chroma.Token) {
+	pos := 0
+	for _, t := range tokens {
+		start, end := pos, pos+len(t.Value)
+		pos = end
+		for _, seg := range []struct {
+			lo, hi int
+			dst    *[]chroma.Token
+		}{
+			{start, min(end, from), &pre},
+			{max(start, from), min(end, to), &mid},
+			{max(start, to), end, &post},
+		} {
+			if seg.hi > seg.lo {
+				nt := t
+				nt.Value = t.Value[seg.lo-start : seg.hi-start]
+				*seg.dst = append(*seg.dst, nt)
+			}
+		}
+	}
+	return pre, mid, post
 }
 
 // hunkExcerptHTML renders the diff lines around a finding's location so a
@@ -403,7 +645,7 @@ func hunkExcerptHTML(diffs []gitlabx.FileDiff, f review.Finding, radius int) []d
 	if fd == nil {
 		return nil
 	}
-	lines := parseDiffLines(*fd, nil)
+	lines := parseDiffLines(*fd, nil, nil)
 	target := -1
 	for i, l := range lines {
 		switch {

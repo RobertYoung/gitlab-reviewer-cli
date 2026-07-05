@@ -26,16 +26,17 @@
 
   {{if $c.MRs}}
   <table class="list">
-    <thead><tr><th>!IID</th><th>Title</th><th>Project</th><th>Author</th><th>Target</th><th>Updated</th></tr></thead>
+    <thead><tr><th>!IID</th><th>Title</th><th>Project</th><th>Author</th><th>Target</th><th>Review</th><th>Updated</th></tr></thead>
     <tbody>
-      {{range $c.MRs}}
+      {{range $i, $m := $c.MRs}}
       <tr>
-        <td>!{{.IID}}</td>
-        <td><a href="{{call $c.MRURL .}}">{{if .Draft}}<span class="badge draft">draft</span> {{end}}{{.Title}}</a></td>
-        <td class="subtle">{{.ProjectPath}}</td>
-        <td class="subtle">{{.AuthorDisplay}}</td>
-        <td class="subtle">{{.TargetBranch}}</td>
-        <td class="subtle">{{reltime .UpdatedAt}}</td>
+        <td>!{{$m.IID}}</td>
+        <td><a href="{{call $c.MRURL $m}}">{{if $m.Draft}}<span class="badge draft">draft</span> {{end}}{{$m.Title}}</a></td>
+        <td class="subtle">{{$m.ProjectPath}}</td>
+        <td class="subtle">{{$m.AuthorDisplay}}</td>
+        <td class="subtle">{{$m.TargetBranch}}</td>
+        <td>{{with index $c.Reviewed $i}}<a class="badge reviewed" href="{{.URL}}" title="last reviewed {{reltime .When}} — {{.Findings}} finding(s), {{.Accepted}} accepted">{{template "icon" "check"}} reviewed{{if .Findings}} · {{.Findings}}{{end}}</a>{{end}}</td>
+        <td class="subtle">{{reltime $m.UpdatedAt}}</td>
       </tr>
       {{end}}
     </tbody>

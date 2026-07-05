@@ -79,6 +79,8 @@ type runContent struct {
 	FindingsURL string
 	LogURL      string
 	WebURL      string
+	// PublishReviewURL posts the pending draft review auto-publish created.
+	PublishReviewURL string
 }
 
 func (s *Server) runURLs(inst string, run *reviewRun, out *runOutcome) (findings, log string) {
@@ -105,14 +107,15 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request, _ *Deps) 
 	}
 	lines, done, out := run.snapshot()
 	content := runContent{
-		Nav:       newMRNav(inst, run.Project, run.IID),
-		Run:       run,
-		Lines:     lines,
-		Done:      done,
-		Outcome:   out,
-		EventsURL: instPath(inst, "/run/"+run.ID+"/events"),
-		CancelURL: instPath(inst, "/run/"+run.ID+"/cancel"),
-		WebURL:    run.WebURL,
+		Nav:              newMRNav(inst, run.Project, run.IID),
+		Run:              run,
+		Lines:            lines,
+		Done:             done,
+		Outcome:          out,
+		EventsURL:        instPath(inst, "/run/"+run.ID+"/events"),
+		CancelURL:        instPath(inst, "/run/"+run.ID+"/cancel"),
+		WebURL:           run.WebURL,
+		PublishReviewURL: instPath(inst, "/mr/publish/review"),
 	}
 	content.FindingsURL, content.LogURL = s.runURLs(inst, run, out)
 	s.render(w, http.StatusOK, "run", pageData{Title: "reviewing " + run.Ref, Instance: inst, Content: content})
@@ -148,6 +151,7 @@ func (s *Server) handleRunEvents(w http.ResponseWriter, r *http.Request, _ *Deps
 			"findingsUrl": findings,
 			"logUrl":      log,
 			"findings":    out.Findings,
+			"draftReady":  out.DraftReady,
 		})
 		_, _ = fmt.Fprintf(w, "event: done\ndata: %s\n\n", payload)
 	}
@@ -219,8 +223,11 @@ type findingsContent struct {
 	RecordName string
 	Items      []findingItem
 	Accepted   int
+	Rejected   int
+	Pending    int
 	StateURL   string // POST target
 	PublishURL string
+	DiffURL    string // the diff view with this record's findings inline
 	LogURL     string
 }
 
@@ -252,14 +259,20 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request, d *Deps)
 		RecordName: recName,
 		StateURL:   instPath(inst, "/mr/findings/state"),
 		PublishURL: mrURL(inst, "/mr/publish", project, iid, url.Values{"record": {recName}}),
+		DiffURL:    mrURL(inst, "/mr/diff", project, iid, url.Values{"record": {recName}}),
 	}
 	if rec.LogPath != "" {
 		content.LogURL = mrURL(inst, "/mr/log", project, iid, url.Values{"name": {filepath.Base(rec.LogPath)}})
 	}
 	for _, f := range rec.Findings {
 		content.Items = append(content.Items, findingItem{F: f, Excerpt: hunkExcerptHTML(diffs, f, 4)})
-		if f.State == review.StateAccepted {
+		switch f.State {
+		case review.StateAccepted:
 			content.Accepted++
+		case review.StateRejected:
+			content.Rejected++
+		case review.StatePending:
+			content.Pending++
 		}
 	}
 	s.render(w, http.StatusOK, "findings", pageData{Title: "findings · " + detail.Ref(), Instance: inst, Content: content})
@@ -308,11 +321,39 @@ func (s *Server) handleFindingState(w http.ResponseWriter, r *http.Request, d *D
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
 	}
-	back := mrURL(inst, "/mr/findings", project, iid, url.Values{"record": {recName}})
-	if id != "" {
-		back += "#f-" + url.QueryEscape(id)
+	// fetch()-driven curation (findings page, inline diff cards) gets the
+	// resulting states and counts as JSON and updates in place; plain form
+	// posts fall back to the redirect.
+	if r.FormValue("format") == "json" {
+		states := map[string]string{}
+		var accepted, rejected, pending int
+		var body string
+		for _, f := range rec.Findings {
+			states[f.ID] = f.State.String()
+			switch f.State {
+			case review.StateAccepted:
+				accepted++
+			case review.StateRejected:
+				rejected++
+			case review.StatePending:
+				pending++
+			}
+			if action == "edit" && f.ID == id {
+				body = f.Body
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"states": states, "accepted": accepted, "rejected": rejected,
+			"pending": pending, "body": body,
+		})
+		return
 	}
-	http.Redirect(w, r, back, http.StatusSeeOther) //nolint:gosec // server-built path with escaped query values
+	fallback := mrURL(inst, "/mr/findings", project, iid, url.Values{"record": {recName}})
+	if id != "" {
+		fallback += "#f-" + url.QueryEscape(id)
+	}
+	localRedirect(w, r, r.FormValue("back"), fallback)
 }
 
 // publishItems resolves what a publish request applies to: a stored

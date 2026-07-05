@@ -3,7 +3,7 @@
   <a href="{{.Nav.DetailURL}}">overview</a>
   <a href="{{.Nav.DiffURL}}">diff</a>
   <a href="{{.Nav.HistoryURL}}">past reviews</a>
-  {{if .WebURL}}<a href="{{.WebURL}}" target="_blank" rel="noopener">open in GitLab ↗</a>{{end}}
+  {{if .WebURL}}<a href="{{.WebURL}}" target="_blank" rel="noopener">open in GitLab {{template "icon" "external"}}</a>{{end}}
 </nav>
 {{end}}
 
@@ -20,9 +20,63 @@
 </p>
 {{end}}
 
+{{/* reviewform is the "Run AI review" form with the agent picker; dot is
+     built by reviewformargs. */}}
+{{define "reviewform"}}
+<form method="post" action="{{.Nav.ReviewURL}}" class="review-form">
+  <input type="hidden" name="project" value="{{.Nav.Project}}">
+  <input type="hidden" name="iid" value="{{.Nav.IID}}">
+  <button type="submit" class="button review">{{template "icon" "play"}} Run AI review</button>
+  <details class="agent-select">
+    <summary>agents</summary>
+    <fieldset>
+      {{range .AgentOptions}}
+      <label title="{{.Description}}">
+        <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
+        {{.Name}}{{if .Source}} <span class="badge">{{.Source}}</span>{{end}}
+        <select name="model:{{.Name}}" class="agent-model" title="model for {{.Name}}">
+          {{range .Models}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+      </label>
+      {{end}}
+    </fieldset>
+    {{range .AgentWarnings}}<p class="warning">{{template "icon" "warn"}} {{.}}</p>{{end}}
+  </details>
+  {{if .PrevReviewHead}}
+  <label class="full-review" title="A stored review exists at {{printf "%.8s" .PrevReviewHead}}. By default only the changes pushed since then are reviewed and the previous findings — with their accepted/rejected states — carry forward; tick to scan the entire diff again.">
+    <input type="checkbox" name="full" value="1"> full re-review
+  </label>
+  {{end}}
+</form>
+{{end}}
+
 {{define "sevbadge"}}{{if .Manual}}<span class="badge manual">manual</span>{{else}}<span class="badge sev-{{.Severity}}">{{.Severity}}{{if .Category}} · {{.Category}}{{end}}{{if and .Agent (ne .Agent (printf "%s" .Category))}} · {{.Agent}}{{end}}</span>{{end}}{{end}}
 
-{{define "statebadge"}}<span class="badge state-{{fstate .}}">{{fstate .}}</span>{{end}}
+{{define "statebadge"}}<span class="badge fstate state-{{fstate .}}">{{fstate .}}</span>{{end}}
+
+{{/* findingactions are the accept/reject forms for one finding; dot carries
+     F, Nav, StateURL, RecordName and an optional BackURL to return to. The
+     forms work without JS; app.js upgrades them to in-place updates. */}}
+{{define "findingactions"}}
+<form method="post" action="{{.StateURL}}" class="inline-form f-state-form">
+  <input type="hidden" name="project" value="{{.Nav.Project}}">
+  <input type="hidden" name="iid" value="{{.Nav.IID}}">
+  <input type="hidden" name="record" value="{{.RecordName}}">
+  <input type="hidden" name="id" value="{{.F.ID}}">
+  <input type="hidden" name="back" value="{{.BackURL}}">
+  <input type="hidden" name="action" value="accept">
+  <button type="submit" class="button ok">{{template "icon" "check"}} Accept</button>
+</form>
+<form method="post" action="{{.StateURL}}" class="inline-form f-state-form">
+  <input type="hidden" name="project" value="{{.Nav.Project}}">
+  <input type="hidden" name="iid" value="{{.Nav.IID}}">
+  <input type="hidden" name="record" value="{{.RecordName}}">
+  <input type="hidden" name="id" value="{{.F.ID}}">
+  <input type="hidden" name="back" value="{{.BackURL}}">
+  <input type="hidden" name="action" value="reject">
+  <button type="submit" class="button danger">{{template "icon" "cross"}} Reject</button>
+</form>
+{{end}}
 
 {{define "excerpt"}}
 {{if .}}

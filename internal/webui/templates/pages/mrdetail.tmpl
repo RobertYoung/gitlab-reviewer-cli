@@ -5,46 +5,22 @@
   <h2>{{if $c.Detail.Draft}}<span class="badge draft">draft</span> {{end}}{{$c.Detail.Title}}</h2>
   {{template "mrhead" $c.Detail}}
 
-  {{if $c.RebaseWarning}}<p class="warning">⚠ {{$c.RebaseWarning}}</p>{{end}}
+  {{if $c.RebaseWarning}}<p class="warning">{{template "icon" "warn"}} {{$c.RebaseWarning}}</p>{{end}}
   {{with $c.Approvals}}
-    {{if .ApprovedBy}}<p class="ok">✓ Approved by {{join .ApprovedBy ", "}}</p>
+    {{if .ApprovedBy}}<p class="ok">{{template "icon" "check"}} Approved by {{join .ApprovedBy ", "}}</p>
     {{else if .ApprovalsRequired}}<p class="subtle">{{.ApprovalsLeft}} of {{.ApprovalsRequired}} required approval(s) outstanding</p>{{end}}
   {{end}}
-  {{if $c.GateBlocking}}<p class="warning">⚠ {{$c.GateBlocking}} finding(s) at or above {{$c.GateSeverity}} in the last review{{if $c.GateBlocked}} — approval is blocked until they are resolved or rejected{{end}}</p>{{end}}
+  {{if $c.GateBlocking}}<p class="warning">{{template "icon" "warn"}} {{$c.GateBlocking}} finding(s) at or above {{$c.GateSeverity}} in the last review{{if $c.GateBlocked}} — approval is blocked until they are resolved or rejected{{end}}</p>{{end}}
 
   <div class="actions">
     <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
-    <form method="post" action="{{$c.Nav.ReviewURL}}" class="review-form">
-      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-      <button type="submit" class="button review">▶ Run AI review</button>
-      <details class="agent-select">
-        <summary>agents</summary>
-        <fieldset>
-          {{range $c.AgentOptions}}
-          <label title="{{.Description}}">
-            <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
-            {{.Name}}{{if .Source}} <span class="badge">{{.Source}}</span>{{end}}
-            <select name="model:{{.Name}}" class="agent-model" title="model for {{.Name}}">
-              {{range .Models}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-            </select>
-          </label>
-          {{end}}
-        </fieldset>
-        {{range $c.AgentWarnings}}<p class="warning">⚠ {{.}}</p>{{end}}
-      </details>
-      {{if $c.PrevReviewHead}}
-      <label class="full-review" title="A stored review exists at {{printf "%.8s" $c.PrevReviewHead}}. By default only the changes pushed since then are reviewed and the previous findings — with their accepted/rejected states — carry forward; tick to scan the entire diff again.">
-        <input type="checkbox" name="full" value="1"> full re-review
-      </label>
-      {{end}}
-    </form>
+    {{template "reviewform" (reviewformargs $c.Nav $c.AgentOptions $c.AgentWarnings $c.PrevReviewHead)}}
     <form method="post" action="{{$c.Nav.ChatURL}}">
       <input type="hidden" name="project" value="{{$c.Nav.Project}}">
       <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-      <button type="submit" class="button">💬 Chat with Claude</button>
+      <button type="submit" class="button">{{template "icon" "chat"}} Chat with Claude</button>
     </form>
-    <a class="button" href="{{$c.Nav.HistoryURL}}">Past reviews</a>
+    <a class="button" href="{{$c.Nav.HistoryURL}}">{{template "icon" "history"}} Past reviews</a>
     {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
     {{if and $c.Approvals $c.Approvals.UserCanApprove}}
     <form method="post" action="{{$c.Nav.ApproveURL}}">
@@ -55,10 +31,10 @@
       <input type="hidden" name="action" value="unapprove">
       <button type="submit" class="button">Unapprove</button>
       {{else if $c.GateBlocked}}
-      <button type="button" class="button" disabled title="blocked by gate.min_severity ({{$c.GateSeverity}})">✓ Approve</button>
+      <button type="button" class="button" disabled title="blocked by gate.min_severity ({{$c.GateSeverity}})">{{template "icon" "check"}} Approve</button>
       {{else}}
       <input type="hidden" name="sha" value="{{$c.Detail.HeadSHA}}">
-      <button type="submit" class="button ok">{{if $c.GateBlocking}}✓ Approve anyway{{else}}✓ Approve{{end}}</button>
+      <button type="submit" class="button ok">{{template "icon" "check"}} {{if $c.GateBlocking}}Approve anyway{{else}}Approve{{end}}</button>
       {{end}}
     </form>
     {{end}}

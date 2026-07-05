@@ -2,6 +2,7 @@ package webui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
@@ -561,7 +563,7 @@ func TestApproveAndUnapprove(t *testing.T) {
 
 	// The detail page offers approval while the user has not approved.
 	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
-	if code != http.StatusOK || !strings.Contains(body, ">✓ Approve<") {
+	if code != http.StatusOK || !strings.Contains(body, "> Approve</button>") {
 		t.Fatalf("detail before approving: %d\n%s", code, body)
 	}
 
@@ -674,7 +676,7 @@ func TestSplitDiffView(t *testing.T) {
 
 func TestSplitLinesPairing(t *testing.T) {
 	diff := "@@ -1,3 +1,3 @@\n ctx1\n-old1\n-old2\n+new1\n ctx2\n"
-	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil)
+	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil, nil)
 	rows := splitLines(lines)
 	if len(rows) != 5 {
 		t.Fatalf("got %d rows, want 5: %+v", len(rows), rows)
@@ -701,7 +703,7 @@ func TestBuildExplorerTree(t *testing.T) {
 		{NewPath: "internal/tui/app.go", Diff: sampleDiff},
 		{NewPath: "README.md", Diff: sampleDiff},
 		{NewPath: "internal/config/load.go", Diff: sampleDiff},
-	}, nil, nil, false)
+	}, nil, nil, nil, false)
 	tree := buildExplorer(files)
 
 	// Directories sort before files, alphabetically within each level.
@@ -821,10 +823,13 @@ func TestReviewRunToFindingsToPublish(t *testing.T) {
 		t.Fatalf("run outcome: %+v", out)
 	}
 
-	// The run page now links to the findings.
+	// The run page now links to the findings and reports their count.
 	code, body = env.get("/i/default/run/" + run.ID)
 	if code != http.StatusOK || !strings.Contains(body, "Open findings") {
 		t.Fatalf("run page after done: %d\n%s", code, body)
+	}
+	if !strings.Contains(body, "completed with 1 finding(s)") {
+		t.Fatalf("run page lost the findings count:\n%s", body)
 	}
 
 	findingsPath := "/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName
@@ -952,7 +957,7 @@ func TestSafeStoreFile(t *testing.T) {
 }
 
 func TestParseDiffLines(t *testing.T) {
-	lines := parseDiffLines(sampleDiffs()[0], nil)
+	lines := parseDiffLines(sampleDiffs()[0], nil, nil)
 	if len(lines) != 5 {
 		t.Fatalf("got %d lines, want 5: %+v", len(lines), lines)
 	}
@@ -1236,5 +1241,192 @@ func TestMRDetailOffersFullReReview(t *testing.T) {
 	_, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
 	if !strings.Contains(body, `name="full"`) || !strings.Contains(body, "full re-review") {
 		t.Fatalf("full re-review override missing once a review is stored:\n%s", body)
+	}
+}
+
+func TestSyntaxCSSHasBothThemes(t *testing.T) {
+	css, err := syntaxCSS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(css)
+	if strings.Contains(s, ".chroma") {
+		t.Fatalf("chroma scope not rewritten:\n%.400s", s)
+	}
+	if !strings.Contains(s, "td.code .k ") && !strings.Contains(s, "td.code .k{") {
+		t.Fatalf("dark token rules missing:\n%.400s", s)
+	}
+	if !strings.Contains(s, `:root[data-theme="light"] td.code`) {
+		t.Fatalf("light token rules missing:\n%.400s", s)
+	}
+}
+
+func TestWordLevelEmphasisMarksChangedSpan(t *testing.T) {
+	diff := "@@ -1,2 +1,2 @@\n-left = compute(alpha, one)\n+left = compute(alpha, two)\n ctx\n"
+	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil, nil)
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4: %+v", len(lines), lines)
+	}
+	if !strings.Contains(string(lines[1].HTML), `<span class="dchg">one</span>`) {
+		t.Fatalf("deletion emphasis missing: %s", lines[1].HTML)
+	}
+	if !strings.Contains(string(lines[2].HTML), `<span class="dchg">two</span>`) {
+		t.Fatalf("addition emphasis missing: %s", lines[2].HTML)
+	}
+	if strings.Contains(string(lines[3].HTML), "dchg") {
+		t.Fatalf("context line should not be emphasised: %s", lines[3].HTML)
+	}
+}
+
+func TestWordLevelEmphasisSkipsUnrelatedLines(t *testing.T) {
+	diff := "@@ -1,1 +1,1 @@\n-aaaaaaaaaaaa\n+zzzzzzzzzzzz\n"
+	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "f.txt", NewPath: "f.txt", Diff: diff}, nil, nil)
+	for _, l := range lines {
+		if strings.Contains(string(l.HTML), "dchg") {
+			t.Fatalf("unrelated replacement should not be emphasised: %s", l.HTML)
+		}
+	}
+}
+
+func TestWordLevelEmphasisSplitsHighlightTokens(t *testing.T) {
+	diff := "@@ -1,1 +1,1 @@\n-x := foo(1)\n+x := bar(1)\n"
+	lines := parseDiffLines(gitlabx.FileDiff{OldPath: "main.go", NewPath: "main.go", Diff: diff}, nil, nil)
+	del, add := string(lines[1].HTML), string(lines[2].HTML)
+	if !strings.Contains(del, `class="dchg"`) || !strings.Contains(del, "foo") {
+		t.Fatalf("deletion emphasis missing from highlighted line: %s", del)
+	}
+	if !strings.Contains(add, `class="dchg"`) || !strings.Contains(add, "bar") {
+		t.Fatalf("addition emphasis missing from highlighted line: %s", add)
+	}
+	// The shared prefix stays outside the marker.
+	if strings.HasPrefix(del, `<span class="dchg">`) {
+		t.Fatalf("emphasis should not swallow the shared prefix: %s", del)
+	}
+}
+
+func TestChangedSpanBounds(t *testing.T) {
+	aFrom, aTo, bFrom, bTo, ok := changedSpan("compute(alpha)", "compute(gamma)")
+	if !ok || aFrom != 8 || aTo != 12 || bFrom != 8 || bTo != 12 { // "alph" vs "gamm": "a)" is shared suffix
+		t.Fatalf("changedSpan: %d %d %d %d %v", aFrom, aTo, bFrom, bTo, ok)
+	}
+	if _, _, _, _, ok := changedSpan("same", "same"); ok {
+		t.Fatal("equal lines must not be marked")
+	}
+	// Multi-byte runes must not be split.
+	aFrom, aTo, _, _, ok = changedSpan("héllo wörld", "héllo wërld")
+	if !ok {
+		t.Fatal("similar unicode lines should be marked")
+	}
+	if aFrom > len("héllo wörld") || aTo > len("héllo wörld") || !utf8.RuneStart("héllo wörld"[aFrom]) {
+		t.Fatalf("emphasis breaks rune boundary: %d %d", aFrom, aTo)
+	}
+}
+
+func TestFindingStateJSONResponse(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
+	run := waitRun(t, env.srv)
+	_, _, out := run.snapshot()
+
+	code, body := env.post("/i/default/mr/findings/state", mrForm(url.Values{
+		"record": {out.RecName}, "id": {"f001"}, "action": {"accept"}, "format": {"json"},
+	}))
+	if code != http.StatusOK {
+		t.Fatalf("state json: %d\n%s", code, body)
+	}
+	var res struct {
+		States   map[string]string `json:"states"`
+		Accepted int               `json:"accepted"`
+		Rejected int               `json:"rejected"`
+		Pending  int               `json:"pending"`
+	}
+	if err := json.Unmarshal([]byte(body), &res); err != nil {
+		t.Fatalf("decoding %q: %v", body, err)
+	}
+	if res.States["f001"] != "accepted" || res.Accepted != 1 || res.Pending != 0 || res.Rejected != 0 {
+		t.Fatalf("unexpected response: %+v", res)
+	}
+}
+
+func TestDiffShowsStoredFindingsInline(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
+	waitRun(t, env.srv)
+
+	code, body := env.get("/i/default/mr/diff?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("diff: %d", code)
+	}
+	if !strings.Contains(body, `data-finding="f001"`) || !strings.Contains(body, "Unused import") {
+		t.Fatalf("stored finding not shown inline:\n%s", body)
+	}
+	if !strings.Contains(body, "Findings from the review") {
+		t.Fatalf("findings banner missing:\n%s", body)
+	}
+	if !strings.Contains(body, `class="inline-form f-state-form"`) {
+		t.Fatalf("inline triage forms missing:\n%s", body)
+	}
+}
+
+func TestMRListShowsReviewedBadge(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	_, body := env.get("/i/default/?projects=group%2Fapp")
+	if strings.Contains(body, `class="badge reviewed"`) {
+		t.Fatalf("badge shown before any review:\n%s", body)
+	}
+
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
+	waitRun(t, env.srv)
+
+	code, body := env.get("/i/default/?projects=group%2Fapp")
+	if code != http.StatusOK || !strings.Contains(body, `class="badge reviewed"`) {
+		t.Fatalf("reviewed badge missing: %d\n%s", code, body)
+	}
+}
+
+func TestAutoPublishImmediateMode(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.Publish.AutoComment = true
+		c.Publish.Mode = "immediate"
+	})
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
+	run := waitRun(t, env.srv)
+	_, _, out := run.snapshot()
+	if out.Err != "" || out.DraftReady {
+		t.Fatalf("outcome: %+v", out)
+	}
+	if len(env.svc.inline) != 1 || !strings.Contains(env.svc.inline[0], "fmt is imported but unused.") {
+		t.Fatalf("auto-publish did not post inline: %+v", env.svc.inline)
+	}
+	rec := loadRecord(t, env, out.RecName)
+	if rec.Findings[0].State != review.StatePublished {
+		t.Fatalf("published state not stored: %v", rec.Findings[0].State)
+	}
+}
+
+func TestAutoPublishDraftMode(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.Publish.AutoComment = true
+		c.Publish.Mode = "draft"
+	})
+	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
+	run := waitRun(t, env.srv)
+	_, _, out := run.snapshot()
+	if !out.DraftReady {
+		t.Fatalf("draft mode should leave a pending review: %+v", out)
+	}
+	if len(env.svc.drafts) != 1 {
+		t.Fatalf("draft notes: %+v", env.svc.drafts)
+	}
+	// The run page offers the one-click publish.
+	code, body := env.get("/i/default/run/" + run.ID)
+	if code != http.StatusOK || !strings.Contains(body, "Publish review now") {
+		t.Fatalf("run page missing publish action: %d\n%s", code, body)
+	}
+	// And its SSE done event carries the flag for the streaming client.
+	_, events := env.get("/i/default/run/" + run.ID + "/events")
+	if !strings.Contains(events, `"draftReady":true`) {
+		t.Fatalf("done event missing draftReady:\n%s", events)
 	}
 }

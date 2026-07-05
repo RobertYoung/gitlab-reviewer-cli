@@ -21,6 +21,7 @@ other modality (keyboard-driven vs browser-native).
 | Filter by state, search text, author, target branch | ✅ | ✅ | TUI: `s`/`/`/`a`/`t`; GUI: filter bar / URL params |
 | Pagination | ✅ | ✅ | TUI loads more as you scroll; GUI pages |
 | Open MR in browser | ✅ | ✅ | TUI: `o`; GUI: "open in GitLab" link |
+| Reviewed badge on MRs with stored reviews | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): GUI links the badge to the MR's past reviews |
 
 ## MR detail
 
@@ -39,9 +40,12 @@ other modality (keyboard-driven vs browser-native).
 |---|:-:|:-:|---|
 | Unified diff with syntax highlighting | ✅ | ✅ | |
 | Split (side-by-side) layout | ✅ | ✅ | TUI: `v` toggles; GUI: layout links in the sidebar; `ui.diff_view` sets the default for both |
-| File explorer: collapsible directory tree, status glyphs, comment counts | ✅ | ✅ | TUI: `e` shows/hides, `h`/`l` fold; GUI: sticky sidebar, folders fold in place |
+| Word-level change emphasis in modified line pairs | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)) |
+| File explorer: collapsible directory tree, status glyphs, comment counts | ✅ | ✅ | TUI: `e` shows/hides, `h`/`l` fold; GUI: sticky sidebar, folders fold in place, finding counts too |
 | Existing GitLab discussions shown inline | ✅ | ✅ | |
-| Hunk-to-hunk navigation | ✅ | n/a | TUI `]`/`[`; the browser scrolls |
+| Review findings shown inline with in-place triage | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): GUI overlays the latest (or `?record=`) stored review on the diff |
+| Viewed-file tracking (collapse + progress) | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): per head commit, in browser local storage |
+| Hunk-to-hunk navigation | ✅ | ✅ | `]`/`[` in both; GUI also `n`/`p` between files |
 | Soft wrapping, text selection, in-page search | n/a | ✅ | Browser-native |
 
 ## Commenting
@@ -74,10 +78,12 @@ other modality (keyboard-driven vs browser-native).
 | Agent selection before each scan | ✅ | ✅ | TUI: picker on `r`; GUI: checkboxes on the review form. Last selection remembered per project |
 | Custom review agents (user + repo `.md` definitions) | ✅ | ✅ | Shared catalog; repo > user > builtin on name collision |
 | Live progress log | ✅ | ✅ | GUI streams over server-sent events; lines prefixed per agent |
+| Per-agent progress chips (running / done / failed) | n/a | ✅ | GUI derives them from the log's per-agent lines; the TUI log carries the same prefixes |
 | Cancel a running review | ✅ | ✅ | |
-| Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | |
+| Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | GUI updates in place (no reloads), with a sticky count bar and state/severity filters |
+| Keyboard triage | ✅ | ✅ | TUI: `↑`/`↓`/`a`/`x`/`e`/`A`; GUI: `j`/`k`/`a`/`x`/`e`/`A` |
 | Publish immediately or as a draft review | ✅ | ✅ | |
-| Auto-publish with `publish.auto_comment` | ✅ | ❌ | Parity gap: the TUI publishes qualifying findings on entering the findings screen; the GUI pre-accepts them but still requires a manual publish |
+| Auto-publish with `publish.auto_comment` | ✅ | ✅ | Both publish qualifying findings without confirmation after a run; draft mode leaves a one-click "publish review" |
 | Position fallback to a general note | ✅ | ✅ | Shared publisher |
 | Past reviews: reopen findings with curation state | ✅ | ✅ | Shared result store — cross-frontend |
 | View a run's progress log later | ✅ | ✅ | |
@@ -86,7 +92,8 @@ other modality (keyboard-driven vs browser-native).
 
 | Feature | TUI | GUI | Notes |
 |---|:-:|:-:|---|
-| Full keyboard driving + `?` help screen | ✅ | n/a | GUI is form/link-driven; `⌘`/`ctrl`+`enter` submits comment forms, `esc` cancels |
+| Full keyboard driving + `?` help screen | ✅ | ✅ | GUI: `?` overlay lists each page's shortcuts (diff navigation, findings triage); forms still work mouse-only |
+| Light/dark theme | n/a | ✅ | GUI: OS preference + topbar toggle; the TUI inherits the terminal palette |
 | Session token auth, loopback-only server | n/a | ✅ | GUI security model |
 
 When adding a feature to one frontend, add it to the other (or record it

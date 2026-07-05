@@ -1,21 +1,25 @@
 {{define "content"}}
 {{$c := .Content}}
 {{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
-<section class="panel">
+<section class="panel findings-page" data-record="{{$c.RecordName}}">
   <h2>Findings · {{$c.Detail.Ref}}</h2>
   {{if $c.Rec.Summary}}<pre class="prose summary">{{$c.Rec.Summary}}</pre>{{end}}
-  {{range $c.Rec.Warnings}}<p class="warning">⚠ {{.}}</p>{{end}}
+  {{range $c.Rec.Warnings}}<p class="warning">{{template "icon" "warn"}} {{.}}</p>{{end}}
 
   <div class="actions">
-    <form method="post" action="{{$c.StateURL}}">
-      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-      <input type="hidden" name="record" value="{{$c.RecordName}}">
-      <input type="hidden" name="action" value="accept-all">
-      <button type="submit" class="button">Accept all pending</button>
-    </form>
-    {{if $c.Accepted}}<a class="button primary" href="{{$c.PublishURL}}">Publish {{$c.Accepted}} accepted</a>{{end}}
-    {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">Run log</a>{{end}}
+    <a class="button" href="{{$c.DiffURL}}">View in diff</a>
+    {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">{{template "icon" "log"}} Run log</a>{{end}}
+    <span class="spacer"></span>
+    <span class="filter-chips" id="finding-filters" hidden>
+      <button type="button" class="chip" data-filter-state="pending">pending</button>
+      <button type="button" class="chip" data-filter-state="accepted">accepted</button>
+      <button type="button" class="chip" data-filter-state="rejected">rejected</button>
+      <span class="chip-sep"></span>
+      <button type="button" class="chip" data-filter-sev="critical">critical</button>
+      <button type="button" class="chip" data-filter-sev="major">major</button>
+      <button type="button" class="chip" data-filter-sev="minor">minor</button>
+      <button type="button" class="chip" data-filter-sev="info">info</button>
+    </span>
   </div>
 
   {{if not $c.Items}}
@@ -24,7 +28,7 @@
 
   {{range $c.Items}}
   {{$f := .F}}
-  <article class="finding state-{{fstate $f.State}}" id="f-{{$f.ID}}">
+  <article class="finding state-{{fstate $f.State}}" id="f-{{$f.ID}}" data-finding="{{$f.ID}}" data-severity="{{$f.Severity}}" tabindex="-1">
     <header>
       {{template "sevbadge" $f}}
       <strong class="ftitle">{{ftitle $f}}</strong>
@@ -41,25 +45,10 @@
     {{end}}
     {{template "excerpt" .Excerpt}}
     <footer class="actions">
-      <form method="post" action="{{$c.StateURL}}" class="inline-form">
-        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-        <input type="hidden" name="record" value="{{$c.RecordName}}">
-        <input type="hidden" name="id" value="{{$f.ID}}">
-        <input type="hidden" name="action" value="accept">
-        <button type="submit" class="button ok">✓ Accept</button>
-      </form>
-      <form method="post" action="{{$c.StateURL}}" class="inline-form">
-        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-        <input type="hidden" name="record" value="{{$c.RecordName}}">
-        <input type="hidden" name="id" value="{{$f.ID}}">
-        <input type="hidden" name="action" value="reject">
-        <button type="submit" class="button danger">✗ Reject</button>
-      </form>
+      {{template "findingactions" (triagerow $f $c)}}
       <details class="edit">
         <summary class="button">Edit body</summary>
-        <form method="post" action="{{$c.StateURL}}">
+        <form method="post" action="{{$c.StateURL}}" class="f-edit-form">
           <input type="hidden" name="project" value="{{$c.Nav.Project}}">
           <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
           <input type="hidden" name="record" value="{{$c.RecordName}}">
@@ -73,4 +62,26 @@
   </article>
   {{end}}
 </section>
+
+{{if $c.Items}}
+<footer class="triage-bar" id="triage-bar">
+  <span class="counts">
+    <span class="count ok"><b id="count-accepted">{{$c.Accepted}}</b> accepted</span>
+    <span class="count danger"><b id="count-rejected">{{$c.Rejected}}</b> rejected</span>
+    <span class="count"><b id="count-pending">{{$c.Pending}}</b> pending</span>
+  </span>
+  <span class="spacer"></span>
+  <span class="subtle kbd-hint">press ? for keyboard shortcuts</span>
+  <form method="post" action="{{$c.StateURL}}" class="inline-form" id="accept-all-form">
+    <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+    <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+    <input type="hidden" name="record" value="{{$c.RecordName}}">
+    <input type="hidden" name="action" value="accept-all">
+    <button type="submit" class="button">{{template "icon" "check"}} Accept all pending</button>
+  </form>
+  <a class="button primary{{if not $c.Accepted}} disabled{{end}}" id="publish-button" href="{{$c.PublishURL}}">
+    Publish <b id="count-publish">{{$c.Accepted}}</b> accepted
+  </a>
+</footer>
+{{end}}
 {{end}}

@@ -7,7 +7,6 @@
 package webui
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"embed"
@@ -23,9 +22,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/alecthomas/chroma/v2/formatters/html"
-	chromastyles "github.com/alecthomas/chroma/v2/styles"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/checkout"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
@@ -166,8 +162,8 @@ func New(opts Options) (*Server, error) {
 	if _, err := rand.Read(buf); err != nil {
 		return nil, fmt.Errorf("generating session token: %w", err)
 	}
-	var css bytes.Buffer
-	if err := html.New(html.WithClasses(true)).WriteCSS(&css, chromastyles.Get(chromaStyleName)); err != nil {
+	css, err := syntaxCSS()
+	if err != nil {
 		return nil, fmt.Errorf("generating syntax stylesheet: %w", err)
 	}
 	return &Server{
@@ -175,7 +171,7 @@ func New(opts Options) (*Server, error) {
 		instances: instances,
 		token:     hex.EncodeToString(buf),
 		pages:     pages,
-		chromaCSS: css.Bytes(),
+		chromaCSS: css,
 		deps:      map[string]*Deps{},
 		runs:      newRunRegistry(),
 		comments:  newCommentStore(),
