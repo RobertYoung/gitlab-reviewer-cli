@@ -211,7 +211,7 @@ func TestRunPerAgentModel(t *testing.T) {
 	r := fanOutRunner(t, rev, []string{"bug", "security", "schema"})
 	r.Cfg.Review.Model = "sonnet" // the run-wide default
 	// A custom agent that declares its own model in frontmatter.
-	r.Catalog = agents.NewCatalog("").WithProjectFiles([]agents.File{{
+	r.Catalog = agents.NewCatalog(nil, nil).WithProjectFiles([]agents.File{{
 		Name:    "schema.md",
 		Content: []byte("---\nname: schema\ndescription: Schema checks\nmodel: haiku\n---\nCheck the schema.\n"),
 	}})

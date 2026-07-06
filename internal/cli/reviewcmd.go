@@ -17,7 +17,6 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
-	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/claudecli"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/publisher"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
@@ -154,7 +153,7 @@ func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output s
 			}
 			return co.Path, co.Close, nil
 		},
-		Catalog:     agents.NewCatalog(config.UserAgentDirs()...),
+		Catalog:     newAgentCatalog(projectCfg),
 		Logs:        runlog.NewStore(reviewsDir),
 		Results:     results,
 		Incremental: !full,

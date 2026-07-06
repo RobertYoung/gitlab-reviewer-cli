@@ -196,7 +196,7 @@ func TestCatalogShadowing(t *testing.T) {
 	writeAgent(t, userDir, "security.md", "---\ndescription: custom security\ncategories: [security]\n---\nMy security prompt.\n")
 	writeAgent(t, userDir, "extra.md", "Extra prompt.\n")
 
-	c := NewCatalog(userDir)
+	c := NewCatalog(nil, []string{userDir})
 	all := c.All()
 	// Order: builtins in place, then user extras.
 	if all[1].Name != "security" || all[1].Source != SourceUser {
@@ -227,7 +227,7 @@ func TestCatalogUserDirShadowing(t *testing.T) {
 	writeAgent(t, ownDir, "shared.md", "Reviewer shared prompt.\n")
 
 	// Later dirs shadow earlier ones, mirroring the project-dir order.
-	c := NewCatalog(claudeDir, ownDir)
+	c := NewCatalog(nil, []string{claudeDir, ownDir})
 	byName := map[string]Agent{}
 	for _, a := range c.All() {
 		byName[a.Name] = a
@@ -252,7 +252,7 @@ func TestCatalogWithProjectClaudeAgents(t *testing.T) {
 	writeAgent(t, filepath.Join(repo, ".claude", "agents"), "shared.md", "Claude shared prompt.\n")
 	writeAgent(t, filepath.Join(repo, ".gitlab-reviewer", "agents"), "shared.md", "Reviewer shared prompt.\n")
 
-	cat := NewCatalog("").WithProject(repo)
+	cat := NewCatalog(nil, nil).WithProject(repo)
 	byName := map[string]Agent{}
 	for _, a := range cat.All() {
 		byName[a.Name] = a
@@ -274,7 +274,7 @@ func TestCatalogWithProjectClaudeAgents(t *testing.T) {
 }
 
 func TestCatalogResolve(t *testing.T) {
-	c := NewCatalog("")
+	c := NewCatalog(nil, nil)
 	got, err := c.Resolve([]string{"security", "bug"})
 	if err != nil {
 		t.Fatal(err)
@@ -408,7 +408,7 @@ func TestLoadProjectFilesAcrossDirs(t *testing.T) {
 		t.Errorf("paths: %q, %q", got[0].Path, got[1].Path)
 	}
 
-	cat := NewCatalog("").WithProjectFiles(files)
+	cat := NewCatalog(nil, nil).WithProjectFiles(files)
 	count := 0
 	for _, a := range cat.All() {
 		if a.Name == "shared" {
@@ -424,7 +424,7 @@ func TestLoadProjectFilesAcrossDirs(t *testing.T) {
 }
 
 func TestCatalogWithProjectFiles(t *testing.T) {
-	base := NewCatalog("")
+	base := NewCatalog(nil, nil)
 	cat := base.WithProjectFiles([]File{
 		{Name: "security.md", Content: []byte("Shadowed security prompt.")},
 		{Name: "extra.md", Content: []byte("Extra prompt.")},
@@ -450,7 +450,7 @@ func TestCatalogWithProjectFiles(t *testing.T) {
 }
 
 func TestRemoteCacheExtend(t *testing.T) {
-	base := NewCatalog("")
+	base := NewCatalog(nil, nil)
 	rc := NewRemoteCache()
 	calls := 0
 	fetch := func() ([]File, error) {

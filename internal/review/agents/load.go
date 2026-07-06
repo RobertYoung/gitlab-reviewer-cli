@@ -2,6 +2,7 @@ package agents
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -67,6 +68,40 @@ func loadDir(dir string, source Source) (agents []Agent, warnings []string) {
 		seen[a.Name] = path
 		agents = append(agents, a)
 	}
+	return agents, warnings
+}
+
+// loadTree reads every *.md agent definition under root, recursively —
+// unlike the user and project directories, plugin layouts are not under
+// this tool's control, so nested subdirectories are honoured. Same
+// skip-and-warn and duplicate handling as loadDir; a missing root is not
+// an error.
+func loadTree(root string, source Source) (agents []Agent, warnings []string) {
+	seen := map[string]string{} // name → file, for duplicate detection
+	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if path == root && os.IsNotExist(err) {
+				return filepath.SkipAll
+			}
+			warnings = append(warnings, fmt.Sprintf("agents: cannot read %s: %v", path, err))
+			return nil
+		}
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		a, err := loadFile(path, source)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("agents: skipping %s: %v", path, err))
+			return nil
+		}
+		if prev, dup := seen[a.Name]; dup {
+			warnings = append(warnings, fmt.Sprintf("agents: skipping %s: duplicate name %q (already defined by %s)", path, a.Name, prev))
+			return nil
+		}
+		seen[a.Name] = path
+		agents = append(agents, a)
+		return nil
+	})
 	return agents, warnings
 }
 

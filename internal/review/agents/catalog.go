@@ -8,19 +8,29 @@ import (
 )
 
 // Catalog is the merged, ordered view of available agents: builtins first,
-// then user agents, then project extras. A user or project agent with a
-// builtin's name replaces it in place, so shadowing never reorders pickers.
+// then plugin and user agents, then project extras. An agent carrying a
+// known name replaces it in place, so shadowing never reorders pickers.
 type Catalog struct {
 	agents   []Agent
 	warnings []string
 }
 
-// NewCatalog merges the builtins with user agents from userDirs (typically
-// config.UserAgentDirs()), in increasing precedence: a definition in a later
-// directory shadows a same-named one in an earlier directory. Empty dirs are
-// skipped; load problems become Warnings, not errors.
-func NewCatalog(userDirs ...string) *Catalog {
+// NewCatalog merges the builtins with the user-scope layers in increasing
+// precedence: plugin agents from pluginDirs (accepted Claude Code plugins,
+// resolved by PluginAgentDirs), then user agents from userDirs (typically
+// config.UserAgentDirs()). Within a layer a definition in a later directory
+// shadows a same-named one in an earlier directory. Empty dirs are skipped;
+// load problems become Warnings, not errors.
+func NewCatalog(pluginDirs, userDirs []string) *Catalog {
 	c := &Catalog{agents: Builtins()}
+	for _, dir := range pluginDirs {
+		if dir == "" {
+			continue
+		}
+		plug, warns := loadTree(dir, SourcePlugin)
+		c.merge(plug)
+		c.warnings = append(c.warnings, warns...)
+	}
 	for _, dir := range userDirs {
 		if dir == "" {
 			continue
@@ -30,6 +40,19 @@ func NewCatalog(userDirs ...string) *Catalog {
 		c.warnings = append(c.warnings, warns...)
 	}
 	return c
+}
+
+// WithWarnings returns a copy of the catalog with extra warnings appended —
+// how plugin discovery problems (PluginAgentDirs) reach the pickers and run
+// logs alongside definition-load warnings.
+func (c *Catalog) WithWarnings(msgs ...string) *Catalog {
+	if len(msgs) == 0 {
+		return c
+	}
+	return &Catalog{
+		agents:   append([]Agent(nil), c.agents...),
+		warnings: append(append([]string(nil), c.warnings...), msgs...),
+	}
 }
 
 // WithProject returns a copy of the catalog extended with agents shipped in

@@ -99,6 +99,7 @@ unset is an **error**, not a silent fallback to the shared token.
 | `review.exclude` | `GITLAB_REVIEWER_REVIEW_EXCLUDE` (comma-separated globs) | `--exclude` (repeatable) | see below | files removed from the review entirely |
 | `review.bare` | `GITLAB_REVIEWER_REVIEW_BARE` | `--bare` | `false` | run `claude --bare`; see caveat below |
 | `review.use_agents` | `GITLAB_REVIEWER_REVIEW_USE_AGENTS` | `--use-agents` | `false` | allow Claude Code *subagents* — unrelated to `review.agents` |
+| `review.claude_plugins` | — (file only, list) | — | `[]` | Claude Code plugins whose agents join the catalog — see [Review Agents](Review-Agents.md#claude-code-plugin-agents) |
 | `review.env` | — (file only, map) | `--review-env KEY=VALUE` (repeatable) | `{}` | extra env for the `claude` subprocess; `GITLAB*` keys are stripped |
 | `review.mcp_servers` | — (file only, map) | — | `{}` | see [MCP Servers](MCP-Servers.md) |
 
@@ -138,6 +139,11 @@ Notes:
   Subagents multiply token usage, so pair this with
   `review.max_budget_usd`. **Naming note:** this is unrelated to
   `review.agents`, which selects the *review agents* that run.
+- **`review.claude_plugins`** loads review agents shipped by installed
+  Claude Code plugins. It is an explicit allowlist — installing a plugin
+  never silently adds reviewers — and file-only, like `review.mcp_servers`,
+  because it is a trust decision. See
+  [Review Agents](Review-Agents.md#claude-code-plugin-agents).
 - **Cost model**: each selected agent is one `claude` invocation per diff
   chunk, so six agents cost roughly six times one combined pass.
   `review.max_budget_usd` is divided evenly across the planned passes

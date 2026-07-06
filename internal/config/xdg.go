@@ -49,6 +49,18 @@ func UserAgentDirs() []string {
 	return []string{DefaultClaudeAgentsDir(), DefaultAgentsDir()}
 }
 
+// DefaultClaudePluginsManifest is Claude Code's plugin install manifest,
+// ~/.claude/plugins/installed_plugins.json — the record of which plugins
+// are installed and where their files live in the plugin cache. Empty when
+// the home directory cannot be resolved.
+func DefaultClaudePluginsManifest() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "plugins", "installed_plugins.json")
+}
+
 // DefaultCacheDir is where repository clones and worktrees are cached.
 func DefaultCacheDir() string {
 	return filepath.Join(xdgDir("XDG_CACHE_HOME", ".cache"), appName)

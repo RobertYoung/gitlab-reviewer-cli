@@ -18,7 +18,7 @@ import (
 func pickerDeps(t *testing.T) Deps {
 	t.Helper()
 	deps := testDeps(&fakeService{})
-	deps.Agents = agents.NewCatalog("")
+	deps.Agents = agents.NewCatalog(nil, nil)
 	deps.Selection = agents.NewSelectionStore(filepath.Join(t.TempDir(), "sel.json"))
 	return deps
 }
@@ -206,7 +206,7 @@ func repoAgentService() *fakeService {
 
 func TestAgentPickerMergesRepoAgents(t *testing.T) {
 	deps := testDeps(repoAgentService())
-	deps.Agents = agents.NewCatalog("")
+	deps.Agents = agents.NewCatalog(nil, nil)
 	deps.Selection = agents.NewSelectionStore(filepath.Join(t.TempDir(), "sel.json"))
 
 	p, deliver := repoAgentPicker(t, deps)
@@ -229,7 +229,7 @@ func TestAgentPickerMergesRepoAgents(t *testing.T) {
 
 func TestAgentPickerRepoAgentsRespectRememberedSelection(t *testing.T) {
 	deps := testDeps(repoAgentService())
-	deps.Agents = agents.NewCatalog("")
+	deps.Agents = agents.NewCatalog(nil, nil)
 	deps.Selection = agents.NewSelectionStore(filepath.Join(t.TempDir(), "sel.json"))
 	deps.Selection.Save("group/app", []string{"docs"})
 

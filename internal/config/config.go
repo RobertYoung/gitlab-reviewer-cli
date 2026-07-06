@@ -89,8 +89,14 @@ type Review struct {
 	// UseAgents lets the reviewer delegate to Claude Code subagents
 	// (project .claude/agents plus user-level ones). Write/exec tools
 	// stay denied for the whole session, subagents included.
-	UseAgents bool              `koanf:"use_agents"`
-	Env       map[string]string `koanf:"env"`
+	UseAgents bool `koanf:"use_agents"`
+	// ClaudePlugins names installed Claude Code plugins ("name" or
+	// "name@marketplace") whose agents join the catalog like ~/.claude/agents
+	// definitions do. An explicit allowlist because a plugin agent's prompt
+	// steers the reviewer: installing a plugin for Claude Code must never
+	// silently add reviewers here. Empty loads none.
+	ClaudePlugins []string          `koanf:"claude_plugins"`
+	Env           map[string]string `koanf:"env"`
 	// MCPServers grants the review session named MCP servers, keyed by
 	// server name (settings file only — no flag or env form; per-project
 	// sections may add servers for just that project). Off by default:
