@@ -218,7 +218,9 @@
   function postState(form, onDone) {
     var data = new URLSearchParams(new FormData(form));
     data.set("format", "json");
-    fetch(form.action, { method: "POST", body: data })
+    // form.action is shadowed by the <input name="action"> control, so read
+    // the URL from the attribute instead of the (element-valued) property.
+    fetch(form.getAttribute("action"), { method: "POST", body: data })
       .then(function (res) {
         if (!res.ok) throw new Error("HTTP " + res.status);
         return res.json();
