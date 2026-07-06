@@ -69,10 +69,11 @@ others' findings survive; the run errors only when every pass fails.
 ## Bring your own agents
 
 Drop Markdown files in `~/.config/gitlab-reviewer/agents/` (yours) or
-`.gitlab-reviewer/agents/` in the reviewed repo (the team's). Repos that
-keep review guidance in Claude Code's `.claude/agents/` are picked up too —
-the definition format is compatible, and frontmatter fields this tool does
-not know (`tools`, …) are ignored.
+`.gitlab-reviewer/agents/` in the reviewed repo (the team's). Claude Code's
+agent directories are picked up too, at both scopes — `~/.claude/agents/`
+(user) and `.claude/agents/` in the reviewed repo (project) — so one set of
+files serves both tools: the definition format is compatible, and
+frontmatter fields this tool does not know (`tools`, …) are ignored.
 
 The file body is the agent's prompt; an optional YAML frontmatter adds
 metadata:
@@ -97,8 +98,11 @@ Agent names must match `^[a-z0-9][a-z0-9_-]*$`. More examples in
 
 Name collisions resolve as **repo > user > built-in**, so a repo can
 sharpen the stock `security` agent by shipping its own `security.md`;
-within a repo, `.gitlab-reviewer/agents/` beats `.claude/agents/`. Invalid
-definition files are skipped with a warning in the picker and the run log.
+within a scope the tool's own directory beats Claude Code's
+(`.gitlab-reviewer/agents/` over `.claude/agents/` in a repo,
+`~/.config/gitlab-reviewer/agents/` over `~/.claude/agents/` for the user).
+Invalid definition files are skipped with a warning in the picker and the
+run log.
 
 Repo-shipped agents steer the reviewer's attention but run in the same
 read-only sandbox as every review (`Read`/`Grep`/`Glob` only) — an agent

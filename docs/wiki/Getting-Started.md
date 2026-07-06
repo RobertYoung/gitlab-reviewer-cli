@@ -116,7 +116,7 @@ note ([Publishing](Publishing.md)).
 | Purpose | Default path |
 |---|---|
 | Settings file | `${XDG_CONFIG_HOME:-~/.config}/gitlab-reviewer/config.yaml` |
-| Your custom agents | `${XDG_CONFIG_HOME:-~/.config}/gitlab-reviewer/agents/` |
+| Your custom agents | `${XDG_CONFIG_HOME:-~/.config}/gitlab-reviewer/agents/` (plus `~/.claude/agents/`) |
 | Clone cache + worktrees | `${XDG_CACHE_HOME:-~/.cache}/gitlab-reviewer/` |
 | Review results, run logs, raw transcripts | `${XDG_STATE_HOME:-~/.local/state}/gitlab-reviewer/reviews/` |
 | Log file | `${XDG_STATE_HOME:-~/.local/state}/gitlab-reviewer/gitlab-reviewer.log` |

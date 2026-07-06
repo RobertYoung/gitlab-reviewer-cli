@@ -17,10 +17,10 @@ other.
 
 What a scan checks is decided by **review agents**
 (`internal/review/agents`): six built-ins mirroring the finding categories
-plus user (`~/.config/gitlab-reviewer/agents/`) and repo
-(`.gitlab-reviewer/agents/` and `.claude/agents/`, the former shadowing
-the latter) definitions, merged into a catalog with repo > user > builtin
-shadowing. Each frontend shows a per-scan agent
+plus user (`~/.config/gitlab-reviewer/agents/` and `~/.claude/agents/`)
+and repo (`.gitlab-reviewer/agents/` and `.claude/agents/`) definitions —
+at both scopes the tool's own directory shadows Claude Code's — merged
+into a catalog with repo > user > builtin shadowing. Each frontend shows a per-scan agent
 picker; repo definitions are read from the user's local clone in path/root
 checkout modes (covering untracked definitions), or fetched over the
 GitLab API at the MR head SHA in clone mode (cached per project + sha in

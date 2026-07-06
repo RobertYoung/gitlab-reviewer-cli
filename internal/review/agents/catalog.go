@@ -15,12 +15,17 @@ type Catalog struct {
 	warnings []string
 }
 
-// NewCatalog merges the builtins with user agents from userDir (typically
-// config.DefaultAgentsDir()). Load problems become Warnings, not errors.
-func NewCatalog(userDir string) *Catalog {
+// NewCatalog merges the builtins with user agents from userDirs (typically
+// config.UserAgentDirs()), in increasing precedence: a definition in a later
+// directory shadows a same-named one in an earlier directory. Empty dirs are
+// skipped; load problems become Warnings, not errors.
+func NewCatalog(userDirs ...string) *Catalog {
 	c := &Catalog{agents: Builtins()}
-	if userDir != "" {
-		user, warns := loadDir(userDir, SourceUser)
+	for _, dir := range userDirs {
+		if dir == "" {
+			continue
+		}
+		user, warns := loadDir(dir, SourceUser)
 		c.merge(user)
 		c.warnings = append(c.warnings, warns...)
 	}

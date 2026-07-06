@@ -31,6 +31,24 @@ func DefaultAgentsDir() string {
 	return filepath.Join(xdgDir("XDG_CONFIG_HOME", ".config"), appName, "agents")
 }
 
+// DefaultClaudeAgentsDir is Claude Code's user-scope subagents directory,
+// ~/.claude/agents — the user-level counterpart of a repo's .claude/agents.
+// Empty when the home directory cannot be resolved.
+func DefaultClaudeAgentsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".claude", "agents")
+}
+
+// UserAgentDirs are the user-scope agent directories in increasing
+// precedence: a definition in DefaultAgentsDir shadows a same-named one in
+// DefaultClaudeAgentsDir.
+func UserAgentDirs() []string {
+	return []string{DefaultClaudeAgentsDir(), DefaultAgentsDir()}
+}
+
 // DefaultCacheDir is where repository clones and worktrees are cached.
 func DefaultCacheDir() string {
 	return filepath.Join(xdgDir("XDG_CACHE_HOME", ".cache"), appName)

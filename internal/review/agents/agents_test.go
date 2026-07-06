@@ -96,6 +96,49 @@ func TestLoadFileNoFrontmatter(t *testing.T) {
 	}
 }
 
+func TestLoadFileClaudeStyleFrontmatter(t *testing.T) {
+	// Claude Code writes the description as one long unquoted scalar that can
+	// contain ": " — invalid strict YAML. Such files must still load.
+	dir := t.TempDir()
+	path := writeAgent(t, dir, "security-auditor.md", `---
+name: security-auditor
+description: Use this agent for security reviews. Examples:\n\nuser: "I added a package"\nassistant: "Let me use the security-auditor agent."
+model: sonnet
+color: purple
+---
+You are an elite security auditor.
+`)
+	a, err := loadFile(path, SourceUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Name != "security-auditor" {
+		t.Errorf("name: %q", a.Name)
+	}
+	if !strings.HasPrefix(a.Description, "Use this agent for security reviews.") {
+		t.Errorf("description: %q", a.Description)
+	}
+	if a.Model != "sonnet" {
+		t.Errorf("model: %q", a.Model)
+	}
+	if a.Prompt != "You are an elite security auditor." {
+		t.Errorf("prompt: %q", a.Prompt)
+	}
+	if !slices.Equal(a.Categories, review.AllCategories) {
+		t.Errorf("default categories: %v", a.Categories)
+	}
+}
+
+func TestParseLenientCategories(t *testing.T) {
+	fm := parseLenient("categories: [bug, security]\ndescription: has: colons")
+	if !slices.Equal(fm.Categories, []string{"bug", "security"}) {
+		t.Errorf("categories: %v", fm.Categories)
+	}
+	if fm.Description != "has: colons" {
+		t.Errorf("description: %q", fm.Description)
+	}
+}
+
 func TestLoadFileErrors(t *testing.T) {
 	dir := t.TempDir()
 	cases := map[string]string{
@@ -173,6 +216,33 @@ func TestCatalogShadowing(t *testing.T) {
 	// Original catalog untouched.
 	if got := c.All()[1]; got.Source != SourceUser {
 		t.Errorf("catalog mutated by WithProject: %+v", got)
+	}
+}
+
+func TestCatalogUserDirShadowing(t *testing.T) {
+	claudeDir := t.TempDir()
+	ownDir := t.TempDir()
+	writeAgent(t, claudeDir, "sql.md", "---\ndescription: from claude\n---\nClaude prompt.\n")
+	writeAgent(t, claudeDir, "shared.md", "Claude shared prompt.\n")
+	writeAgent(t, ownDir, "shared.md", "Reviewer shared prompt.\n")
+
+	// Later dirs shadow earlier ones, mirroring the project-dir order.
+	c := NewCatalog(claudeDir, ownDir)
+	byName := map[string]Agent{}
+	for _, a := range c.All() {
+		byName[a.Name] = a
+	}
+	if a := byName["sql"]; a.Source != SourceUser || a.Prompt != "Claude prompt." {
+		t.Errorf("claude user agent: %+v", a)
+	}
+	if a := byName["shared"]; a.Prompt != "Reviewer shared prompt." {
+		t.Errorf("shared agent: %+v", a)
+	}
+	if n := len(c.All()); n != len(Builtins())+2 {
+		t.Errorf("catalog size %d: %v", n, c.Names())
+	}
+	if len(c.Warnings()) != 0 {
+		t.Errorf("warnings: %v", c.Warnings())
 	}
 }
 
