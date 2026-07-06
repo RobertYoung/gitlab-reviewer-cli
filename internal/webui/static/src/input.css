@@ -460,7 +460,13 @@ tr.inline-comment td { @apply border-t border-b border-base-300; }
 .finding.state-accepted, .finding.state-published { border-left: 3px solid var(--color-success); }
 .finding > header { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
 .finding .edit summary { list-style: none; }
+/* the <details> is a flex item in the actions row: closed it sizes to its
+   summary button, open it takes the whole row so the textarea (100% wide,
+   vertically resizable) fills the finding instead of its ~20-column
+   intrinsic width */
+.finding .edit[open] { flex-basis: 100%; }
 .finding .edit form { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; width: 100%; }
+.finding .edit textarea { min-height: 7rem; }
 .finding:focus, .finding.kfocus { @apply outline-2 outline-primary outline-offset-1; }
 .finding.filtered { display: none; }
 /* named f-inline, not "inline": Tailwind ships a real .inline utility
