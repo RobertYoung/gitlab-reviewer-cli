@@ -1,8 +1,8 @@
 // Package agents defines the pluggable review agents that a scan can run:
-// the six built-in agents (one per finding category) plus user- and
-// project-provided agents loaded from markdown files with YAML frontmatter.
-// Each selected agent runs as its own reviewer invocation with its own
-// system prompt; findings carry the agent's name for attribution.
+// the six built-in agents (one per finding category) plus plugin-, user-
+// and project-provided agents loaded from markdown files with YAML
+// frontmatter. Each selected agent runs as its own reviewer invocation with
+// its own system prompt; findings carry the agent's name for attribution.
 package agents
 
 import (
@@ -10,11 +10,12 @@ import (
 )
 
 // Source records where an agent definition came from. When names collide,
-// project shadows user shadows builtin.
+// project shadows user shadows plugin shadows builtin.
 type Source string
 
 const (
 	SourceBuiltin Source = "builtin"
+	SourcePlugin  Source = "plugin"
 	SourceUser    Source = "user"
 	SourceProject Source = "project"
 )

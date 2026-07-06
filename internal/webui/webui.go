@@ -64,7 +64,7 @@ type Deps struct {
 // catalog returns the agent catalog, defaulting to builtins only.
 func (d *Deps) catalog() *agents.Catalog {
 	if d.Agents == nil {
-		return agents.NewCatalog("")
+		return agents.NewCatalog(nil, nil)
 	}
 	return d.Agents
 }

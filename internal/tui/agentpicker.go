@@ -80,7 +80,7 @@ type projectAgentsMsg struct {
 func newAgentPicker(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, manual []review.Finding, manualReport func(string, review.FindingState)) *agentPicker {
 	catalog := deps.Agents
 	if catalog == nil {
-		catalog = agents.NewCatalog("")
+		catalog = agents.NewCatalog(nil, nil)
 	}
 	p := &agentPicker{
 		deps:         deps,

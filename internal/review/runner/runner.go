@@ -425,7 +425,7 @@ func findingLoc(f review.Finding) string {
 func (r Runner) resolveAgents(detail gitlabx.MRDetail, repoPath string, emit func(string)) ([]agents.Agent, error) {
 	catalog := r.Catalog
 	if catalog == nil {
-		catalog = agents.NewCatalog("")
+		catalog = agents.NewCatalog(nil, nil)
 	}
 	// Path/root checkout modes may keep agent definitions untracked in the
 	// user's local clone (like local_overlay files); merge them first so

@@ -94,15 +94,38 @@ migrations without a documented rollback.
 Agent names must match `^[a-z0-9][a-z0-9_-]*$`. More examples in
 [Recipes](Recipes.md#custom-agents-in-practice).
 
+### Claude Code plugin agents
+
+Agents installed via Claude Code *plugins* can join the catalog too, but
+only for plugins you explicitly accept — a plugin agent's prompt steers the
+reviewer, so installing a plugin for Claude Code must never silently add
+reviewers here:
+
+```yaml
+review:
+  claude_plugins:
+    - review-pack@official-marketplace  # full form
+    - security-toolkit                  # bare name, if only one marketplace has it
+```
+
+Accepted plugins are resolved through Claude Code's install manifest
+(`~/.claude/plugins/installed_plugins.json`) and their `agents/`
+directories are loaded (recursively — plugin layouts vary), in allowlist
+order. A bare name that exists in several marketplaces is skipped with a
+warning asking you to qualify it, as is a name that isn't installed. When
+a plugin is installed at both user and project scope, the user-scope
+install is used. There is no wildcard — each plugin is a trust decision,
+so the key is settings-file only (no env var or flag).
+
 ### Precedence and safety
 
-Name collisions resolve as **repo > user > built-in**, so a repo can
-sharpen the stock `security` agent by shipping its own `security.md`;
-within a scope the tool's own directory beats Claude Code's
-(`.gitlab-reviewer/agents/` over `.claude/agents/` in a repo,
-`~/.config/gitlab-reviewer/agents/` over `~/.claude/agents/` for the user).
-Invalid definition files are skipped with a warning in the picker and the
-run log.
+Name collisions resolve as **repo > user > plugin > built-in**, so a repo
+can sharpen the stock `security` agent by shipping its own `security.md`,
+and your own definition beats a same-named plugin one; within a scope the
+tool's own directory beats Claude Code's (`.gitlab-reviewer/agents/` over
+`.claude/agents/` in a repo, `~/.config/gitlab-reviewer/agents/` over
+`~/.claude/agents/` for the user). Invalid definition files are skipped
+with a warning in the picker and the run log.
 
 Repo-shipped agents steer the reviewer's attention but run in the same
 read-only sandbox as every review (`Read`/`Grep`/`Glob` only) — an agent
