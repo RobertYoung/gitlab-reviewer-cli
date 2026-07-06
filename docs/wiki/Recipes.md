@@ -138,8 +138,9 @@ migrations without a documented rollback.
 ```
 
 Repos that already keep review guidance in Claude Code's
-`.claude/agents/` work as-is. See [Review Agents](Review-Agents.md) for
-precedence and discovery rules.
+`.claude/agents/` work as-is, and so do your personal subagents in
+`~/.claude/agents/`. See [Review Agents](Review-Agents.md) for precedence
+and discovery rules.
 
 ## Claude Code subagents inside reviews
 

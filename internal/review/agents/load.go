@@ -19,7 +19,8 @@ const ProjectAgentsDir = ".gitlab-reviewer/agents"
 // ClaudeAgentsDir is Claude Code's subagents directory. Teams that keep
 // review guidance there ship it to both tools with one set of files; the
 // definition format is compatible (YAML frontmatter + prompt body), and
-// fields this tool does not know are ignored.
+// fields this tool does not know are ignored. The user-scope counterpart
+// (~/.claude/agents, config.DefaultClaudeAgentsDir) is loaded via NewCatalog.
 const ClaudeAgentsDir = ".claude/agents"
 
 // ProjectAgentDirs are the repo-relative directories scanned for
@@ -188,7 +189,50 @@ func splitFrontmatter(raw string) (frontmatter, string, error) {
 		body = ""
 	}
 	if err := yaml.Unmarshal([]byte(header), &fm); err != nil {
-		return fm, "", fmt.Errorf("frontmatter: %w", err)
+		// Claude Code writes descriptions as one long unquoted scalar that
+		// may contain ": ", which strict YAML rejects. Fall back to reading
+		// the known fields line by line so those definitions stay loadable.
+		return parseLenient(header), body, nil
 	}
 	return fm, body, nil
+}
+
+var fieldRe = regexp.MustCompile(`^([A-Za-z][A-Za-z0-9_-]*):\s?(.*)$`)
+
+// parseLenient reads one `key: value` field per line, taking everything
+// after the first colon verbatim. Only inline lists ([a, b] or a, b) are
+// understood for categories.
+func parseLenient(header string) frontmatter {
+	var fm frontmatter
+	for _, line := range strings.Split(header, "\n") {
+		m := fieldRe.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		val := strings.TrimSpace(m[2])
+		switch m[1] {
+		case "name":
+			fm.Name = val
+		case "description":
+			fm.Description = val
+		case "severity":
+			fm.Severity = val
+		case "model":
+			fm.Model = val
+		case "categories":
+			fm.Categories = splitInlineList(val)
+		}
+	}
+	return fm
+}
+
+func splitInlineList(v string) []string {
+	v = strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(v), "["), "]")
+	var out []string
+	for _, item := range strings.Split(v, ",") {
+		if item = strings.Trim(strings.TrimSpace(item), `"'`); item != "" {
+			out = append(out, item)
+		}
+	}
+	return out
 }

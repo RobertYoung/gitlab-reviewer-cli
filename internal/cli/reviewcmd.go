@@ -154,7 +154,7 @@ func runHeadlessReview(cmd *cobra.Command, st *state, ref, publishMode, output s
 			}
 			return co.Path, co.Close, nil
 		},
-		Catalog:     agents.NewCatalog(config.DefaultAgentsDir()),
+		Catalog:     agents.NewCatalog(config.UserAgentDirs()...),
 		Logs:        runlog.NewStore(reviewsDir),
 		Results:     results,
 		Incremental: !full,

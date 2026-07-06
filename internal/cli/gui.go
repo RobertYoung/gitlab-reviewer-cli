@@ -56,7 +56,7 @@ func newGUICmd(st *state) *cobra.Command {
 			}
 			logs := runlog.NewStore(reviewsDir)
 			results := resultstore.NewStore(reviewsDir)
-			catalog := agents.NewCatalog(config.DefaultAgentsDir())
+			catalog := agents.NewCatalog(config.UserAgentDirs()...)
 			selection := agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json"))
 
 			// Enforce the clone-cache budget in the background; the server
