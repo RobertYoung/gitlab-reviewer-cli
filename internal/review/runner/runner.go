@@ -43,9 +43,10 @@ type Runner struct {
 	// --agents); empty falls back to cfg.Review.Agents.
 	AgentNames []string
 	// AgentModels overrides the review model per agent (agent name → model
-	// ID), from the picker. It takes precedence over an agent's frontmatter
-	// model and cfg.Review.Model; agents absent from the map keep those
-	// defaults. Nil applies no overrides.
+	// ID), from the picker. It takes precedence over the configured
+	// cfg.Review.AgentModels, an agent's frontmatter model, and
+	// cfg.Review.Model; agents absent from the map keep those defaults.
+	// Nil applies no overrides.
 	AgentModels map[string]string
 	// Incremental asks for a delta review: when Results holds a previous
 	// review of this MR, only the changes pushed since its head go through
@@ -465,11 +466,15 @@ func (r Runner) resolveAgents(detail gitlabx.MRDetail, repoPath string, emit fun
 }
 
 // modelFor resolves the review model an agent runs with: the per-agent
-// override from AgentModels (picker choice) first, then the agent's
-// frontmatter model. Empty means neither applies, leaving req.Model at the
-// cfg.Review.Model default BuildRequests set.
+// override from AgentModels (picker choice) first, then the configured
+// review.agent_models entry, then the agent's frontmatter model. Empty
+// means none applies, leaving req.Model at the cfg.Review.Model default
+// BuildRequests set.
 func (r Runner) modelFor(a agents.Agent) string {
 	if m := r.AgentModels[a.Name]; m != "" {
+		return m
+	}
+	if m := r.Cfg.Review.AgentModels[a.Name]; m != "" {
 		return m
 	}
 	return a.Model

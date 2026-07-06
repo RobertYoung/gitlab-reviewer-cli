@@ -43,13 +43,29 @@ suggestions — the same list `gitlab-reviewer models` prints):
 Either way the pick is remembered per project alongside the agent
 selection, and both frontends share it.
 
+To pin an agent's model globally instead of per project, set
+`review.agent_models` in the settings file (or the GUI settings page,
+*Review → Agent models*):
+
+```yaml
+review:
+  agent_models:
+    security: opus
+    docs: haiku
+```
+
 The model an agent runs with resolves in this order:
 
 1. the picker choice for this project (remembered);
-2. the agent's frontmatter `model:` (see below) — how repo/user agents and
-   non-interactive runs set a per-agent model;
-3. [`review.model`](Configuration-Reference.md#review), the run-wide default;
-4. the `claude` CLI's own default when none of the above is set.
+2. [`review.agent_models`](Configuration-Reference.md#review), the global
+   per-agent setting;
+3. the agent's frontmatter `model:` (see below) — how repo/user agents set
+   their own default;
+4. [`review.model`](Configuration-Reference.md#review), the run-wide default;
+5. the `claude` CLI's own default when none of the above is set.
+
+Entries for agents that do not exist are inert (no error): the map keys
+are matched against whatever agents actually run.
 
 ## Cost and limits
 

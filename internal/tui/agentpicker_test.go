@@ -249,6 +249,30 @@ func TestAgentPickerRepoAgentsRespectRememberedSelection(t *testing.T) {
 	}
 }
 
+func TestAgentPickerDisplayModelResolution(t *testing.T) {
+	detail, diffs, _ := reviewFixture()
+	deps := pickerDeps(t)
+	// The configured per-agent model shows as the row's model, but a
+	// remembered picker choice for the project still wins.
+	deps.Cfg.Review.AgentModels = map[string]string{"security": "opus", "bug": "haiku"}
+	deps.Selection.SaveModels(detail.ProjectPath, map[string]string{"bug": "sonnet"})
+
+	p := newAgentPicker(deps, *detail, diffs, nil, nil, nil)
+	byName := map[string]agents.Agent{}
+	for _, a := range p.agents {
+		byName[a.Name] = a
+	}
+	if got := p.displayModel(byName["security"]); got != "opus" {
+		t.Errorf("configured model: %q", got)
+	}
+	if got := p.displayModel(byName["bug"]); got != "sonnet" {
+		t.Errorf("picker choice must win: %q", got)
+	}
+	if got := p.displayModel(byName["docs"]); got != "(default)" {
+		t.Errorf("unconfigured agent: %q", got)
+	}
+}
+
 func TestAgentPickerSkipsFetchWithoutHeadSHA(t *testing.T) {
 	detail, diffs, _ := reviewFixture()
 	p := newAgentPicker(pickerDeps(t), *detail, diffs, nil, nil, nil)

@@ -70,6 +70,7 @@ func settingsSchema() []settingSection {
 			{Key: "review.timeout", Label: "Timeout", Kind: kindDuration, Help: "Per-review time limit, e.g. 10m."},
 			{Key: "review.max_budget_usd", Label: "Max budget (USD)", Kind: kindFloat, Help: "Spend cap per review; 0 disables the cap."},
 			{Key: "review.agents", Label: "Agents", Kind: kindList, Help: "Default agent selection, one per line. Blank uses all builtins."},
+			{Key: "review.agent_models", Label: "Agent models", Kind: kindMap, Help: "Model per agent, agent=model per line, e.g. security=opus. A per-project picker choice still wins."},
 			{Key: "review.agent_concurrency", Label: "Agent concurrency", Kind: kindInt, Help: "How many agent passes run at once (≥1)."},
 			{Key: "review.instructions", Label: "Instructions", Kind: kindText, Help: "Extra reviewer instructions (inline)."},
 			{Key: "review.instructions_file", Label: "Instructions file", Kind: kindText, Help: "Path to a file with extra reviewer instructions."},
