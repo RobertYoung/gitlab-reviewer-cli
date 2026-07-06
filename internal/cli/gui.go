@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -59,6 +60,11 @@ func newGUICmd(st *state) *cobra.Command {
 			catalog := agents.NewCatalog(config.UserAgentDirs()...)
 			selection := agents.NewSelectionStore(filepath.Join(config.DefaultStateDir(), "agent-selection.json"))
 
+			// The live configuration the GUI serves. The settings page swaps
+			// it in place (via Reload below) so saved changes take effect
+			// without a restart; MakeDeps reads it on every deps rebuild.
+			cfgHolder := &guiConfigHolder{loaded: st.loaded, reviewer: reviewer}
+
 			// Enforce the clone-cache budget in the background; the server
 			// must not wait on a filesystem walk.
 			if manager, err := checkout.NewManager(cfg.Checkout, cfg.GitLab.BaseURL, cfg.GitLab.Token); err == nil {
@@ -72,14 +78,17 @@ func newGUICmd(st *state) *cobra.Command {
 			}
 
 			srv, err := webui.New(webui.Options{
-				Instances:  cfg.InstanceNames(),
-				ReviewsDir: reviewsDir,
-				Version:    version.Version,
+				Instances:    cfg.InstanceNames(),
+				ReviewsDir:   reviewsDir,
+				Version:      version.Version,
+				SettingsFile: st.loaded.FilePath,
+				BaseConfig:   cfg,
 				MakeDeps: func(instance string) (*webui.Deps, error) {
-					icfg := cfg
+					loaded, reviewer := cfgHolder.get()
+					icfg := loaded.Config
 					if instance != "" {
 						var err error
-						if icfg, err = cfg.WithInstance(instance); err != nil {
+						if icfg, err = loaded.Config.WithInstance(instance); err != nil {
 							return nil, err
 						}
 					}
@@ -111,7 +120,7 @@ func newGUICmd(st *state) *cobra.Command {
 							return co.Path, co.Close, nil
 						},
 						CfgFor: func(projectPath string) config.Config {
-							projectCfg, err := st.loaded.ForProject(projectPath)
+							projectCfg, err := loaded.ForProject(projectPath)
 							if err != nil {
 								return icfg
 							}
@@ -122,6 +131,26 @@ func newGUICmd(st *state) *cobra.Command {
 						},
 					}
 					return deps, nil
+				},
+				Reload: func() (config.Config, error) {
+					res, err := config.Load(config.Options{File: st.configFile, Flags: cmd.Flags()})
+					if err != nil {
+						return config.Config{}, st.redactor.RedactError(err)
+					}
+					if err := res.Config.Validate(); err != nil {
+						return config.Config{}, err
+					}
+					if _, err := review.ParseBodyTemplate(res.Config.Publish.Template); err != nil {
+						return config.Config{}, err
+					}
+					st.redactor.Add(res.Config.GitLab.Token)
+					for _, inst := range res.Config.GitLab.Instances {
+						st.redactor.Add(inst.Token)
+					}
+					// Rebuild the reviewer: provider, model, claude_path,
+					// timeout and env may all have changed.
+					cfgHolder.set(res, claudecli.New(res.Config, reviewsDir))
+					return res.Config, nil
 				},
 			})
 			if err != nil {
@@ -145,6 +174,28 @@ func newGUICmd(st *state) *cobra.Command {
 	cmd.Flags().IntVar(&port, "port", 0, "port to listen on (default: a random free port)")
 	cmd.Flags().BoolVar(&noBrowser, "no-browser", false, "do not open the browser automatically")
 	return cmd
+}
+
+// guiConfigHolder holds the configuration the GUI serves, together with the
+// reviewer built from it. The settings page swaps both atomically when the
+// settings file is saved, so handlers pick up new values without a restart.
+type guiConfigHolder struct {
+	mu       sync.RWMutex
+	loaded   *config.Result
+	reviewer *claudecli.Backend
+}
+
+func (h *guiConfigHolder) get() (*config.Result, *claudecli.Backend) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.loaded, h.reviewer
+}
+
+func (h *guiConfigHolder) set(loaded *config.Result, reviewer *claudecli.Backend) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.loaded = loaded
+	h.reviewer = reviewer
 }
 
 // openBrowser opens url in the platform's default browser. The URL is a

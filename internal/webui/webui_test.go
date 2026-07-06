@@ -252,7 +252,9 @@ func newTestEnv(t *testing.T, rev review.Reviewer, cfgOpts ...func(*config.Confi
 	}
 
 	srv, err := New(Options{
-		ReviewsDir: dir,
+		ReviewsDir:   dir,
+		SettingsFile: filepath.Join(dir, "config.yaml"),
+		BaseConfig:   cfg,
 		MakeDeps: func(string) (*Deps, error) {
 			chatter, _ := rev.(review.Chatter)
 			return &Deps{

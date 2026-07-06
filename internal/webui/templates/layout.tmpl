@@ -25,6 +25,9 @@
   {{if and .Instance .Instances}}<span class="crumb">{{.Instance}}</span>{{end}}
   <span class="page-title">{{.Title}}</span>
   <span class="spacer"></span>
+  <a class="iconbtn" href="/settings" title="settings">
+    <svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>
+  </a>
   <button type="button" class="iconbtn" id="help-toggle" title="keyboard shortcuts (?)" hidden>?</button>
   <button type="button" class="iconbtn" id="theme-toggle" title="switch between light and dark theme">
     <svg class="icon only-dark" aria-hidden="true"><use href="#i-sun"/></svg>
