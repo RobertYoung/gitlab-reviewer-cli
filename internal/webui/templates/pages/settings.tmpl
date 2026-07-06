@@ -1,0 +1,64 @@
+{{define "content"}}
+{{$c := .Content}}
+<section class="panel narrow-wide">
+  <h2>Settings</h2>
+  <p class="subtle">Editing <code>{{$c.FilePath}}</code>{{if not $c.FileExists}} <span class="note">(not created yet — saving creates it)</span>{{end}}.</p>
+  <p class="note">These are the effective values. Environment variables and command-line flags still override the file at runtime. {{if $c.HotReload}}Saved changes apply to subsequent actions without a restart.{{else}}Saved changes apply the next time you start the GUI.{{end}}</p>
+  {{if $c.Saved}}
+  {{if $c.Applied}}<p class="ok">{{template "icon" "check"}} Saved to {{$c.FilePath}} and applied.</p>
+  {{else if $c.HotReload}}<p class="warning">{{template "icon" "warn"}} Saved to {{$c.FilePath}}, but the running session kept the previous settings — restart the GUI to apply.</p>
+  {{else}}<p class="ok">{{template "icon" "check"}} Saved to {{$c.FilePath}}. Restart the GUI to apply.</p>{{end}}
+  {{end}}
+  {{if $c.Err}}<div class="warning">{{template "icon" "warn"}} Could not save:</div><pre class="error">{{$c.Err}}</pre>{{end}}
+</section>
+
+<form method="post" action="{{$c.SaveURL}}" class="settings-form" autocomplete="off">
+  {{range $c.Sections}}
+  <section class="panel settings-section" id="sec-{{.Anchor}}">
+    <h3>{{.Title}}</h3>
+    {{if .Help}}<p class="subtle">{{.Help}}</p>{{end}}
+    {{range .Views}}
+    {{template "settingfield" .}}
+    {{end}}
+  </section>
+  {{end}}
+  <div class="actions settings-actions">
+    <button type="submit" class="button primary">Save settings</button>
+    <a class="button" href="/">Cancel</a>
+  </div>
+</form>
+{{end}}
+
+{{define "settingfield"}}
+<div class="setting setting-{{.Kind}}">
+  {{if .Is "bool"}}
+  <label class="setting-check">
+    <input type="checkbox" name="{{.Key}}" {{if .Checked}}checked{{end}}>
+    <span class="setting-label">{{.Label}}</span>
+  </label>
+  {{if .Help}}<span class="help">{{.Help}}</span>{{end}}
+  {{else}}
+  <label class="setting-label" for="f-{{.Key}}">{{.Label}}</label>
+  {{if .Help}}<span class="help">{{.Help}}</span>{{end}}
+  {{if .Is "select"}}
+  {{$val := .Value}}
+  <select id="f-{{.Key}}" name="{{.Key}}">
+    {{range .Options}}
+    <option value="{{.}}" {{if eq . $val}}selected{{end}}>{{if eq . ""}}(unset — disabled){{else}}{{.}}{{end}}</option>
+    {{end}}
+  </select>
+  {{else if or (.Is "list") (.Is "map")}}
+  <textarea id="f-{{.Key}}" name="{{.Key}}" rows="4" spellcheck="false">{{.Text}}</textarea>
+  {{else if .Is "secret"}}
+  <input type="password" id="f-{{.Key}}" name="{{.Key}}" autocomplete="new-password"
+    placeholder="{{if .TokenSet}}configured — leave blank to keep{{else}}not set{{end}}">
+  {{else if .Is "int"}}
+  <input type="number" step="1" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}">
+  {{else if .Is "float"}}
+  <input type="number" step="any" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}">
+  {{else}}
+  <input type="text" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}" spellcheck="false">
+  {{end}}
+  {{end}}
+</div>
+{{end}}

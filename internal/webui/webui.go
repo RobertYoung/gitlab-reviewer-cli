@@ -129,6 +129,18 @@ type Options struct {
 	ReviewsDir string
 	// Version is shown in the page footer.
 	Version string
+	// SettingsFile is the settings file the settings page reads and writes.
+	// Empty falls back to config.DefaultFile().
+	SettingsFile string
+	// BaseConfig is the effective configuration (before any instance is
+	// selected) the settings page shows as the current values.
+	BaseConfig config.Config
+	// Reload re-reads the settings file from disk, rebuilds the shared
+	// config-derived state, and returns the new effective base config. It is
+	// called after the settings page writes the file so changes take effect
+	// without a restart. Nil disables hot reload: saved changes then apply
+	// only on the next launch.
+	Reload func() (config.Config, error)
 }
 
 // Server is the browser GUI: an http.Handler plus the session state that
@@ -140,8 +152,9 @@ type Server struct {
 	pages     map[string]*template.Template
 	chromaCSS []byte
 
-	mu   sync.Mutex
-	deps map[string]*Deps
+	mu         sync.Mutex
+	deps       map[string]*Deps
+	baseConfig config.Config // guarded by mu; swapped by reload
 
 	runs     *runRegistry
 	comments *commentStore
@@ -167,16 +180,44 @@ func New(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("generating syntax stylesheet: %w", err)
 	}
 	return &Server{
-		opts:      opts,
-		instances: instances,
-		token:     hex.EncodeToString(buf),
-		pages:     pages,
-		chromaCSS: css,
-		deps:      map[string]*Deps{},
-		runs:      newRunRegistry(),
-		comments:  newCommentStore(),
-		chats:     newChatRegistry(),
+		opts:       opts,
+		instances:  instances,
+		token:      hex.EncodeToString(buf),
+		pages:      pages,
+		chromaCSS:  css,
+		deps:       map[string]*Deps{},
+		baseConfig: opts.BaseConfig,
+		runs:       newRunRegistry(),
+		comments:   newCommentStore(),
+		chats:      newChatRegistry(),
 	}, nil
+}
+
+// currentConfig returns the effective base configuration, which reload swaps
+// in place when the settings file changes.
+func (s *Server) currentConfig() config.Config {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.baseConfig
+}
+
+// reload re-reads the settings file and rebuilds the config-derived state,
+// then discards the cached per-instance deps so the next request rebuilds
+// them against the new configuration. In-flight requests keep the deps they
+// already hold. It is a no-op when hot reload is not configured.
+func (s *Server) reload() error {
+	if s.opts.Reload == nil {
+		return nil
+	}
+	cfg, err := s.opts.Reload()
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.baseConfig = cfg
+	s.deps = map[string]*Deps{}
+	s.mu.Unlock()
+	return nil
 }
 
 // Token returns the session access token baked into the launch URL.
@@ -226,6 +267,8 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	mux.HandleFunc("GET /{$}", s.handleHome)
+	mux.HandleFunc("GET /settings", s.handleSettings)
+	mux.HandleFunc("POST /settings", s.handleSettingsSave)
 	mux.HandleFunc("GET /i/{inst}/{$}", s.withDeps(s.handleMRList))
 	mux.HandleFunc("GET /i/{inst}/browse", s.withDeps(s.handleBrowse))
 	mux.HandleFunc("GET /i/{inst}/mr", s.withDeps(s.handleMRDetail))
