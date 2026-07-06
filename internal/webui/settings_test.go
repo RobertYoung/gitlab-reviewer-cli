@@ -49,6 +49,7 @@ func TestSettingsPageRenders(t *testing.T) {
 		`name="gitlab.base_url"`,
 		`name="review.provider"`,
 		`name="review.timeout"`,
+		`name="review.agent_models"`,
 		`name="checkout.mode"`,
 		`name="log.level"`,
 		"Save settings",
@@ -70,6 +71,7 @@ func TestSettingsSaveWritesFile(t *testing.T) {
 	form.Set("gitlab.base_url", "https://gitlab.example.com")
 	form.Set("review.timeout", "3m")
 	form.Set("review.use_agents", "on")
+	form.Set("review.agent_models", "security=opus\nbug=haiku")
 
 	code, _ := env.post("/settings", form)
 	if code != http.StatusOK { // PostForm follows the redirect to GET /settings
@@ -91,6 +93,9 @@ func TestSettingsSaveWritesFile(t *testing.T) {
 	}
 	if !res.Config.Review.UseAgents {
 		t.Errorf("use_agents not saved")
+	}
+	if m := res.Config.Review.AgentModels; m["security"] != "opus" || m["bug"] != "haiku" {
+		t.Errorf("agent_models = %v", m)
 	}
 }
 

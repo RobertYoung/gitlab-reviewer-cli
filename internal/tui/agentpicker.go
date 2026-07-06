@@ -41,10 +41,15 @@ type agentPicker struct {
 	height   int
 
 	// models holds the per-agent model overrides the user picked (agent name
-	// → model ID); an agent absent from the map runs with its frontmatter
-	// model, then the configured default. Seeded from the remembered
-	// selection and carried to the run.
+	// → model ID); an agent absent from the map runs with the configured
+	// review.agent_models entry, then its frontmatter model, then the
+	// run-wide default. Seeded from the remembered selection and carried to
+	// the run.
 	models map[string]string
+	// cfgModels is review.agent_models for this project: the configured
+	// per-agent defaults a picker choice overrides, shown on the row when no
+	// choice is made.
+	cfgModels map[string]string
 	// modelChoices is the menu the "m" chooser offers: "" (the default entry)
 	// followed by cfg.ModelOptions(). choosing shows it for the cursor agent,
 	// with modelCursor the highlighted row.
@@ -110,6 +115,7 @@ func newAgentPicker(deps Deps, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff
 	for name, m := range deps.Selection.LoadModels(detail.ProjectPath) {
 		p.models[name] = m
 	}
+	p.cfgModels = cfg.Review.AgentModels
 	p.modelChoices = append([]string{""}, cfg.ModelOptions()...)
 
 	// Initial checks: last selection for this project, then the configured
@@ -327,9 +333,13 @@ func (p *agentPicker) selectedModels(selected []string) map[string]string {
 }
 
 // displayModel is the model shown on an agent's row: the user's pick, else
-// its frontmatter model, else the "(default)" placeholder.
+// the configured review.agent_models entry, else its frontmatter model,
+// else the "(default)" placeholder — mirroring the runner's resolution.
 func (p *agentPicker) displayModel(a agents.Agent) string {
 	if m := p.models[a.Name]; m != "" {
+		return m
+	}
+	if m := p.cfgModels[a.Name]; m != "" {
 		return m
 	}
 	if a.Model != "" {
@@ -382,8 +392,9 @@ func (p *agentPicker) View() string {
 		}
 		model := fmt.Sprintf("%-*s", modelWidth, p.displayModel(a))
 		// Dim the model column only when it is the bare "(default)" fallback;
-		// an explicit pick or a frontmatter model reads as a real choice.
-		if p.models[a.Name] == "" && a.Model == "" {
+		// an explicit pick, a configured entry, or a frontmatter model reads
+		// as a real choice.
+		if p.models[a.Name] == "" && p.cfgModels[a.Name] == "" && a.Model == "" {
 			model = subtleStyle.Render(model)
 		}
 		line := fmt.Sprintf("%s%s %-*s  %s  %s", prefix, box, nameWidth, a.Name, model, a.Description)

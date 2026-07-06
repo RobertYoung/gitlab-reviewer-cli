@@ -205,16 +205,23 @@ func fanOutRunner(t *testing.T, rev *fakeReviewer, names []string) Runner {
 
 // TestRunPerAgentModel checks the per-agent model precedence the runner
 // applies when specialising each agent's request: the AgentModels override
-// wins, then the agent's frontmatter model, then cfg.Review.Model.
+// wins, then the configured review.agent_models entry, then the agent's
+// frontmatter model, then cfg.Review.Model.
 func TestRunPerAgentModel(t *testing.T) {
 	rev := &fakeReviewer{}
-	r := fanOutRunner(t, rev, []string{"bug", "security", "schema"})
+	r := fanOutRunner(t, rev, []string{"bug", "security", "schema", "migrations"})
 	r.Cfg.Review.Model = "sonnet" // the run-wide default
-	// A custom agent that declares its own model in frontmatter.
+	// Custom agents that declare their own model in frontmatter.
 	r.Catalog = agents.NewCatalog(nil, nil).WithProjectFiles([]agents.File{{
 		Name:    "schema.md",
 		Content: []byte("---\nname: schema\ndescription: Schema checks\nmodel: haiku\n---\nCheck the schema.\n"),
+	}, {
+		Name:    "migrations.md",
+		Content: []byte("---\nname: migrations\ndescription: Migration checks\nmodel: haiku\n---\nCheck the migrations.\n"),
 	}})
+	// The global per-agent configuration: outranked by the picker for bug,
+	// outranking the frontmatter model for schema.
+	r.Cfg.Review.AgentModels = map[string]string{"bug": "haiku", "schema": "claude-sonnet-5"}
 	// The picker's override for one agent takes precedence over everything.
 	r.AgentModels = map[string]string{"bug": "opus"}
 
@@ -227,9 +234,10 @@ func TestRunPerAgentModel(t *testing.T) {
 		got[req.AgentName] = req.Model
 	}
 	want := map[string]string{
-		"bug":      "opus",   // AgentModels override
-		"schema":   "haiku",  // frontmatter model
-		"security": "sonnet", // cfg.Review.Model default
+		"bug":        "opus",            // AgentModels override beats agent_models
+		"schema":     "claude-sonnet-5", // review.agent_models beats frontmatter
+		"migrations": "haiku",           // frontmatter model
+		"security":   "sonnet",          // cfg.Review.Model default
 	}
 	if !maps.Equal(got, want) {
 		t.Fatalf("per-agent models: got %v, want %v", got, want)

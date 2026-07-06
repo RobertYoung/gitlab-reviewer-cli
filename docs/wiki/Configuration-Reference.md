@@ -91,6 +91,7 @@ unset is an **error**, not a silent fallback to the shared token.
 | `review.timeout` | `GITLAB_REVIEWER_REVIEW_TIMEOUT` | `--review-timeout` | `10m` | Go duration; **per review pass**, must be > 0 |
 | `review.max_budget_usd` | `GITLAB_REVIEWER_REVIEW_MAX_BUDGET_USD` | `--max-budget-usd` | unset | **total per run**, split evenly across passes |
 | `review.agents` | `GITLAB_REVIEWER_REVIEW_AGENTS` (comma-separated) | `--agents` | all built-ins | see [Review Agents](Review-Agents.md); unknown names fail the run |
+| `review.agent_models` | — (file only, map) | — | `{}` | model per agent (`security: opus`) — see [Review Agents](Review-Agents.md#per-agent-model) |
 | `review.agent_concurrency` | `GITLAB_REVIEWER_REVIEW_AGENT_CONCURRENCY` | `--agent-concurrency` | `3` | ≥ 1; how many passes run at once |
 | `review.categories` | `GITLAB_REVIEWER_REVIEW_CATEGORIES` (comma-separated) | `--categories` | all six | **deprecated** alias — see below |
 | `review.instructions` | `GITLAB_REVIEWER_REVIEW_INSTRUCTIONS` | `--instructions` | `""` | appended to the review prompt |

@@ -76,6 +76,12 @@ type Review struct {
 	// falls back to the deprecated categories key, which defaults to all
 	// builtins.
 	Agents []string `koanf:"agents"`
+	// AgentModels pins the review model per agent (agent name → model ID),
+	// e.g. security: opus. A picker choice remembered for the project still
+	// wins; an agent's own frontmatter model and review.model are the
+	// fallbacks. Names are resolved when the run's agents are, so an entry
+	// for an unknown agent is simply inert.
+	AgentModels map[string]string `koanf:"agent_models"`
 	// AgentConcurrency caps how many agent passes run at once.
 	AgentConcurrency int `koanf:"agent_concurrency"`
 	// Categories is deprecated: builtin agents subsumed it. It is kept as
@@ -208,6 +214,7 @@ func Default() Config {
 			// step falls back to categories, making the deprecated key a
 			// working alias without tracking which layer set it.
 			AgentConcurrency: 3,
+			AgentModels:      map[string]string{},
 			Categories:       slices.Clone(Categories),
 			MaxDiffKB:        256,
 			Exclude: []string{

@@ -305,7 +305,11 @@ func agentOptions(d *Deps, cat *agents.Catalog, projectPath string) []agentOptio
 		if a.Source != agents.SourceBuiltin {
 			opt.Source = string(a.Source)
 		}
-		opt.Models = modelMenu(modelChoices, models[a.Name], a.Model)
+		fallback := cfg.Review.AgentModels[a.Name]
+		if fallback == "" {
+			fallback = a.Model
+		}
+		opt.Models = modelMenu(modelChoices, models[a.Name], fallback)
 		anyChecked = anyChecked || opt.Checked
 		opts = append(opts, opt)
 	}
@@ -318,13 +322,14 @@ func agentOptions(d *Deps, cat *agents.Catalog, projectPath string) []agentOptio
 }
 
 // modelMenu builds one agent's model dropdown. The "(default)" entry falls
-// back to the agent's frontmatter model (surfaced in its label when set),
-// then review.model; pick is the remembered override, pre-selected and kept
-// as an entry even when it is not in the configured list.
-func modelMenu(choices []string, pick, frontmatter string) []agentModelOption {
+// back to the agent's effective default — its review.agent_models entry,
+// then its frontmatter model (surfaced in the label when set), then
+// review.model; pick is the remembered override, pre-selected and kept as
+// an entry even when it is not in the configured list.
+func modelMenu(choices []string, pick, fallback string) []agentModelOption {
 	defaultLabel := "(default)"
-	if frontmatter != "" {
-		defaultLabel = "default (" + frontmatter + ")"
+	if fallback != "" {
+		defaultLabel = "default (" + fallback + ")"
 	}
 	menu := []agentModelOption{{Value: "", Label: defaultLabel, Selected: pick == ""}}
 	found := false
