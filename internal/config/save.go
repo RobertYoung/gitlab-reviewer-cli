@@ -19,7 +19,7 @@ import (
 // does not manage (gitlab.instances, review.mcp_servers, per-project
 // overrides) survive untouched through Set/Delete and back to disk.
 func FileValues(path string) (map[string]any, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) //nolint:gosec // path is the operator's settings file location, not user input
 	if err != nil {
 		if os.IsNotExist(err) {
 			return map[string]any{}, nil

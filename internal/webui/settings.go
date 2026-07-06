@@ -122,10 +122,10 @@ func settingsSchema() []settingSection {
 // shape the template needs, plus the schema metadata.
 type fieldView struct {
 	settingField
-	Value    string   // single-line controls (text/select/int/float/duration)
-	Text     string   // multi-line controls (list/map)
-	Checked  bool // bool
-	TokenSet bool // secret: whether a value is currently configured
+	Value    string // single-line controls (text/select/int/float/duration)
+	Text     string // multi-line controls (list/map)
+	Checked  bool   // bool
+	TokenSet bool   // secret: whether a value is currently configured
 }
 
 // Is reports whether the field is of the named kind, for template branching
