@@ -500,6 +500,54 @@
     });
   }
 
+  // --- settings: gitlab.instances add/remove ---------------------------
+  // The server renders every instance as a fieldset plus one trailing blank
+  // row. "Add instance" clones the blank row with a fresh index; "Remove"
+  // deletes a row (an empty name is dropped server-side, so no-JS users
+  // remove by clearing the name). Degrades to the single blank row without
+  // this script.
+  var instanceEditor = $("#instance-editor");
+  if (instanceEditor) {
+    var addInstanceBtn = $("#add-instance");
+    var reindexRow = function (row, index) {
+      $$("[name^='instance.']", row).forEach(function (field) {
+        field.name = field.name.replace(/^instance\.\d+\./, "instance." + index + ".");
+      });
+      $$("[id^='inst-']", row).forEach(function (field) {
+        var suffix = field.id.replace(/^inst-\d+-/, "");
+        field.id = "inst-" + index + "-" + suffix;
+      });
+      $$("label[for^='inst-']", row).forEach(function (label) {
+        var suffix = label.htmlFor.replace(/^inst-\d+-/, "");
+        label.htmlFor = "inst-" + index + "-" + suffix;
+      });
+    };
+    if (addInstanceBtn) {
+      addInstanceBtn.addEventListener("click", function () {
+        var rows = $$("[data-instance-row]", instanceEditor);
+        var template = rows[rows.length - 1];
+        if (!template) return;
+        var index = parseInt(instanceEditor.dataset.nextIndex || "0", 10);
+        instanceEditor.dataset.nextIndex = index + 1;
+        var clone = template.cloneNode(true);
+        reindexRow(clone, index);
+        $$("input", clone).forEach(function (field) {
+          if (field.type !== "hidden") field.value = "";
+          if (field.name.indexOf(".orig_name") !== -1) field.value = "";
+        });
+        instanceEditor.appendChild(clone);
+        var name = $("[name$='.name']", clone);
+        if (name) name.focus();
+      });
+    }
+    instanceEditor.addEventListener("click", function (ev) {
+      var btn = ev.target.closest("[data-remove-instance]");
+      if (!btn) return;
+      var row = btn.closest("[data-instance-row]");
+      if (row) row.remove();
+    });
+  }
+
   // Unhide the topbar help button on pages that registered shortcuts.
   var helpBtn = $("#help-toggle");
   if (helpBtn && shortcuts.length) {
