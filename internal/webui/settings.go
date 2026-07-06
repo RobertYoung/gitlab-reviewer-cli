@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -47,10 +48,11 @@ type settingSection struct {
 }
 
 // settingsSchema is the full set of editable settings, grouped as they are
-// in the config struct. Deliberately omitted are the structured collections
-// that a flat form cannot edit without loss — gitlab.instances,
-// review.mcp_servers, and per-project overrides — which the round-trip save
-// preserves untouched and which are edited in the file directly.
+// in the config struct. gitlab.instances has its own repeating-row editor
+// (see instanceRows/applyInstances); the remaining structured collections a
+// flat form cannot edit without loss — review.mcp_servers and per-project
+// overrides — are preserved untouched by the round-trip save and edited in
+// the file directly.
 func settingsSchema() []settingSection {
 	sev := config.Severities
 	return []settingSection{
@@ -133,12 +135,41 @@ type fieldView struct {
 // string literal directly).
 func (v fieldView) Is(kind string) bool { return string(v.Kind) == kind }
 
+// instanceRow is one gitlab.instances entry resolved for the repeating-row
+// editor. The token is write-only: TokenSet reports whether one is
+// configured, but the value is never rendered back to the page.
+type instanceRow struct {
+	Index    int
+	Name     string
+	BaseURL  string
+	TokenEnv string
+	TokenSet bool
+}
+
+// instanceRows builds the editor rows from the current configuration.
+func instanceRows(cfg config.Config) []instanceRow {
+	rows := make([]instanceRow, 0, len(cfg.GitLab.Instances))
+	for i, inst := range cfg.GitLab.Instances {
+		rows = append(rows, instanceRow{
+			Index:    i,
+			Name:     inst.Name,
+			BaseURL:  inst.BaseURL,
+			TokenEnv: inst.TokenEnv,
+			TokenSet: inst.Token != "",
+		})
+	}
+	return rows
+}
+
 // settingsContent is the settings page model.
 type settingsContent struct {
 	Sections []settingSectionView
-	FilePath string
-	SaveURL  string
-	Saved    bool
+	// Instances is the gitlab.instances editor state, rendered as a
+	// repeating group with add/remove rows.
+	Instances []instanceRow
+	FilePath  string
+	SaveURL   string
+	Saved     bool
 	// Applied reports whether a successful save also took effect in the
 	// running session (only meaningful when Saved).
 	Applied bool
@@ -205,6 +236,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 	values := effectiveValues(cfg)
 	content := settingsContent{
 		Sections:   buildViews(values, cfg.GitLab.Token != ""),
+		Instances:  instanceRows(cfg),
 		FilePath:   s.settingsFile(),
 		SaveURL:    "/settings",
 		Saved:      r.URL.Query().Get("saved") == "1",
@@ -238,6 +270,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	applyInstances(values, r)
 
 	fail := func(status int, msg string) {
 		tokenSet := s.currentConfig().GitLab.Token != ""
@@ -246,6 +279,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 		}
 		content := settingsContent{
 			Sections:   buildViews(values, tokenSet),
+			Instances:  instanceRowsFromValues(values),
 			FilePath:   path,
 			SaveURL:    "/settings",
 			HotReload:  s.opts.Reload != nil,
@@ -337,6 +371,143 @@ func applyField(values map[string]any, f settingField, r *http.Request) error {
 		}
 	}
 	return nil
+}
+
+// instanceSubmission is one submitted gitlab.instances row. OrigName carries
+// the name the row was rendered with, so a blank (unchanged) write-only token
+// can be matched back to the value already on disk.
+type instanceSubmission struct {
+	Name     string
+	BaseURL  string
+	Token    string
+	TokenEnv string
+	OrigName string
+}
+
+// parseInstanceForm collects the repeating instance rows from the form. Rows
+// are named instance.<index>.<field>; indices need not be contiguous (the
+// browser deletes rows client-side, and adds them with fresh indices), so the
+// present indices are gathered and returned in ascending order.
+func parseInstanceForm(r *http.Request) []instanceSubmission {
+	indices := map[int]bool{}
+	for key := range r.Form {
+		rest, ok := strings.CutPrefix(key, "instance.")
+		if !ok {
+			continue
+		}
+		numStr, _, ok := strings.Cut(rest, ".")
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(numStr); err == nil {
+			indices[n] = true
+		}
+	}
+	ordered := make([]int, 0, len(indices))
+	for n := range indices {
+		ordered = append(ordered, n)
+	}
+	sort.Ints(ordered)
+
+	subs := make([]instanceSubmission, 0, len(ordered))
+	for _, n := range ordered {
+		p := fmt.Sprintf("instance.%d.", n)
+		subs = append(subs, instanceSubmission{
+			Name:     strings.TrimSpace(r.FormValue(p + "name")),
+			BaseURL:  strings.TrimSpace(r.FormValue(p + "base_url")),
+			Token:    strings.TrimSpace(r.FormValue(p + "token")),
+			TokenEnv: strings.TrimSpace(r.FormValue(p + "token_env")),
+			OrigName: r.FormValue(p + "orig_name"),
+		})
+	}
+	return subs
+}
+
+// applyInstances rebuilds gitlab.instances in values from the submitted rows.
+// Rows without a name are dropped (an empty template row, or one the user
+// cleared to remove). A blank token preserves the value already on disk,
+// matched by the row's original name, so the write-only token survives an
+// edit that does not touch it. When no rows remain the key is deleted so the
+// shared gitlab.token path applies again.
+func applyInstances(values map[string]any, r *http.Request) {
+	existing := instanceTokens(values)
+	var list []any
+	for _, sub := range parseInstanceForm(r) {
+		if sub.Name == "" {
+			continue
+		}
+		m := map[string]any{"name": sub.Name, "base_url": sub.BaseURL}
+		token := sub.Token
+		if token == "" {
+			token = existing[sub.OrigName]
+		}
+		if token != "" {
+			m["token"] = token
+		}
+		if sub.TokenEnv != "" {
+			m["token_env"] = sub.TokenEnv
+		}
+		list = append(list, m)
+	}
+	if len(list) > 0 {
+		config.SetValue(values, "gitlab.instances", list)
+	} else {
+		config.DeleteValue(values, "gitlab.instances")
+	}
+}
+
+// instanceTokens maps each configured instance name to its literal token as
+// stored in the file, so a blank token field can preserve the existing value.
+// Instances backed by token_env have no literal token and are absent here.
+func instanceTokens(values map[string]any) map[string]string {
+	out := map[string]string{}
+	raw, ok := mapGet(values, "gitlab.instances")
+	if !ok {
+		return out
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return out
+	}
+	for _, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, tok := toString(m["name"]), toString(m["token"]); name != "" && tok != "" {
+			out[name] = tok
+		}
+	}
+	return out
+}
+
+// instanceRowsFromValues rebuilds the editor rows from the round-tripped
+// values map, so a save rejected by validation re-renders the user's edits
+// rather than the last-saved configuration.
+func instanceRowsFromValues(values map[string]any) []instanceRow {
+	raw, ok := mapGet(values, "gitlab.instances")
+	if !ok {
+		return nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	rows := make([]instanceRow, 0, len(list))
+	for i, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows = append(rows, instanceRow{
+			Index:    i,
+			Name:     toString(m["name"]),
+			BaseURL:  toString(m["base_url"]),
+			TokenEnv: toString(m["token_env"]),
+			TokenSet: toString(m["token"]) != "",
+		})
+	}
+	return rows
 }
 
 func (s *Server) settingsFile() string {

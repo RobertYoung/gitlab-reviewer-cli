@@ -22,11 +22,46 @@
     {{end}}
   </section>
   {{end}}
+
+  <section class="panel settings-section" id="sec-instances">
+    <h3>GitLab instances</h3>
+    <p class="subtle">Named GitLab connections to switch between at startup. Leave this empty to use the single connection under GitLab above. To remove an instance, clear its name (or press Remove) and save; a blank token keeps the value already stored.</p>
+    <div class="instance-editor" id="instance-editor" data-next-index="{{len $c.Instances}}">
+      {{range $c.Instances}}{{template "instancerow" .}}{{end}}
+      {{template "instancerow" (blankinstance (len $c.Instances))}}
+    </div>
+    <button type="button" class="button" id="add-instance">Add instance</button>
+  </section>
+
   <div class="actions settings-actions">
     <button type="submit" class="button primary">Save settings</button>
     <a class="button" href="/">Cancel</a>
   </div>
 </form>
+{{end}}
+
+{{define "instancerow"}}
+<fieldset class="instance-row" data-instance-row>
+  <input type="hidden" name="instance.{{.Index}}.orig_name" value="{{.Name}}">
+  <div class="setting">
+    <label class="setting-label" for="inst-{{.Index}}-name">Name</label>
+    <input type="text" id="inst-{{.Index}}-name" name="instance.{{.Index}}.name" value="{{.Name}}" spellcheck="false" placeholder="e.g. work">
+  </div>
+  <div class="setting">
+    <label class="setting-label" for="inst-{{.Index}}-url">Base URL</label>
+    <input type="text" id="inst-{{.Index}}-url" name="instance.{{.Index}}.base_url" value="{{.BaseURL}}" spellcheck="false" placeholder="https://gitlab.example.com">
+  </div>
+  <div class="setting">
+    <label class="setting-label" for="inst-{{.Index}}-token">Token</label>
+    <input type="password" id="inst-{{.Index}}-token" name="instance.{{.Index}}.token" autocomplete="new-password" placeholder="{{if .TokenSet}}configured — leave blank to keep{{else}}not set — or use a token env var{{end}}">
+  </div>
+  <div class="setting">
+    <label class="setting-label" for="inst-{{.Index}}-tokenenv">Token env var</label>
+    <input type="text" id="inst-{{.Index}}-tokenenv" name="instance.{{.Index}}.token_env" value="{{.TokenEnv}}" spellcheck="false" placeholder="e.g. WORK_GITLAB_TOKEN">
+    <span class="help">Environment variable read for the token when Token is left blank.</span>
+  </div>
+  <button type="button" class="button danger" data-remove-instance>Remove</button>
+</fieldset>
 {{end}}
 
 {{define "settingfield"}}

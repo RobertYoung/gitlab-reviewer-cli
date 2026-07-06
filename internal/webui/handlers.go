@@ -52,16 +52,17 @@ func localRedirect(w http.ResponseWriter, r *http.Request, back, fallback string
 // handleHome is the instance picker; with one instance it redirects
 // straight to the MR list.
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	if len(s.instances) == 1 {
-		http.Redirect(w, r, instPath(s.instances[0], "/"), http.StatusSeeOther)
+	instances := s.instanceList()
+	if len(instances) == 1 {
+		http.Redirect(w, r, instPath(instances[0], "/"), http.StatusSeeOther)
 		return
 	}
 	type instanceItem struct {
 		Name string
 		URL  string
 	}
-	items := make([]instanceItem, 0, len(s.instances))
-	for _, name := range s.instances {
+	items := make([]instanceItem, 0, len(instances))
+	for _, name := range instances {
 		items = append(items, instanceItem{Name: name, URL: instPath(name, "/")})
 	}
 	s.render(w, http.StatusOK, "home", pageData{Title: "instances", Content: items})

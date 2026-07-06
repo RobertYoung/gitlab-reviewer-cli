@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -115,6 +116,16 @@ func (d *Deps) cfgFor(projectPath string) config.Config {
 // gitlab.instances is set.
 const defaultInstance = "default"
 
+// instanceNames returns the selectable instance names for a configuration,
+// falling back to the single unnamed pseudo-instance when none are named.
+func instanceNames(cfg config.Config) []string {
+	names := cfg.InstanceNames()
+	if len(names) == 0 {
+		return []string{defaultInstance}
+	}
+	return names
+}
+
 // Options configure the server.
 type Options struct {
 	// Instances are the selectable GitLab instance names, in config order.
@@ -147,12 +158,12 @@ type Options struct {
 // backs it (per-instance deps, in-flight review runs, pending comments).
 type Server struct {
 	opts      Options
-	instances []string
 	token     string
 	pages     map[string]*template.Template
 	chromaCSS []byte
 
 	mu         sync.Mutex
+	instances  []string // guarded by mu; refreshed by reload
 	deps       map[string]*Deps
 	baseConfig config.Config // guarded by mu; swapped by reload
 
@@ -215,9 +226,17 @@ func (s *Server) reload() error {
 	}
 	s.mu.Lock()
 	s.baseConfig = cfg
+	s.instances = instanceNames(cfg)
 	s.deps = map[string]*Deps{}
 	s.mu.Unlock()
 	return nil
+}
+
+// instanceList returns a snapshot of the selectable instance names.
+func (s *Server) instanceList() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.instances...)
 }
 
 // Token returns the session access token baked into the launch URL.
@@ -226,16 +245,16 @@ func (s *Server) Token() string { return s.token }
 // instanceDeps returns the cached dependencies for one instance, building
 // them on first use.
 func (s *Server) instanceDeps(name string) (*Deps, error) {
-	if !s.validInstance(name) {
-		return nil, fmt.Errorf("unknown GitLab instance %q", name)
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !validInstance(s.instances, name) {
+		return nil, fmt.Errorf("unknown GitLab instance %q", name)
+	}
 	if d, ok := s.deps[name]; ok {
 		return d, nil
 	}
 	arg := name
-	if name == defaultInstance && len(s.opts.Instances) == 0 {
+	if name == defaultInstance && len(s.baseConfig.GitLab.Instances) == 0 {
 		arg = "" // unnamed single instance
 	}
 	d, err := s.opts.MakeDeps(arg)
@@ -246,13 +265,8 @@ func (s *Server) instanceDeps(name string) (*Deps, error) {
 	return d, nil
 }
 
-func (s *Server) validInstance(name string) bool {
-	for _, n := range s.instances {
-		if n == name {
-			return true
-		}
-	}
-	return false
+func validInstance(instances []string, name string) bool {
+	return slices.Contains(instances, name)
 }
 
 // Handler returns the routed, authenticated handler.

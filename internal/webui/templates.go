@@ -51,15 +51,16 @@ var tmplFuncs = template.FuncMap{
 			"RecordName": content.RecordName, "BackURL": "",
 		}
 	},
-	"ftitle":   findingTitle,
-	"floc":     findingLocation,
-	"fstate":   func(s review.FindingState) string { return s.String() },
-	"reltime":  relTime,
-	"markdown": renderMarkdown,
-	"join":     strings.Join,
-	"datetime": func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
-	"query":    url.QueryEscape,
-	"pathesc":  url.PathEscape,
+	"blankinstance": func(index int) instanceRow { return instanceRow{Index: index} },
+	"ftitle":        findingTitle,
+	"floc":          findingLocation,
+	"fstate":        func(s review.FindingState) string { return s.String() },
+	"reltime":       relTime,
+	"markdown":      renderMarkdown,
+	"join":          strings.Join,
+	"datetime":      func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
+	"query":         url.QueryEscape,
+	"pathesc":       url.PathEscape,
 }
 
 // parseTemplates builds one template set per page, each sharing the layout
@@ -90,8 +91,8 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data pag
 		http.Error(w, "unknown page "+page, http.StatusInternalServerError)
 		return
 	}
-	if len(s.instances) > 1 {
-		data.Instances = s.instances
+	if instances := s.instanceList(); len(instances) > 1 {
+		data.Instances = instances
 	}
 	data.Version = s.opts.Version
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

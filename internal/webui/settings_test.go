@@ -193,6 +193,178 @@ func TestSettingsHotReloadFailureStillSaves(t *testing.T) {
 	}
 }
 
+// setInstance fills one gitlab.instances row in a settings form.
+func setInstance(form url.Values, i int, name, baseURL, token, tokenEnv, origName string) {
+	p := fmt.Sprintf("instance.%d.", i)
+	form.Set(p+"name", name)
+	form.Set(p+"base_url", baseURL)
+	form.Set(p+"token", token)
+	form.Set(p+"token_env", tokenEnv)
+	form.Set(p+"orig_name", origName)
+}
+
+// reloadFromFile wires a hot reload that re-reads the settings file, ignoring
+// the environment, the way the gui command does.
+func reloadFromFile(env *testEnv) {
+	env.srv.opts.Reload = func() (config.Config, error) {
+		res, err := config.Load(config.Options{
+			File:      env.srv.settingsFile(),
+			LookupEnv: func(string) (string, bool) { return "", false },
+		})
+		if err != nil {
+			return config.Config{}, err
+		}
+		return res.Config, nil
+	}
+}
+
+func TestSettingsInstancesRender(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.GitLab.Instances = []config.Instance{
+			{Name: "work", BaseURL: "https://work.example", Token: "work-token"},
+			{Name: "personal", BaseURL: "https://personal.example", TokenEnv: "PERSONAL_TOKEN"},
+		}
+	})
+	code, body := env.get("/settings")
+	if code != http.StatusOK {
+		t.Fatalf("GET /settings: got %d, want 200", code)
+	}
+	for _, want := range []string{
+		`name="instance.0.name"`, `value="work"`,
+		`name="instance.0.base_url"`, `value="https://work.example"`,
+		`name="instance.1.name"`, `value="personal"`,
+		`name="instance.1.token_env"`, `value="PERSONAL_TOKEN"`,
+		`id="add-instance"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("instances editor missing %q", want)
+		}
+	}
+	// Instance tokens are write-only, like the top-level token.
+	if strings.Contains(body, "work-token") {
+		t.Errorf("instance token leaked into the page")
+	}
+}
+
+func TestSettingsAddInstance(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	reloadFromFile(env)
+
+	form := settingsForm(env.srv.opts.BaseConfig)
+	setInstance(form, 0, "work", "https://work.example", "work-token", "", "")
+
+	if code, _ := env.post("/settings", form); code != http.StatusOK {
+		t.Fatalf("POST /settings: got %d", code)
+	}
+
+	res, err := config.Load(config.Options{
+		File:      env.srv.settingsFile(),
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if err != nil {
+		t.Fatalf("reloading saved config: %v", err)
+	}
+	if len(res.Config.GitLab.Instances) != 1 {
+		t.Fatalf("instances = %+v", res.Config.GitLab.Instances)
+	}
+	got := res.Config.GitLab.Instances[0]
+	if got.Name != "work" || got.BaseURL != "https://work.example" || got.Token != "work-token" {
+		t.Errorf("saved instance = %+v", got)
+	}
+	// Hot reload refreshed the selectable instance set, so the new instance is
+	// routable without a restart.
+	if names := env.srv.instanceList(); len(names) != 1 || names[0] != "work" {
+		t.Errorf("instanceList = %v, want [work]", names)
+	}
+}
+
+func TestSettingsInstanceTokenPreserved(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.GitLab.Instances = []config.Instance{
+			{Name: "work", BaseURL: "https://work.example", Token: "work-token"},
+		}
+	})
+	if err := os.WriteFile(env.srv.settingsFile(),
+		[]byte("gitlab:\n  instances:\n    - name: work\n      base_url: https://work.example\n      token: work-token\n"),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	form := settingsForm(env.srv.opts.BaseConfig)
+	// Same instance, blank token (unchanged), new base URL.
+	setInstance(form, 0, "work", "https://work.new.example", "", "", "work")
+
+	if code, _ := env.post("/settings", form); code != http.StatusOK {
+		t.Fatalf("POST /settings: got %d", code)
+	}
+	data, err := os.ReadFile(env.srv.settingsFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "work-token") {
+		t.Errorf("blank instance token should preserve the stored value; file:\n%s", data)
+	}
+	if !strings.Contains(string(data), "https://work.new.example") {
+		t.Errorf("instance base URL was not updated; file:\n%s", data)
+	}
+}
+
+func TestSettingsRemoveInstance(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
+		c.GitLab.Instances = []config.Instance{
+			{Name: "work", BaseURL: "https://work.example", Token: "work-token"},
+			{Name: "personal", BaseURL: "https://personal.example", Token: "personal-token"},
+		}
+	})
+	if err := os.WriteFile(env.srv.settingsFile(),
+		[]byte("gitlab:\n  instances:\n    - name: work\n      base_url: https://work.example\n      token: work-token\n    - name: personal\n      base_url: https://personal.example\n      token: personal-token\n"),
+		0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	form := settingsForm(env.srv.opts.BaseConfig)
+	setInstance(form, 0, "work", "https://work.example", "", "", "work")
+	// Row 1 removed: cleared name (the browser deletes the row entirely).
+	setInstance(form, 1, "", "", "", "", "personal")
+
+	if code, _ := env.post("/settings", form); code != http.StatusOK {
+		t.Fatalf("POST /settings: got %d", code)
+	}
+	res, err := config.Load(config.Options{
+		File:      env.srv.settingsFile(),
+		LookupEnv: func(string) (string, bool) { return "", false },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Config.GitLab.Instances) != 1 || res.Config.GitLab.Instances[0].Name != "work" {
+		t.Fatalf("instances after removal = %+v", res.Config.GitLab.Instances)
+	}
+	// The surviving instance kept its preserved token.
+	if res.Config.GitLab.Instances[0].Token != "work-token" {
+		t.Errorf("surviving instance token = %q", res.Config.GitLab.Instances[0].Token)
+	}
+}
+
+func TestSettingsInstanceRejectsDuplicate(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	form := settingsForm(env.srv.opts.BaseConfig)
+	setInstance(form, 0, "work", "https://a.example", "t1", "", "")
+	setInstance(form, 1, "work", "https://b.example", "t2", "", "")
+
+	code, body := env.post("/settings", form)
+	if code != http.StatusBadRequest {
+		t.Fatalf("POST duplicate instances: got %d, want 400", code)
+	}
+	if !strings.Contains(body, "duplicate") {
+		t.Errorf("error page should mention the duplicate name, got: %s", body)
+	}
+	if _, err := os.Stat(env.srv.settingsFile()); !os.IsNotExist(err) {
+		t.Errorf("nothing should be written on a rejected save (err=%v)", err)
+	}
+}
+
 func TestSettingsSaveKeepsToken(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()}, func(c *config.Config) {
 		c.GitLab.Token = "secret-token"

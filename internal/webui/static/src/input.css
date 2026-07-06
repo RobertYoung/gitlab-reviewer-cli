@@ -274,6 +274,14 @@ textarea { width: 100%; font-family: var(--mono); font-size: 13px; }
 .instance-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.5rem; }
 .instance-list .button { display: block; text-align: center; padding: 0.7rem; }
 
+.instance-editor { display: flex; flex-direction: column; gap: 0.75rem; margin: 0.5rem 0 0.85rem; }
+.instance-row {
+  @apply border border-base-300 rounded-box bg-base-200/40;
+  padding: 0.75rem 1rem; margin: 0;
+}
+.instance-row .setting { margin: 0.5rem 0; }
+.instance-row .button.danger { @apply text-error border-error/40; margin-top: 0.25rem; }
+
 pre.prose {
   white-space: pre-wrap;
   word-break: break-word;
