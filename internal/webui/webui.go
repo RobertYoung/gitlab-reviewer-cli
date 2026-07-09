@@ -292,6 +292,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /i/{inst}/mr/comment", s.withDeps(s.handleCommentAdd))
 	mux.HandleFunc("POST /i/{inst}/mr/comment/delete", s.withDeps(s.handleCommentDelete))
 	mux.HandleFunc("POST /i/{inst}/mr/approve", s.withDeps(s.handleApprove))
+	mux.HandleFunc("GET /i/{inst}/mr/review", s.withDeps(s.handleReviewForm))
 	mux.HandleFunc("POST /i/{inst}/mr/review", s.withDeps(s.handleReviewStart))
 	mux.HandleFunc("GET /i/{inst}/run/{run}", s.withDeps(s.handleRunPage))
 	mux.HandleFunc("GET /i/{inst}/run/{run}/events", s.withDeps(s.handleRunEvents))

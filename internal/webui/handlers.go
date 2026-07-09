@@ -298,35 +298,37 @@ func fetchDetail(r *http.Request, d *Deps) (*gitlabx.MRDetail, error) {
 
 // mrNav is the URL set shared by every MR-scoped page.
 type mrNav struct {
-	Instance    string
-	Project     string
-	IID         int64
-	DetailURL   string
-	DiffURL     string
-	HistoryURL  string
-	ReviewURL   string // POST target
-	CommentURL  string // POST target
-	DeleteURL   string // POST target
-	ApproveURL  string // POST target
-	PublishURL  string // GET confirm page for pending comments
-	FindingsURL string
-	ChatURL     string // POST target: start a conversation about the MR/line
+	Instance      string
+	Project       string
+	IID           int64
+	DetailURL     string
+	DiffURL       string
+	HistoryURL    string
+	ReviewURL     string // POST target
+	ReviewFormURL string // GET options page shown before a run starts
+	CommentURL    string // POST target
+	DeleteURL     string // POST target
+	ApproveURL    string // POST target
+	PublishURL    string // GET confirm page for pending comments
+	FindingsURL   string
+	ChatURL       string // POST target: start a conversation about the MR/line
 }
 
 func newMRNav(inst, project string, iid int64) mrNav {
 	return mrNav{
-		Instance:   inst,
-		Project:    project,
-		IID:        iid,
-		DetailURL:  mrURL(inst, "/mr", project, iid, nil),
-		DiffURL:    mrURL(inst, "/mr/diff", project, iid, nil),
-		HistoryURL: mrURL(inst, "/mr/history", project, iid, nil),
-		ReviewURL:  instPath(inst, "/mr/review"),
-		CommentURL: instPath(inst, "/mr/comment"),
-		DeleteURL:  instPath(inst, "/mr/comment/delete"),
-		ApproveURL: instPath(inst, "/mr/approve"),
-		PublishURL: mrURL(inst, "/mr/publish", project, iid, url.Values{"source": {"comments"}}),
-		ChatURL:    instPath(inst, "/mr/chat/start"),
+		Instance:      inst,
+		Project:       project,
+		IID:           iid,
+		DetailURL:     mrURL(inst, "/mr", project, iid, nil),
+		DiffURL:       mrURL(inst, "/mr/diff", project, iid, nil),
+		HistoryURL:    mrURL(inst, "/mr/history", project, iid, nil),
+		ReviewURL:     instPath(inst, "/mr/review"),
+		ReviewFormURL: mrURL(inst, "/mr/review", project, iid, nil),
+		CommentURL:    instPath(inst, "/mr/comment"),
+		DeleteURL:     instPath(inst, "/mr/comment/delete"),
+		ApproveURL:    instPath(inst, "/mr/approve"),
+		PublishURL:    mrURL(inst, "/mr/publish", project, iid, url.Values{"source": {"comments"}}),
+		ChatURL:       instPath(inst, "/mr/chat/start"),
 	}
 }
 
@@ -338,18 +340,12 @@ type mrDetailContent struct {
 	Approvals     *gitlabx.Approvals // nil when the instance exposes none
 	RebaseWarning string
 	HasAccepted   bool
-	AgentOptions  []agentOption
-	AgentWarnings []string
 	// GateBlocking is how many findings in the last stored review block the
 	// severity gate (0 when the gate is off or satisfied); GateSeverity is
 	// its threshold and GateBlocked whether approval is refused outright.
 	GateBlocking int
 	GateSeverity string
 	GateBlocked  bool
-	// PrevReviewHead is the head commit of the MR's newest stored review;
-	// when set the review form offers the full-re-review override (the run
-	// defaults to reviewing only the changes pushed since that commit).
-	PrevReviewHead string
 }
 
 // agentOption is one review agent offered on the run-review form.
@@ -451,16 +447,13 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), iid)    // best-effort
 	approvals, _ := d.Svc.GetApprovals(r.Context(), detail.Project(), iid) // decoration; page works without it
 	pending := s.comments.list(mrKey(inst, project, iid))
-	cat, fetchWarnings := d.projectCatalog(r.Context(), detail)
 
 	content := mrDetailContent{
-		Nav:           newMRNav(inst, project, iid),
-		Detail:        detail,
-		Commits:       commits,
-		Pending:       pending,
-		Approvals:     approvals,
-		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
-		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
+		Nav:       newMRNav(inst, project, iid),
+		Detail:    detail,
+		Commits:   commits,
+		Pending:   pending,
+		Approvals: approvals,
 	}
 	for _, f := range pending {
 		if f.State == review.StateAccepted {
@@ -478,9 +471,6 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 			content.GateSeverity = gate.MinSeverity
 			content.GateBlocked = gate.Approvals == "block"
 		}
-	}
-	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
-		content.PrevReviewHead = prev.HeadSHA
 	}
 	s.render(w, http.StatusOK, "mrdetail", pageData{
 		Title: detail.Ref(), Instance: inst,
@@ -501,10 +491,6 @@ type diffContent struct {
 	SplitURL    string
 	HeadSHA     string // ref the context expander fetches unchanged lines at
 	ContextURL  string // GET target for expanding diff context
-	// Review-form state, same as the MR detail page.
-	AgentOptions   []agentOption
-	AgentWarnings  []string
-	PrevReviewHead string // baseline for the full-re-review override
 	// A stored review shown inline: its findings anchor on their diff
 	// lines and can be triaged in place.
 	RecordName      string
@@ -541,7 +527,6 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 	}
 	discussions, _ := d.Svc.ListDiscussions(r.Context(), detail.Project(), iid) // decorative
 	pending := s.comments.list(mrKey(inst, project, iid))
-	cat, fetchWarnings := d.projectCatalog(r.Context(), detail)
 
 	// The latest stored review rides along so its findings can be triaged
 	// in diff context; ?record= pins a specific one (the findings page
@@ -569,26 +554,21 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 
 	viewQuery := url.Values{"view": {view}}
 	content := diffContent{
-		Nav:           newMRNav(inst, project, iid),
-		Detail:        detail,
-		Files:         buildDiffFiles(diffs, discussions, pending, recFindings, split),
-		BackURL:       mrURL(inst, "/mr/diff", project, iid, viewQuery),
-		Split:         split,
-		UnifiedURL:    mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"unified"}}),
-		SplitURL:      mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"split"}}),
-		HeadSHA:       detail.HeadSHA,
-		ContextURL:    mrURL(inst, "/mr/diff/context", project, iid, url.Values{"view": {view}}),
-		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
-		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
-		RecordName:    recName,
-		RecordTime:    recTime,
-		StateURL:      instPath(inst, "/mr/findings/state"),
+		Nav:        newMRNav(inst, project, iid),
+		Detail:     detail,
+		Files:      buildDiffFiles(diffs, discussions, pending, recFindings, split),
+		BackURL:    mrURL(inst, "/mr/diff", project, iid, viewQuery),
+		Split:      split,
+		UnifiedURL: mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"unified"}}),
+		SplitURL:   mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"split"}}),
+		HeadSHA:    detail.HeadSHA,
+		ContextURL: mrURL(inst, "/mr/diff/context", project, iid, url.Values{"view": {view}}),
+		RecordName: recName,
+		RecordTime: recTime,
+		StateURL:   instPath(inst, "/mr/findings/state"),
 	}
 	if recName != "" {
 		content.FindingsURL = mrURL(inst, "/mr/findings", project, iid, url.Values{"record": {recName}})
-	}
-	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
-		content.PrevReviewHead = prev.HeadSHA
 	}
 	for _, f := range recFindings {
 		if f.File == "" {

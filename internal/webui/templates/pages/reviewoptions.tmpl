@@ -1,0 +1,71 @@
+{{define "content"}}
+{{$c := .Content}}
+{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
+<section class="panel">
+  <h2>Run AI review of {{$c.Detail.Ref}}</h2>
+  {{template "mrhead" $c.Detail}}
+
+  <form method="post" action="{{$c.Nav.ReviewURL}}" class="review-options">
+    <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+    <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+
+    <div class="setting">
+      <span class="setting-label">Agents</span>
+      <div class="agent-select">
+      <fieldset>
+        {{range $c.AgentOptions}}
+        <label title="{{.Description}}">
+          <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
+          {{.Name}}{{if .Source}} <span class="badge">{{.Source}}</span>{{end}}
+          <select name="model:{{.Name}}" class="agent-model" title="model for {{.Name}}">
+            {{range .Models}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+        </label>
+        {{end}}
+      </fieldset>
+      </div>
+      {{range $c.AgentWarnings}}<p class="warning">{{template "icon" "warn"}} {{.}}</p>{{end}}
+    </div>
+
+    {{if $c.PrevReviewHead}}
+    <div class="setting">
+      <label class="setting-check" title="A stored review exists at {{printf "%.8s" $c.PrevReviewHead}}. By default only the changes pushed since then are reviewed and the previous findings — with their accepted/rejected states — carry forward; tick to scan the entire diff again.">
+        <input type="checkbox" name="full" value="1"> full re-review
+      </label>
+      <span class="help">by default only changes since the last reviewed commit ({{printf "%.8s" $c.PrevReviewHead}}) are reviewed</span>
+    </div>
+    {{end}}
+
+    <div class="setting">
+      <label class="setting-label" for="run_model">Model</label>
+      <select name="run_model" id="run_model">
+        {{range $c.RunModels}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <span class="help">default model for every agent in this run; per-agent picks above still win</span>
+    </div>
+
+    <div class="setting">
+      <label class="setting-label" for="concurrency">Agent concurrency</label>
+      <input type="number" name="concurrency" id="concurrency" min="1" step="1" value="{{$c.Concurrency}}">
+      <span class="help">how many agent passes run at once</span>
+    </div>
+
+    <div class="setting">
+      <label class="setting-label" for="budget">Max budget (USD)</label>
+      <input type="number" name="budget" id="budget" min="0" step="any" value="{{$c.Budget}}">
+      <span class="help">total for the run, split evenly across agent passes; 0 = unlimited</span>
+    </div>
+
+    <div class="setting">
+      <label class="setting-label" for="instructions">Extra instructions</label>
+      <textarea name="instructions" id="instructions" rows="4">{{$c.Instructions}}</textarea>
+      <span class="help">appended to the review prompt; remembered for this project</span>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="button primary review">{{template "icon" "play"}} Run AI review</button>
+      <a class="button" href="{{$c.Nav.DetailURL}}">Cancel</a>
+    </div>
+  </form>
+</section>
+{{end}}

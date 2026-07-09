@@ -16,9 +16,91 @@ import (
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/publisher"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 )
+
+// reviewOptionsContent feeds the pre-run options page: the agent picker
+// plus the per-run overrides, seeded from the remembered per-project
+// choices falling back to the effective config.
+type reviewOptionsContent struct {
+	Nav            mrNav
+	Detail         *gitlabx.MRDetail
+	AgentOptions   []agentOption
+	AgentWarnings  []string
+	PrevReviewHead string             // baseline for the full-re-review override
+	RunModels      []agentModelOption // run-wide model dropdown
+	Concurrency    int
+	Budget         float64
+	Instructions   string
+}
+
+// handleReviewForm shows the review options page: agent selection, per-agent
+// and run-wide models, concurrency, budget, and extra instructions. Posting
+// it starts the run.
+func (s *Server) handleReviewForm(w http.ResponseWriter, r *http.Request, d *Deps) {
+	inst := r.PathValue("inst")
+	detail, err := fetchDetail(r, d)
+	if err != nil {
+		s.renderError(w, http.StatusBadGateway, err)
+		return
+	}
+	cat, fetchWarnings := d.projectCatalog(r.Context(), detail)
+	cfg := d.cfgFor(detail.ProjectPath)
+	opts := d.Selection.LoadOptions(detail.ProjectPath)
+	if opts == nil {
+		opts = &agents.RunOptions{}
+	}
+
+	content := reviewOptionsContent{
+		Nav:           newMRNav(inst, detail.ProjectPath, detail.IID),
+		Detail:        detail,
+		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
+		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
+		RunModels:     modelMenu(cfg.ModelOptions(), opts.Model, cfg.Review.Model),
+		Concurrency:   cfg.Review.AgentConcurrency,
+		Budget:        cfg.Review.MaxBudgetUSD,
+		Instructions:  opts.Instructions,
+	}
+	if opts.Concurrency > 0 {
+		content.Concurrency = opts.Concurrency
+	}
+	if opts.MaxBudgetUSD != nil {
+		content.Budget = *opts.MaxBudgetUSD
+	}
+	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
+		content.PrevReviewHead = prev.HeadSHA
+	}
+	s.render(w, http.StatusOK, "reviewoptions", pageData{
+		Title: "review · " + detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "review"), Content: content,
+	})
+}
+
+// parseRunOverrides reads the per-run override fields from the review
+// options form. Empty fields mean "keep the configured default".
+func parseRunOverrides(form url.Values) (*agents.RunOptions, error) {
+	o := &agents.RunOptions{
+		Model:        strings.TrimSpace(form.Get("run_model")),
+		Instructions: strings.TrimSpace(form.Get("instructions")),
+	}
+	if v := strings.TrimSpace(form.Get("concurrency")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 1 {
+			return nil, fmt.Errorf("agent concurrency must be a whole number of at least 1, got %q", v)
+		}
+		o.Concurrency = n
+	}
+	if v := strings.TrimSpace(form.Get("budget")); v != "" {
+		b, err := strconv.ParseFloat(v, 64)
+		if err != nil || b < 0 {
+			return nil, fmt.Errorf("max budget must be a number of at least 0, got %q", v)
+		}
+		o.MaxBudgetUSD = &b
+	}
+	return o, nil
+}
 
 // handleReviewStart kicks off a review run and redirects to its progress
 // page. The MR's accepted pending comments ride along into the run.
@@ -29,23 +111,34 @@ func (s *Server) handleReviewStart(w http.ResponseWriter, r *http.Request, d *De
 		s.renderError(w, http.StatusBadGateway, err)
 		return
 	}
+	_ = r.ParseForm()
+	overrides, err := parseRunOverrides(r.Form)
+	if err != nil {
+		s.renderError(w, http.StatusBadRequest, err)
+		return
+	}
 	diffs, err := d.Svc.ListDiffs(r.Context(), detail.Project(), detail.IID)
 	if err != nil {
 		s.renderError(w, http.StatusBadGateway, err)
 		return
 	}
 	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), detail.IID) // best-effort
-	_ = r.ParseForm()
 	agentNames := r.Form["agents"]
 	agentModels := parseAgentModels(r.Form, agentNames)
 	if len(agentNames) > 0 {
 		d.Selection.Save(detail.ProjectPath, agentNames)
 		d.Selection.SaveModels(detail.ProjectPath, agentModels)
 	}
-	// Incremental by default: the runner falls back to a full review when no
-	// usable baseline exists; the form's "full re-review" box forces one.
-	incremental := r.FormValue("full") == ""
-	run := s.startRun(d, inst, *detail, diffs, commits, agentNames, agentModels, incremental)
+	d.Selection.SaveOptions(detail.ProjectPath, overrides)
+	run := s.startRun(d, inst, *detail, diffs, commits, reviewStartOptions{
+		AgentNames:  agentNames,
+		AgentModels: agentModels,
+		// Incremental by default: the runner falls back to a full review
+		// when no usable baseline exists; the form's "full re-review" box
+		// forces one.
+		Incremental: r.FormValue("full") == "",
+		Overrides:   overrides,
+	})
 	http.Redirect(w, r, instPath(inst, "/run/"+run.ID), http.StatusSeeOther) //nolint:gosec // server-built path: escaped instance + generated run ID
 }
 

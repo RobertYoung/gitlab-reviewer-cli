@@ -352,8 +352,8 @@ pre.prose.summary { @apply border-l-2 border-primary pl-3; }
 .new-comment summary { cursor: pointer; color: var(--color-primary); }
 .new-comment form { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-start; }
 
-/* agent selection on the review form */
-.review-form { display: flex; align-items: baseline; gap: 0.6rem; flex-wrap: wrap; }
+/* agent selection on the review options page */
+.review-options { max-width: 640px; }
 .agent-select summary { cursor: pointer; color: var(--color-primary); font-size: 0.9rem; }
 .agent-select fieldset { @apply border border-base-300 rounded-field mt-1 px-3 py-2 flex flex-col gap-1; }
 .agent-select label { display: flex; align-items: center; gap: 0.4rem; font-size: 0.9rem; cursor: pointer; }

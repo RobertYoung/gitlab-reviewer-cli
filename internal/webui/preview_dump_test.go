@@ -129,6 +129,7 @@ func TestDumpPreviewPages(t *testing.T) {
 		"mrdetail.html":   "/i/default/mr?project=group%2Fapp&iid=5",
 		"diff.html":       "/i/default/mr/diff?project=group%2Fapp&iid=5",
 		"diff-split.html": "/i/default/mr/diff?project=group%2Fapp&iid=5&view=split",
+		"review.html":     "/i/default/mr/review?project=group%2Fapp&iid=5",
 		"findings.html":   "/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + out.RecName,
 		"run.html":        "/i/default/run/" + run.ID,
 	}
