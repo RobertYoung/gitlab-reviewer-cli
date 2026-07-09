@@ -38,6 +38,7 @@ type reviewRun struct {
 	recName    string // stored record file name; "" when the run stored none
 	logName    string // stored progress log file name
 	findings   int    // findings stored with the record
+	published  int    // findings auto-publish posted live (immediate mode)
 	draftReady bool   // auto-publish left a draft review pending
 }
 
@@ -54,6 +55,10 @@ type runOutcome struct {
 	RecName   string
 	LogName   string
 	Findings  int
+	// Published counts findings auto-publish (publish.auto_comment) posted
+	// straight to GitLab in immediate mode, so the findings page can confirm
+	// the outcome rather than landing on it silently.
+	Published int
 	// DraftReady reports that auto-publish (publish.auto_comment, draft
 	// mode) created a pending draft review awaiting one-click publication.
 	DraftReady bool
@@ -82,6 +87,7 @@ func (r *reviewRun) finish(out runOutcome) {
 	r.recName = out.RecName
 	r.logName = out.LogName
 	r.findings = out.Findings
+	r.published = out.Published
 	r.draftReady = out.DraftReady
 	for ch := range r.subs {
 		select {
@@ -113,7 +119,7 @@ func (r *reviewRun) unsubscribe(ch chan runEvent) {
 }
 
 func (r *reviewRun) outcomeLocked() *runOutcome {
-	out := &runOutcome{RecName: r.recName, LogName: r.logName, Findings: r.findings, DraftReady: r.draftReady}
+	out := &runOutcome{RecName: r.recName, LogName: r.logName, Findings: r.findings, Published: r.published, DraftReady: r.draftReady}
 	if r.err != nil {
 		if errors.Is(r.err, context.Canceled) {
 			out.Cancelled = true
@@ -231,7 +237,7 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 			// TUI parity: auto_comment publishes the accepted findings
 			// without further confirmation once the run completes.
 			if cfg.Publish.AutoComment {
-				outcome.DraftReady = autoPublish(ctx, d, cfg, detail, diffs, rec, run.append)
+				outcome.Published, outcome.DraftReady = autoPublish(ctx, d, cfg, detail, diffs, rec, run.append)
 			}
 			if err := d.Results.Save(*rec); err != nil {
 				run.append("warning: could not store the review result: " + err.Error())
@@ -248,9 +254,10 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 
 // autoPublish posts a fresh record's accepted findings straight to GitLab,
 // mirroring the TUI's publish.auto_comment behaviour, and updates their
-// states in place (the caller saves the record). It reports whether a
-// draft review was created and left pending publication.
-func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, rec *resultstore.Record, emit func(string)) bool {
+// states in place (the caller saves the record). It reports how many
+// findings were posted live (immediate mode) and whether a draft review was
+// created and left pending publication.
+func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, rec *resultstore.Record, emit func(string)) (published int, draftReady bool) {
 	var accepted []int
 	for i := range rec.Findings {
 		if rec.Findings[i].State == review.StateAccepted {
@@ -258,7 +265,7 @@ func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx
 		}
 	}
 	if len(accepted) == 0 {
-		return false
+		return 0, false
 	}
 	pub, tmplErr := publisher.New(d.Svc, detail, diffs, cfg.Publish)
 	if tmplErr != nil {
@@ -266,7 +273,6 @@ func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx
 	}
 	pub.Draft = cfg.Publish.Mode == "draft"
 	emit(fmt.Sprintf("auto-publishing %d accepted finding(s) in %s mode…", len(accepted), cfg.Publish.Mode))
-	published := 0
 	for _, i := range accepted {
 		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		state, err := pub.PublishOne(pctx, rec.Findings[i])
@@ -280,8 +286,8 @@ func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx
 	}
 	if pub.Draft && published > 0 {
 		emit(fmt.Sprintf("%d draft note(s) created — publish the review to make them visible", published))
-		return true
+		return 0, true
 	}
 	emit(fmt.Sprintf("auto-published %d comment(s)", published))
-	return false
+	return published, false
 }

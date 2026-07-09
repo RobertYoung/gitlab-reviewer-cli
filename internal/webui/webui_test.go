@@ -1401,9 +1401,28 @@ func TestAutoPublishImmediateMode(t *testing.T) {
 	if len(env.svc.inline) != 1 || !strings.Contains(env.svc.inline[0], "fmt is imported but unused.") {
 		t.Fatalf("auto-publish did not post inline: %+v", env.svc.inline)
 	}
+	if out.Published != 1 {
+		t.Fatalf("outcome should report 1 auto-published finding: %+v", out)
+	}
 	rec := loadRecord(t, env, out.RecName)
 	if rec.Findings[0].State != review.StatePublished {
 		t.Fatalf("published state not stored: %v", rec.Findings[0].State)
+	}
+	// The run redirects to the findings page carrying the count, which the
+	// page confirms with a banner rather than landing on it silently.
+	code, body := env.get("/i/default/mr/findings?project=group%2Fapp&iid=5&record=" +
+		url.QueryEscape(out.RecName) + "&published=1")
+	if code != http.StatusOK || !strings.Contains(body, "Auto-published 1 qualifying finding") {
+		t.Fatalf("findings page missing auto-publish banner: %d\n%s", code, body)
+	}
+	if !strings.Contains(body, `id="count-published"`) {
+		t.Fatalf("triage bar missing published count:\n%s", body)
+	}
+	// The streaming client redirects to that same URL: the done event's
+	// findingsUrl carries the published count.
+	_, events := env.get("/i/default/run/" + run.ID + "/events")
+	if !strings.Contains(events, "published=1") {
+		t.Fatalf("done event findingsUrl missing published count:\n%s", events)
 	}
 }
 
