@@ -1,6 +1,7 @@
 package webui
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -498,6 +499,8 @@ type diffContent struct {
 	Split       bool   // side-by-side layout
 	UnifiedURL  string // layout toggle targets
 	SplitURL    string
+	HeadSHA     string // ref the context expander fetches unchanged lines at
+	ContextURL  string // GET target for expanding diff context
 	// Review-form state, same as the MR detail page.
 	AgentOptions   []agentOption
 	AgentWarnings  []string
@@ -573,6 +576,8 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 		Split:         split,
 		UnifiedURL:    mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"unified"}}),
 		SplitURL:      mrURL(inst, "/mr/diff", project, iid, url.Values{"view": {"split"}}),
+		HeadSHA:       detail.HeadSHA,
+		ContextURL:    mrURL(inst, "/mr/diff/context", project, iid, url.Values{"view": {view}}),
 		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
 		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
 		RecordName:    recName,
@@ -603,6 +608,41 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 		Title: "diff · " + detail.Ref(), Instance: inst,
 		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "diff"), Content: content,
 	})
+}
+
+// handleDiffContext renders the unchanged lines revealed when expanding
+// diff context around a hunk. It fetches the new-side file at ref and
+// returns the table rows for [start, start+count) as HTML, which the diff
+// page splices in place. count is clamped; a request past end of file
+// yields fewer rows, so the client knows the file is fully expanded.
+func (s *Server) handleDiffContext(w http.ResponseWriter, r *http.Request, d *Deps) {
+	q := r.URL.Query()
+	project, path, ref := q.Get("project"), q.Get("path"), q.Get("ref")
+	if project == "" || path == "" || ref == "" {
+		http.Error(w, "missing project, path or ref", http.StatusBadRequest)
+		return
+	}
+	start, errStart := strconv.Atoi(q.Get("start"))
+	count, errCount := strconv.Atoi(q.Get("count"))
+	offset, errOffset := strconv.Atoi(q.Get("offset"))
+	if errStart != nil || errCount != nil || errOffset != nil || start < 1 || count < 1 {
+		http.Error(w, "invalid start, count or offset", http.StatusBadRequest)
+		return
+	}
+	content, err := d.Svc.GetRawFile(r.Context(), parseProject(project), path, ref)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadGateway)
+		return
+	}
+	rows := buildContextRows(path, content, start, offset, min(count, 100))
+	data := map[string]any{"Split": q.Get("view") == "split", "Rows": rows}
+	var buf bytes.Buffer
+	if err := s.pages["diff"].ExecuteTemplate(&buf, "diffcontext", data); err != nil {
+		http.Error(w, "rendering context failed", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 // handleCommentAdd stores a manual comment (line-anchored or MR-level)

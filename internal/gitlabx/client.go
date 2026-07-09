@@ -415,6 +415,15 @@ func (c *Client) ListDirectoryFiles(ctx context.Context, project any, dir, ref s
 	return out, nil
 }
 
+// GetRawFile returns the raw bytes of path at ref.
+func (c *Client) GetRawFile(ctx context.Context, project any, path, ref string) ([]byte, error) {
+	raw, _, err := c.gl.RepositoryFiles.GetRawFile(project, path, &gitlab.GetRawFileOptions{Ref: gitlab.Ptr(ref)}, gitlab.WithContext(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("fetching %s at %s: %w", path, ref, err)
+	}
+	return raw, nil
+}
+
 func (c *Client) ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error) {
 	var out []Discussion
 	opts := &gitlab.ListMergeRequestDiscussionsOptions{

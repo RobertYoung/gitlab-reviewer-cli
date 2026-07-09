@@ -65,6 +65,8 @@ type fakeService struct {
 	repoFiles      []gitlabx.RepoFile
 	repoFilesByDir map[string][]gitlabx.RepoFile
 	repoFilesErr   error
+	rawFiles       map[string][]byte // keyed by path
+	rawFileErr     error
 	inline         []string
 	notes          []string
 	drafts         []string
@@ -119,6 +121,16 @@ func (f *fakeService) ListDirectoryFiles(_ context.Context, _ any, dir, _ string
 		return f.repoFilesByDir[dir], f.repoFilesErr
 	}
 	return f.repoFiles, f.repoFilesErr
+}
+
+func (f *fakeService) GetRawFile(_ context.Context, _ any, path, _ string) ([]byte, error) {
+	if f.rawFileErr != nil {
+		return nil, f.rawFileErr
+	}
+	if content, ok := f.rawFiles[path]; ok {
+		return content, nil
+	}
+	return nil, errors.New("not found")
 }
 
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {
@@ -1022,6 +1034,138 @@ func TestParseDiffLines(t *testing.T) {
 	}
 	if !strings.Contains(string(lines[2].HTML), "fmt") {
 		t.Fatalf("added line content missing: %s", lines[2].HTML)
+	}
+}
+
+// gapDiff is a two-hunk diff whose first hunk starts partway through the
+// file, leaving unchanged lines above it and between the hunks to expand.
+const gapDiff = "@@ -10,3 +10,4 @@\n ctxA\n+added\n ctxB\n ctxC\n@@ -30,2 +31,2 @@\n ctxD\n-old\n+new\n"
+
+func TestParseDiffLinesExpanders(t *testing.T) {
+	fd := gitlabx.FileDiff{OldPath: "main.go", NewPath: "main.go", Diff: gapDiff}
+	lines := parseDiffLines(fd, nil, nil)
+
+	var hunks []diffLine
+	for _, l := range lines {
+		if l.Kind == "hunk" {
+			hunks = append(hunks, l)
+		}
+	}
+	if len(hunks) != 2 {
+		t.Fatalf("want 2 hunk rows, got %d", len(hunks))
+	}
+	// First hunk starts at new line 10, so lines 1..9 are expandable above it.
+	if hunks[0].Expand == nil {
+		t.Fatal("first hunk should expand: unchanged lines precede it")
+	}
+	if got := hunks[0].Expand; got.New != 10 || got.Min != 1 || got.Offset != 0 {
+		t.Fatalf("first hunk expand = %+v, want New=10 Min=1 Offset=0", got)
+	}
+	// The first hunk consumes new lines 10..13; the second starts at 31, so
+	// the gap 14..30 is reachable and stops at the previous hunk's end.
+	if got := hunks[1].Expand; got == nil || got.New != 31 || got.Min != 14 {
+		t.Fatalf("second hunk expand = %+v, want New=31 Min=14", got)
+	}
+	// Offset for the second hunk: old start 30, new start 31.
+	if got := hunks[1].Expand.Offset; got != -1 {
+		t.Fatalf("second hunk offset = %d, want -1", got)
+	}
+}
+
+func TestTailExpand(t *testing.T) {
+	fd := gitlabx.FileDiff{OldPath: "main.go", NewPath: "main.go", Diff: sampleDiff}
+	tail := tailExpand(fd, parseDiffLines(fd, nil, nil))
+	if tail == nil || !tail.Down {
+		t.Fatalf("sample diff should have a downward tail expander: %+v", tail)
+	}
+	// The diff ends at new line 4 (old line 3), so the tail starts at 5.
+	if tail.New != 5 || tail.Offset != -1 {
+		t.Fatalf("tail = %+v, want New=5 Offset=-1", tail)
+	}
+
+	// A newly added file has no unchanged lines to reveal.
+	added := gitlabx.FileDiff{NewPath: "new.go", NewFile: true, Diff: "@@ -0,0 +1,2 @@\n+a\n+b\n"}
+	if got := tailExpand(added, parseDiffLines(added, nil, nil)); got != nil {
+		t.Fatalf("added file should have no tail expander: %+v", got)
+	}
+}
+
+func TestBuildContextRows(t *testing.T) {
+	content := []byte("one\ntwo\nthree\nfour\nfive\n")
+	// Reveal new lines 2..3 with an old−new offset of -1.
+	rows := buildContextRows("main.go", content, 2, -1, 2)
+	if len(rows) != 2 {
+		t.Fatalf("want 2 rows, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].New != 2 || rows[0].Old != 1 || !strings.Contains(string(rows[0].HTML), "two") {
+		t.Fatalf("row 0 = %+v", rows[0])
+	}
+	if rows[1].New != 3 || rows[1].Old != 2 || !strings.Contains(string(rows[1].HTML), "three") {
+		t.Fatalf("row 1 = %+v", rows[1])
+	}
+
+	// A request running past end of file is truncated, not padded.
+	if got := buildContextRows("main.go", content, 4, 0, 10); len(got) != 2 {
+		t.Fatalf("past-EOF request should yield 2 rows, got %d", len(got))
+	}
+	if got := buildContextRows("main.go", content, 0, 0, 5); got != nil {
+		t.Fatalf("start<1 must yield no rows: %+v", got)
+	}
+}
+
+func TestDiffContextEndpoint(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	env.svc.rawFiles = map[string][]byte{"main.go": []byte("one\ntwo\nthree\nfour\nfive\n")}
+
+	code, body := env.get("/i/default/mr/diff/context?project=group%2Fapp&iid=5&path=main.go&ref=head&start=2&count=2&offset=-1")
+	if code != http.StatusOK {
+		t.Fatalf("context endpoint: %d\n%s", code, body)
+	}
+	if strings.Count(body, "<tr") != 2 {
+		t.Fatalf("want 2 rows, got:\n%s", body)
+	}
+	if !strings.Contains(body, `data-new="2"`) || !strings.Contains(body, `data-old="1"`) {
+		t.Fatalf("rows missing expected line numbers:\n%s", body)
+	}
+	if !strings.Contains(body, "two") || !strings.Contains(body, "three") {
+		t.Fatalf("rows missing content:\n%s", body)
+	}
+
+	// Split view emits the six-column layout with the anchor on the button.
+	_, split := env.get("/i/default/mr/diff/context?project=group%2Fapp&iid=5&path=main.go&ref=head&start=2&count=1&offset=-1&view=split")
+	if !strings.Contains(split, `class="code ctx"`) || !strings.Contains(split, `data-file="main.go"`) {
+		t.Fatalf("split context rows malformed:\n%s", split)
+	}
+}
+
+func TestDiffContextEndpointErrors(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	if code, _ := env.get("/i/default/mr/diff/context?project=group%2Fapp&iid=5&ref=head&start=1&count=2&offset=0"); code != http.StatusBadRequest {
+		t.Fatalf("missing path should be 400, got %d", code)
+	}
+	if code, _ := env.get("/i/default/mr/diff/context?project=group%2Fapp&iid=5&path=main.go&ref=head&start=0&count=2&offset=0"); code != http.StatusBadRequest {
+		t.Fatalf("invalid start should be 400, got %d", code)
+	}
+	// GetRawFile failing (no content registered) surfaces as a bad gateway.
+	if code, _ := env.get("/i/default/mr/diff/context?project=group%2Fapp&iid=5&path=missing.go&ref=head&start=1&count=2&offset=0"); code != http.StatusBadGateway {
+		t.Fatalf("fetch failure should be 502, got %d", code)
+	}
+}
+
+func TestDiffPageRendersExpanders(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	code, body := env.get("/i/default/mr/diff?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("diff page: %d", code)
+	}
+	// The sample diff reaches end of file, so at least the tail expander and
+	// the context URL the client fetches must be present.
+	if !strings.Contains(body, "expander-tail") || !strings.Contains(body, "expand-ctx") {
+		t.Fatalf("diff page missing context expander controls:\n%s", body)
+	}
+	if !strings.Contains(body, "data-ctx-url=") || !strings.Contains(body, `data-ctx-ref="head"`) {
+		t.Fatalf("diff layout missing context fetch attributes:\n%s", body)
 	}
 }
 

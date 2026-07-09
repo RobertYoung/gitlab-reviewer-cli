@@ -453,6 +453,59 @@
         }
       }
     });
+
+    // Expandable diff context: each hunk header (and the file tail) can pull
+    // in the unchanged lines around it, fetched from the new-side file at the
+    // MR head. The server renders the rows; we splice them next to the
+    // control and advance its boundary, dropping it once fully expanded.
+    var CTX_STEP = 10;
+    var ctxURL = diffLayout.dataset.ctxUrl;
+    var ctxRef = diffLayout.dataset.ctxRef;
+    var expanding = false;
+    diffLayout.addEventListener("click", function (ev) {
+      var btn = ev.target.closest(".expand-ctx");
+      if (!btn || expanding || !ctxURL) return;
+      var row = btn.closest("tr");
+      var article = btn.closest(".diff-file");
+      if (!row || !article) return;
+      var down = row.dataset.ctxDown === "1";
+      var offset = parseInt(row.dataset.ctxOffset, 10) || 0;
+      var boundary = parseInt(row.dataset.ctxNew, 10);
+      var minNew = parseInt(row.dataset.ctxMin, 10) || 1;
+      var start, count;
+      if (down) {
+        start = boundary;
+        count = CTX_STEP;
+      } else {
+        count = Math.min(CTX_STEP, boundary - minNew);
+        if (count <= 0) { btn.remove(); return; }
+        start = boundary - count;
+      }
+      var params = new URLSearchParams({
+        path: article.dataset.path, ref: ctxRef,
+        start: String(start), count: String(count), offset: String(offset),
+      });
+      expanding = true;
+      btn.classList.add("loading");
+      var done = function () { expanding = false; btn.classList.remove("loading"); };
+      fetch(ctxURL + "&" + params.toString())
+        .then(function (res) { if (!res.ok) throw new Error("context " + res.status); return res.text(); })
+        .then(function (html) {
+          var tbody = document.createElement("tbody");
+          tbody.innerHTML = html.trim();
+          var added = Array.prototype.slice.call(tbody.children);
+          added.forEach(function (r) { row.parentNode.insertBefore(r, row); });
+          if (down) {
+            row.dataset.ctxNew = String(boundary + added.length);
+            if (added.length < count) btn.remove();
+          } else {
+            row.dataset.ctxNew = String(start);
+            if (start <= minNew) btn.remove();
+          }
+          done();
+        })
+        .catch(function () { toast("Could not load more lines", "error"); done(); });
+    });
   }
 
   // One floating comment form, moved to the clicked line.

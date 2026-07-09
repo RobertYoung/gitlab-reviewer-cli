@@ -436,6 +436,36 @@ func TestListDirectoryFiles(t *testing.T) {
 	}
 }
 
+func TestGetRawFile(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/repository/files/{path}/raw", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("ref"); got != "abc123" {
+			t.Errorf("ref = %q", got)
+		}
+		_, _ = w.Write([]byte("line one\nline two\n"))
+	})
+	c := newTestClient(t, nil, nil, mux)
+	raw, err := c.GetRawFile(context.Background(), "group/app", "internal/main.go", "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "line one\nline two\n" {
+		t.Errorf("raw = %q", raw)
+	}
+}
+
+func TestGetRawFileError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v4/projects/{project}/repository/files/{path}/raw", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		writeJSON(t, w, map[string]any{"message": "404 File Not Found"})
+	})
+	c := newTestClient(t, nil, nil, mux)
+	if _, err := c.GetRawFile(context.Background(), "group/app", "gone.go", "abc123"); err == nil {
+		t.Fatal("missing file should be an error")
+	}
+}
+
 func TestListDirectoryFilesMissingDir(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v4/projects/{project}/repository/tree", func(w http.ResponseWriter, _ *http.Request) {

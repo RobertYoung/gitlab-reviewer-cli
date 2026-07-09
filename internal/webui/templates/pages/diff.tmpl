@@ -10,7 +10,7 @@
   </details>
   {{end}}
 </header>
-<div class="diff-layout" data-viewed-key="viewed:{{$c.Nav.Project}}!{{$c.Nav.IID}}@{{$c.Detail.HeadSHA}}">
+<div class="diff-layout" data-viewed-key="viewed:{{$c.Nav.Project}}!{{$c.Nav.IID}}@{{$c.Detail.HeadSHA}}" data-ctx-url="{{$c.ContextURL}}" data-ctx-ref="{{$c.HeadSHA}}">
   <aside class="filetree">
     <h3>{{len $c.Files}} changed file{{if ne (len $c.Files) 1}}s{{end}} <span class="viewed-progress" id="viewed-progress"></span></h3>
     <ul>
@@ -82,7 +82,7 @@
         </colgroup>
         {{range .Rows}}
         {{if .Hunk}}
-        <tr class="hunk"><td class="ln"></td><td class="gutter"></td><td class="code" colspan="4">{{.Hunk}}</td></tr>
+        <tr class="hunk"{{with .Expand}} data-ctx-new="{{.New}}" data-ctx-offset="{{.Offset}}" data-ctx-min="{{.Min}}"{{end}}><td class="ln" colspan="2">{{if .Expand}}<button type="button" class="expand-ctx" title="show more lines above">↕</button>{{end}}</td><td class="code" colspan="4">{{.Hunk}}</td></tr>
         {{else}}
         <tr class="line">
           <td class="ln {{.Left.Kind}}">{{if .Left.Num}}{{.Left.Num}}{{end}}</td>
@@ -100,12 +100,15 @@
         {{end}}
         {{end}}
         {{end}}
+        {{with $file.Tail}}
+        <tr class="hunk expander-tail" data-ctx-new="{{.New}}" data-ctx-offset="{{.Offset}}" data-ctx-down="1"><td class="ln" colspan="2"><button type="button" class="expand-ctx" title="show more lines below">↓</button></td><td class="code" colspan="4"></td></tr>
+        {{end}}
       </table>
       {{else}}
       <table class="diff">
         {{range .Lines}}
         {{if eq .Kind "hunk"}}
-        <tr class="hunk"><td class="ln"></td><td class="ln"></td><td class="gutter"></td><td class="code">{{.HTML}}</td></tr>
+        <tr class="hunk"{{with .Expand}} data-ctx-new="{{.New}}" data-ctx-offset="{{.Offset}}" data-ctx-min="{{.Min}}"{{end}}><td class="ln" colspan="3">{{if .Expand}}<button type="button" class="expand-ctx" title="show more lines above">↕</button>{{end}}</td><td class="code">{{.HTML}}</td></tr>
         {{else}}
         <tr class="line {{.Kind}}" data-file="{{$file.NewPath}}" data-old="{{.Old}}" data-new="{{.New}}">
           <td class="ln">{{if .Old}}{{.Old}}{{end}}</td>
@@ -120,6 +123,9 @@
         <tr class="inline-comment"><td colspan="3" class="ln"></td><td>{{template "diffthread" (threadrow . $c)}}</td></tr>
         {{end}}
         {{end}}
+        {{end}}
+        {{with $file.Tail}}
+        <tr class="hunk expander-tail" data-ctx-new="{{.New}}" data-ctx-offset="{{.Offset}}" data-ctx-down="1"><td class="ln" colspan="3"><button type="button" class="expand-ctx" title="show more lines below">↓</button></td><td class="code"></td></tr>
         {{end}}
       </table>
       {{end}}
