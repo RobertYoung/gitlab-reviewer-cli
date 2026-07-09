@@ -497,6 +497,20 @@ table.diff.split tr.line td:nth-child(3) { @apply border-r border-base-300; }
 }
 tr.line:hover .add-comment { visibility: visible; }
 
+/* expand-context control on hunk headers and the file tail */
+.expand-ctx {
+  @apply text-primary;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  width: 100%;
+  padding: 0;
+}
+.expand-ctx:hover { @apply bg-primary text-primary-content rounded-sm; }
+.expand-ctx.loading { opacity: 0.5; cursor: progress; }
+
 tr.inline-comment td { @apply border-t border-b border-base-300; }
 .thread summary {
   cursor: pointer;

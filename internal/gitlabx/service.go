@@ -49,6 +49,11 @@ type Service interface {
 	// the pickers before any checkout exists.
 	ListDirectoryFiles(ctx context.Context, project any, dir, ref string) ([]RepoFile, error)
 
+	// GetRawFile returns the raw bytes of one file at ref. Used by the GUI
+	// diff viewer to fetch unchanged lines around a hunk when expanding
+	// context beyond what the MR diff carries.
+	GetRawFile(ctx context.Context, project any, path, ref string) ([]byte, error)
+
 	// ListDiscussions returns every discussion thread on the MR
 	// (paginating internally).
 	ListDiscussions(ctx context.Context, project any, iid int64) ([]Discussion, error)

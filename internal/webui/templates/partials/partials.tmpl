@@ -95,3 +95,11 @@
 </table>
 {{end}}
 {{end}}
+
+{{/* diffcontext renders the unchanged lines revealed by expanding a hunk's
+     context: unified or split rows the diff page splices around the hunk. */}}
+{{define "diffcontext"}}{{if .Split}}{{range .Rows}}{{template "ctxrow-split" .}}{{end}}{{else}}{{range .Rows}}{{template "ctxrow-unified" .}}{{end}}{{end}}{{end}}
+
+{{define "ctxrow-unified"}}<tr class="line ctx" data-file="{{.File}}" data-old="{{.Old}}" data-new="{{.New}}"><td class="ln">{{.Old}}</td><td class="ln">{{.New}}</td><td class="gutter"><button type="button" class="add-comment" title="add a comment on this line">+</button></td><td class="code">{{.HTML}}</td></tr>{{end}}
+
+{{define "ctxrow-split"}}<tr class="line"><td class="ln ctx">{{.Old}}</td><td class="gutter ctx"></td><td class="code ctx">{{.HTML}}</td><td class="ln ctx">{{.New}}</td><td class="gutter ctx"><button type="button" class="add-comment" title="add a comment on this line" data-file="{{.File}}" data-old="{{.Old}}" data-new="{{.New}}">+</button></td><td class="code ctx">{{.HTML}}</td></tr>{{end}}

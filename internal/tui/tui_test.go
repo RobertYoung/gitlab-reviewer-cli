@@ -89,6 +89,10 @@ func (f *fakeService) ListDirectoryFiles(_ context.Context, _ any, dir, _ string
 	return f.repoFiles, nil
 }
 
+func (f *fakeService) GetRawFile(context.Context, any, string, string) ([]byte, error) {
+	return nil, errors.New("not found")
+}
+
 func (f *fakeService) ListDiscussions(context.Context, any, int64) ([]gitlabx.Discussion, error) {
 	return f.discussions, nil
 }

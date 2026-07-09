@@ -80,6 +80,18 @@ type inlineThread struct {
 // First is the thread's opening comment, shown in the collapsed summary.
 func (t inlineThread) First() inlineComment { return t.Comments[0] }
 
+// hunkExpand describes the unchanged region a diff row can pull into view:
+// the new-side line at the boundary, the old−new offset that holds across
+// the region (context lines shift both sides equally), and, for upward
+// expansion, the lowest new line reachable before the previous hunk. Down
+// expansion (the file tail) leaves Min zero and stops at end of file.
+type hunkExpand struct {
+	New    int // new-side line at the boundary (first line of the hunk, or last+1 at the tail)
+	Offset int // oldLine − newLine within the region
+	Min    int // upward: lowest new line to reveal; 0 means unbounded (tail)
+	Down   bool
+}
+
 // diffLine is one rendered row of a unified diff.
 type diffLine struct {
 	Kind     string // add | del | ctx | hunk
@@ -87,6 +99,7 @@ type diffLine struct {
 	HTML     template.HTML
 	Threads  []inlineThread
 	Findings []review.Finding // stored review findings anchored on this line
+	Expand   *hunkExpand      // hunk rows with unchanged lines above them
 }
 
 // CanComment reports whether a manual comment can anchor on this line.
@@ -103,6 +116,7 @@ type diffFile struct {
 	Comments int        // anchored comment count, for the file explorer badge
 	Findings int        // anchored review findings, for the file explorer badge
 	TooLarge bool
+	Tail     *hunkExpand // downward expander for lines past the last hunk
 }
 
 // Letter is the file explorer's status glyph.
@@ -200,6 +214,7 @@ func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, 
 			TooLarge: fd.TooLarge,
 		}
 		f.Lines = parseDiffLines(fd, anchored, anchoredFindings)
+		f.Tail = tailExpand(fd, f.Lines)
 		for _, l := range f.Lines {
 			for _, t := range l.Threads {
 				f.Comments += len(t.Comments)
@@ -212,6 +227,25 @@ func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, 
 		files = append(files, f)
 	}
 	return files
+}
+
+// tailExpand builds the downward expander for the region past the last
+// hunk: the new-side line after the final consumed line, with the old−new
+// offset the diff ends on. Returns nil when there is nothing to reveal (no
+// new-side file, an oversized diff, or an empty diff).
+func tailExpand(fd gitlabx.FileDiff, lines []diffLine) *hunkExpand {
+	if fd.NewPath == "" || fd.NewFile || fd.DeletedFile || fd.TooLarge {
+		return nil
+	}
+	lastOld, lastNew := 0, 0
+	for _, l := range lines {
+		lastOld = max(lastOld, l.Old)
+		lastNew = max(lastNew, l.New)
+	}
+	if lastNew == 0 {
+		return nil
+	}
+	return &hunkExpand{New: lastNew + 1, Offset: lastOld - lastNew, Down: true}
 }
 
 func fileStatus(fd gitlabx.FileDiff) string {
@@ -316,13 +350,24 @@ func parseDiffLines(fd gitlabx.FileDiff, anchored map[string][]inlineThread, fin
 	}
 	markLinePairs(raw)
 	h := newLineHighlighter(fd.NewPath)
+	// Context expansion only works when the new-side file exists to fetch
+	// unchanged lines from; deleted files and oversized diffs get no
+	// expanders.
+	expandable := fd.NewPath != "" && !fd.NewFile && !fd.TooLarge
+	lastNew := 0 // last new line consumed; the boundary for the next hunk
 	lines := make([]diffLine, 0, len(raw))
 	for _, rl := range raw {
 		l := diffLine{Kind: rl.kind, Old: rl.old, New: rl.new}
+		if rl.new > 0 {
+			lastNew = rl.new
+		}
 		var key string
 		switch rl.kind {
 		case "hunk":
 			l.HTML = template.HTML(template.HTMLEscapeString(rl.text)) //nolint:gosec // escaped
+			if o, n, ok := parseHunkHeader(rl.text); ok && expandable && n > lastNew+1 {
+				l.Expand = &hunkExpand{New: n, Offset: o - n, Min: lastNew + 1}
+			}
 			lines = append(lines, l)
 			continue
 		case "del":
@@ -457,6 +502,7 @@ type splitCell struct {
 type splitRow struct {
 	Hunk        template.HTML // non-empty: header row, Left/Right unused
 	Left, Right splitCell
+	Expand      *hunkExpand // set on hunk rows with unchanged lines above them
 }
 
 // Threads merges both sides' threads; they render full-width underneath.
@@ -483,7 +529,7 @@ func splitLines(lines []diffLine) []splitRow {
 	for i := 0; i < len(lines); {
 		switch l := lines[i]; l.Kind {
 		case "hunk":
-			rows = append(rows, splitRow{Hunk: l.HTML})
+			rows = append(rows, splitRow{Hunk: l.HTML, Expand: l.Expand})
 			i++
 		case "ctx":
 			rows = append(rows, splitRow{
@@ -630,6 +676,37 @@ func splitTokens(tokens []chroma.Token, from, to int) (pre, mid, post []chroma.T
 		}
 	}
 	return pre, mid, post
+}
+
+// ctxRow is one unchanged line revealed by expanding diff context: it
+// carries both side's line numbers so it can host comments like any other
+// context line.
+type ctxRow struct {
+	File     string
+	Old, New int
+	HTML     template.HTML
+}
+
+// buildContextRows renders count unchanged lines of newPath's content
+// starting at new-side line startNew, mapping each to its old-side number
+// via offset (oldLine = newLine + offset). It stops at end of file, so a
+// request running past the last line simply returns fewer rows.
+func buildContextRows(newPath string, content []byte, startNew, offset, count int) []ctxRow {
+	if startNew < 1 || count < 1 {
+		return nil
+	}
+	fileLines := strings.Split(strings.TrimSuffix(string(content), "\n"), "\n")
+	h := newLineHighlighter(newPath)
+	rows := make([]ctxRow, 0, count)
+	for n := startNew; n < startNew+count && n-1 < len(fileLines); n++ {
+		rows = append(rows, ctxRow{
+			File: newPath,
+			Old:  n + offset,
+			New:  n,
+			HTML: h.line(fileLines[n-1], 0, 0),
+		})
+	}
+	return rows
 }
 
 // hunkExcerptHTML renders the diff lines around a finding's location so a
