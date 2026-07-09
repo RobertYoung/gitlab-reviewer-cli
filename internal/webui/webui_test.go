@@ -409,6 +409,54 @@ func TestMRListAndDetail(t *testing.T) {
 	}
 }
 
+func TestMRStatusEndpoint(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	mr := sampleMR()
+	mr.Pipeline = &gitlabx.PipelineStatus{
+		Status: "failed",
+		WebURL: "https://gitlab.example.com/group/app/-/pipelines/9",
+	}
+	env.svc.mr = &mr
+	env.svc.discussions = []gitlabx.Discussion{
+		{ID: "open", Notes: []gitlabx.Note{{ID: 1, Resolvable: true}}},
+		{ID: "done", Notes: []gitlabx.Note{{ID: 2, Resolvable: true, Resolved: true}}},
+		{ID: "system", Notes: []gitlabx.Note{{ID: 3, System: true}}},
+	}
+
+	// The MR list row carries the lazy hydration URL.
+	code, body := env.get("/i/default/")
+	if code != http.StatusOK || !strings.Contains(body, "data-status-url=") || !strings.Contains(body, "mr/status?iid=5") {
+		t.Fatalf("MR list should embed status URLs: %d\n%s", code, body)
+	}
+
+	code, body = env.get("/i/default/mr/status?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("mr/status: %d\n%s", code, body)
+	}
+	var out struct {
+		Pipeline *struct {
+			Status string `json:"status"`
+			URL    string `json:"url"`
+		} `json:"pipeline"`
+		Threads    int `json:"threads"`
+		Unresolved int `json:"unresolved"`
+	}
+	if err := json.Unmarshal([]byte(body), &out); err != nil {
+		t.Fatalf("decoding %q: %v", body, err)
+	}
+	if out.Pipeline == nil || out.Pipeline.Status != "failed" || !strings.Contains(out.Pipeline.URL, "/pipelines/9") {
+		t.Errorf("pipeline: %+v", out.Pipeline)
+	}
+	if out.Threads != 2 || out.Unresolved != 1 {
+		t.Errorf("threads = %d, unresolved = %d, want 2 and 1", out.Threads, out.Unresolved)
+	}
+
+	// A missing MR pair is a client error, not a GitLab round trip.
+	if code, _ := env.get("/i/default/mr/status"); code != http.StatusBadRequest {
+		t.Errorf("missing params: got %d, want 400", code)
+	}
+}
+
 func TestMRHeaderLinksAndMarkdownDescription(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 	mr := sampleMR()

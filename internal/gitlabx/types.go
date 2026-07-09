@@ -135,6 +135,14 @@ type MRDetail struct {
 	HasConflicts        bool
 	DivergedCommits     int64
 	DetailedMergeStatus string
+	Pipeline            *PipelineStatus // head pipeline; nil when none has run
+}
+
+// PipelineStatus is the outcome of an MR's head pipeline. The list API
+// omits pipelines, so it is only populated on MRDetail.
+type PipelineStatus struct {
+	Status string // GitLab status: success, failed, running, pending, canceled, skipped, manual, ...
+	WebURL string
 }
 
 // NeedsRebase reports whether the source branch is behind its target or
@@ -192,6 +200,29 @@ type Discussion struct {
 	Notes []Note
 }
 
+// Unresolved reports whether the discussion is an open thread: it holds a
+// resolvable note nobody has resolved yet. GitLab resolves a thread only
+// once every resolvable note in it is resolved.
+func (d Discussion) Unresolved() bool {
+	for _, n := range d.Notes {
+		if n.Resolvable && !n.Resolved {
+			return true
+		}
+	}
+	return false
+}
+
+// Resolvable reports whether the discussion is a thread at all (has any
+// resolvable note), as opposed to system notes or plain comments.
+func (d Discussion) Resolvable() bool {
+	for _, n := range d.Notes {
+		if n.Resolvable {
+			return true
+		}
+	}
+	return false
+}
+
 // Anchor returns the diff position of the discussion's first positioned
 // note, or nil for general (unanchored) threads.
 func (d Discussion) Anchor() *Position {
@@ -210,6 +241,7 @@ type Note struct {
 	AuthorName string // full name; empty when GitLab omits it
 	Body       string
 	System     bool
+	Resolvable bool
 	Resolved   bool
 	CreatedAt  time.Time
 	Position   *Position // nil for general (unpositioned) notes

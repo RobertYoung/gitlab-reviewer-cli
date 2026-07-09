@@ -131,6 +131,9 @@ func TestGetMergeRequest(t *testing.T) {
 			"diff_refs": map[string]any{
 				"base_sha": "base1", "head_sha": "head999", "start_sha": "start1",
 			},
+			"head_pipeline": map[string]any{
+				"status": "failed", "web_url": "https://gitlab.example/group/app/-/pipelines/42",
+			},
 		})
 	})
 	c := newTestClient(t, nil, nil, mux)
@@ -143,6 +146,9 @@ func TestGetMergeRequest(t *testing.T) {
 	}
 	if !mr.HasConflicts || mr.ProjectPath != "group/app" {
 		t.Errorf("detail mapping: %+v", mr)
+	}
+	if mr.Pipeline == nil || mr.Pipeline.Status != "failed" || mr.Pipeline.WebURL != "https://gitlab.example/group/app/-/pipelines/42" {
+		t.Errorf("pipeline mapping: %+v", mr.Pipeline)
 	}
 }
 
@@ -263,7 +269,7 @@ func TestListDiscussions(t *testing.T) {
 			"id":              "disc1",
 			"individual_note": false,
 			"notes": []map[string]any{{
-				"id": 100, "body": "please rename", "system": false, "resolved": true,
+				"id": 100, "body": "please rename", "system": false, "resolvable": true, "resolved": true,
 				"author": map[string]any{"username": "carol"},
 				"position": map[string]any{
 					"base_sha": "b", "head_sha": "h", "start_sha": "s",
@@ -281,7 +287,7 @@ func TestListDiscussions(t *testing.T) {
 		t.Fatalf("got %+v", discussions)
 	}
 	note := discussions[0].Notes[0]
-	if note.Author != "carol" || !note.Resolved {
+	if note.Author != "carol" || !note.Resolvable || !note.Resolved {
 		t.Errorf("note mapping: %+v", note)
 	}
 	if note.Position == nil || note.Position.NewLine == nil || *note.Position.NewLine != 12 || note.Position.OldLine != nil {

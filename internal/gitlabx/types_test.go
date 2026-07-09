@@ -34,3 +34,30 @@ func TestMRSummaryWebURLs(t *testing.T) {
 			zero.ProjectWebURL(), zero.AuthorWebURL(), zero.BranchWebURL("main"))
 	}
 }
+
+func TestDiscussionThreadStates(t *testing.T) {
+	cases := []struct {
+		name       string
+		d          Discussion
+		resolvable bool
+		unresolved bool
+	}{
+		{"open thread", Discussion{Notes: []Note{{Resolvable: true}}}, true, true},
+		{"resolved thread", Discussion{Notes: []Note{{Resolvable: true, Resolved: true}}}, true, false},
+		// A thread resolves only when every resolvable note is resolved.
+		{"partially resolved", Discussion{Notes: []Note{
+			{Resolvable: true, Resolved: true}, {Resolvable: true},
+		}}, true, true},
+		{"plain comment", Discussion{Notes: []Note{{}}}, false, false},
+		{"system note", Discussion{Notes: []Note{{System: true}}}, false, false},
+		{"empty", Discussion{}, false, false},
+	}
+	for _, c := range cases {
+		if got := c.d.Resolvable(); got != c.resolvable {
+			t.Errorf("%s: Resolvable() = %v, want %v", c.name, got, c.resolvable)
+		}
+		if got := c.d.Unresolved(); got != c.unresolved {
+			t.Errorf("%s: Unresolved() = %v, want %v", c.name, got, c.unresolved)
+		}
+	}
+}

@@ -1,12 +1,14 @@
 package webui
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
@@ -102,6 +104,7 @@ type mrListContent struct {
 	NextURL    string
 	Err        string
 	MRURL      func(gitlabx.MRSummary) string
+	StatusURL  func(gitlabx.MRSummary) string // lazy pipeline/thread JSON per row
 }
 
 // mrReviewedInfo decorates a listed MR that has stored reviews: how the
@@ -146,6 +149,13 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 				project = fmt.Sprint(m.ProjectID)
 			}
 			return mrURL(inst, "/mr", project, m.IID, nil)
+		},
+		StatusURL: func(m gitlabx.MRSummary) string {
+			project := m.ProjectPath
+			if project == "" {
+				project = fmt.Sprint(m.ProjectID)
+			}
+			return mrURL(inst, "/mr/status", project, m.IID, nil)
 		},
 	}
 
@@ -195,6 +205,66 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 		Title: "merge requests", Instance: inst,
 		Crumbs: []crumb{{Label: inst}}, Content: content,
 	})
+}
+
+// handleMRStatus returns one MR's review-queue signals as JSON: the head
+// pipeline outcome and its unresolved discussion-thread count. Both need a
+// per-MR API call (the list API returns neither), so the MR list hydrates
+// them lazily row by row instead of turning one list request into N+1.
+func (s *Server) handleMRStatus(w http.ResponseWriter, r *http.Request, d *Deps) {
+	project, iid, err := mrQuery(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	id := parseProject(project)
+
+	var (
+		wg          sync.WaitGroup
+		detail      *gitlabx.MRDetail
+		discussions []gitlabx.Discussion
+		detailErr   error
+		discErr     error
+	)
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		detail, detailErr = d.Svc.GetMergeRequest(r.Context(), id, iid)
+	}()
+	go func() {
+		defer wg.Done()
+		discussions, discErr = d.Svc.ListDiscussions(r.Context(), id, iid)
+	}()
+	wg.Wait()
+
+	// Each signal degrades independently: a row shows whatever half loaded.
+	if detailErr != nil && discErr != nil {
+		http.Error(w, detailErr.Error(), http.StatusBadGateway)
+		return
+	}
+	out := map[string]any{}
+	if detailErr == nil && detail.Pipeline != nil {
+		out["pipeline"] = map[string]string{
+			"status": detail.Pipeline.Status,
+			"url":    detail.Pipeline.WebURL,
+		}
+	}
+	if discErr == nil {
+		var threads, unresolved int
+		for _, disc := range discussions {
+			if !disc.Resolvable() {
+				continue
+			}
+			threads++
+			if disc.Unresolved() {
+				unresolved++
+			}
+		}
+		out["threads"] = threads
+		out["unresolved"] = unresolved
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
 }
 
 func splitList(s string) []string {
