@@ -48,6 +48,10 @@ The GUI mirrors the TUI screen for screen:
   search via the filter bar (filters are URL parameters, so views are
   bookmarkable). MRs that already have a stored review carry a *reviewed*
   badge linking to their past reviews. Each MR links to its GitLab page.
+  A status column fills in lazily after the list renders: the head
+  pipeline's outcome (linking to the pipeline in GitLab) and the MR's
+  unresolved discussion-thread count — amber while threads are open, a
+  muted check once all are resolved.
 - **MR detail** — title, branches, approval status with
   approve/unapprove, the description rendered as markdown, the commit
   list, and a needs-rebase warning when the branch is behind its target.

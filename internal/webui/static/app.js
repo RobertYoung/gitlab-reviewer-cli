@@ -506,6 +506,69 @@
     });
   }
 
+  // --- MR list: lazy pipeline + thread hydration ------------------------
+  // Pipeline status and unresolved-thread counts each cost a per-MR API
+  // call, so the list renders without them and each row fetches its own
+  // status JSON afterwards, a few at a time. Failures leave the cell empty.
+  var statusCells = $$("td.mr-status[data-status-url]");
+  if (statusCells.length) {
+    var statusIcon = function (name) {
+      var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("class", "icon");
+      var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", "#i-" + name);
+      svg.appendChild(use);
+      return svg;
+    };
+    var ciLabels = { success: "passed", waiting_for_resource: "waiting" };
+    var renderStatus = function (cell, out) {
+      if (out.pipeline && out.pipeline.status) {
+        var p = out.pipeline;
+        var badge = document.createElement(p.url ? "a" : "span");
+        badge.className = "badge ci ci-" + p.status.replace(/[^a-z_-]/g, "");
+        if (p.url) {
+          badge.href = p.url;
+          badge.target = "_blank";
+          badge.rel = "noopener";
+        }
+        badge.title = "pipeline: " + p.status;
+        if (p.status === "success") badge.appendChild(statusIcon("check"));
+        if (p.status === "failed") badge.appendChild(statusIcon("cross"));
+        badge.appendChild(document.createTextNode(" " + (ciLabels[p.status] || p.status)));
+        cell.appendChild(badge);
+      }
+      if (out.threads > 0) {
+        var t = document.createElement("span");
+        if (out.unresolved > 0) {
+          t.className = "badge threads-open";
+          t.title = out.unresolved + " of " + out.threads + " thread(s) unresolved";
+          t.appendChild(statusIcon("chat"));
+          t.appendChild(document.createTextNode(" " + out.unresolved));
+        } else {
+          t.className = "badge threads-resolved";
+          t.title = "all " + out.threads + " thread(s) resolved";
+          t.appendChild(statusIcon("check"));
+          t.appendChild(document.createTextNode(" " + out.threads));
+        }
+        cell.appendChild(t);
+      }
+    };
+    var statusQueue = statusCells.slice();
+    var pumpStatus = function () {
+      var cell = statusQueue.shift();
+      if (!cell) return;
+      fetch(cell.dataset.statusUrl)
+        .then(function (res) {
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          return res.json();
+        })
+        .then(function (out) { renderStatus(cell, out); })
+        .catch(function () { /* row stays plain */ })
+        .then(pumpStatus, pumpStatus);
+    };
+    for (var s = 0; s < 4 && s < statusCells.length; s++) pumpStatus();
+  }
+
   // --- settings: gitlab.instances add/remove ---------------------------
   // The server renders every instance as a fieldset plus one trailing blank
   // row. "Add instance" clones the blank row with a fresh index; "Remove"

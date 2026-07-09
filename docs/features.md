@@ -22,6 +22,7 @@ other modality (keyboard-driven vs browser-native).
 | Pagination | ✅ | ✅ | TUI loads more as you scroll; GUI pages |
 | Open MR in browser | ✅ | ✅ | TUI: `o`; GUI: "open in GitLab" link |
 | Reviewed badge on MRs with stored reviews | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): GUI links the badge to the MR's past reviews |
+| Pipeline status and unresolved-thread counts on the MR list | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): both need a per-MR API call, so rows hydrate lazily after the list renders; the pipeline badge links to the pipeline |
 
 ## MR detail
 

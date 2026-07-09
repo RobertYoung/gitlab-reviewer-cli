@@ -239,6 +239,12 @@ func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*
 		DivergedCommits:     mr.DivergedCommitsCount,
 		DetailedMergeStatus: mr.DetailedMergeStatus,
 	}
+	if mr.HeadPipeline != nil {
+		detail.Pipeline = &PipelineStatus{
+			Status: mr.HeadPipeline.Status,
+			WebURL: mr.HeadPipeline.WebURL,
+		}
+	}
 	if path, ok := project.(string); ok {
 		detail.ProjectPath = path
 	} else if mr.References != nil {
@@ -538,10 +544,11 @@ func toDiscussion(d *gitlab.Discussion) Discussion {
 	disc := Discussion{ID: d.ID}
 	for _, n := range d.Notes {
 		note := Note{
-			ID:       n.ID,
-			Body:     n.Body,
-			System:   n.System,
-			Resolved: n.Resolved,
+			ID:         n.ID,
+			Body:       n.Body,
+			System:     n.System,
+			Resolvable: n.Resolvable,
+			Resolved:   n.Resolved,
 		}
 		if n.Author.Username != "" {
 			note.Author = n.Author.Username

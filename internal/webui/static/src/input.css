@@ -249,6 +249,21 @@ a.badge.reviewed:hover { @apply no-underline bg-base-300; }
 .badge.state-below-threshold { @apply text-base-content/50; }
 .finding.state-below-threshold { opacity: 0.7; }
 
+/* MR list lazy status: head pipeline outcome + unresolved threads. */
+.badge.ci-success { @apply text-success; border-color: var(--color-success); }
+.badge.ci-failed { @apply text-error; border-color: var(--color-error); }
+.badge.ci-running { @apply text-info; border-color: var(--color-info); }
+.badge.ci-pending, .badge.ci-created, .badge.ci-manual, .badge.ci-scheduled,
+.badge.ci-preparing, .badge.ci-waiting_for_resource { @apply text-warning; border-color: var(--color-warning); }
+.badge.ci-canceled, .badge.ci-canceling, .badge.ci-skipped { @apply text-base-content/50; }
+a.badge.ci:hover { @apply no-underline bg-base-300; }
+/* threads-* (not .threads.resolved) so the diff view's green .badge.resolved
+   rule cannot bleed into the muted all-resolved state here. */
+.badge.threads-open { @apply text-warning; border-color: var(--color-warning); }
+.badge.threads-resolved { @apply text-base-content/50; }
+td.mr-status { white-space: nowrap; }
+td.mr-status .badge + .badge { margin-left: 0.3rem; }
+
 /* lists — DaisyUI's own .list component (an unrelated vertical-list-with-
    dividers pattern) sets display:flex, which would otherwise break the
    table's column layout since thead/tbody stop being laid out as a table.
