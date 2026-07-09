@@ -136,6 +136,7 @@
       es.addEventListener("done", function (ev) {
         es.close();
         var out = JSON.parse(ev.data);
+        loadbarStart();
         if (!out.error && out.findingsUrl && !out.draftReady) {
           window.location.replace(out.findingsUrl);
         } else {
@@ -167,6 +168,7 @@
       });
       ces.addEventListener("done", function () {
         ces.close();
+        loadbarStart();
         window.location.reload();
       });
       ces.onerror = function () {
@@ -178,7 +180,10 @@
       // ctrl/cmd+enter sends the message, like the TUI's ctrl+s.
       if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
         var form = ev.target.closest("form.chat-form");
-        if (form) form.submit();
+        if (form) {
+          loadbarStart();
+          form.submit();
+        }
       }
     });
   }
@@ -495,6 +500,7 @@
       if (ev.key === "Escape") close();
       // ctrl/cmd+enter submits the open comment form, like the TUI's ctrl+s.
       if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter" && open) {
+        loadbarStart();
         open.querySelector("form").submit();
       }
     });
@@ -547,6 +553,43 @@
       if (row) row.remove();
     });
   }
+
+  // --- page-load indicator ----------------------------------------------
+  // Every navigation is a full page load with no built-in feedback; show an
+  // indeterminate bar at the top once one takes longer than a moment. This
+  // submit listener registers after the triage one above, so upgraded forms
+  // have already called preventDefault by the time it runs.
+  var loadbar = $("#loadbar");
+  var loadbarTimer = null;
+  function loadbarStart() {
+    if (!loadbar || loadbarTimer !== null) return;
+    loadbarTimer = setTimeout(function () { loadbar.hidden = false; }, 150);
+  }
+  function loadbarStop() {
+    if (loadbarTimer !== null) {
+      clearTimeout(loadbarTimer);
+      loadbarTimer = null;
+    }
+    if (loadbar) loadbar.hidden = true;
+  }
+  document.addEventListener("click", function (ev) {
+    if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var a = ev.target.closest && ev.target.closest("a[href]");
+    if (!a || a.target || a.hasAttribute("download") || a.origin !== location.origin) return;
+    var href = a.getAttribute("href");
+    if (!href || href.charAt(0) === "#") return;
+    loadbarStart();
+  });
+  document.addEventListener("submit", function (ev) {
+    if (ev.defaultPrevented || ev.target.target || ev.target.method === "dialog") return;
+    loadbarStart();
+  });
+  // A bfcache restore (back/forward) brings the old page back with the bar
+  // up; Escape cancels an in-flight navigation.
+  window.addEventListener("pageshow", loadbarStop);
+  document.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") loadbarStop();
+  });
 
   // Unhide the topbar help button on pages that registered shortcuts.
   var helpBtn = $("#help-toggle");

@@ -20,10 +20,15 @@
 </head>
 <body>
 {{template "iconsprite"}}
+<div id="loadbar" class="loadbar" hidden aria-hidden="true"><div class="fill"></div></div>
 <header class="topbar">
   <a class="brand" href="/">gitlab-reviewer</a>
-  {{if and .Instance .Instances}}<span class="crumb">{{.Instance}}</span>{{end}}
-  <span class="page-title">{{.Title}}</span>
+  <nav class="crumbs" aria-label="breadcrumb">
+    {{- range $i, $c := .Crumbs}}
+    {{- if $i}}<span class="sep" aria-hidden="true">/</span>{{end}}
+    {{- if $c.URL}}<a class="crumb" href="{{$c.URL}}">{{$c.Label}}</a>{{else}}<span class="crumb current" aria-current="page">{{$c.Label}}</span>{{end}}
+    {{- end}}
+  </nav>
   <span class="spacer"></span>
   <a class="iconbtn" href="/settings" title="settings">
     <svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>

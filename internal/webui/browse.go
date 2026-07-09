@@ -103,7 +103,10 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, d *Deps) {
 	if hasMore {
 		content.NextURL = browsePageURL(inst, q, page+1)
 	}
-	s.render(w, http.StatusOK, "browse", pageData{Title: title, Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "browse", pageData{
+		Title: title, Instance: inst,
+		Crumbs: append(instCrumbs(inst), crumb{Label: title}), Content: content,
+	})
 }
 
 // scopedMRsURL links to the MR list with an ad-hoc scope override; param is
