@@ -68,15 +68,20 @@ The GUI mirrors the TUI screen for screen:
   commit, so a new push resets it); clicking a header folds the file.
   The latest review's findings appear inline on their lines and can be
   accepted or rejected in place.
-- **Review form** — the *Run AI review* button (on the overview and the
-  diff sidebar) has an agents selector matching the TUI's picker, with a
-  per-agent model dropdown next to each; the selection and model picks
-  per project are remembered across both frontends. See
-  [Review Agents](Review-Agents.md#per-agent-model). Once the MR has a
-  stored review, runs default to an incremental re-review (only the
-  changes since the last reviewed commit, previous findings and their
-  curation states carried forward); a *full re-review* checkbox forces
-  scanning the entire diff.
+- **Review options page** — the *Run AI review* button (on the overview
+  and the diff sidebar) opens an options page before the run starts. It
+  has an agents selector matching the TUI's picker, with a per-agent
+  model dropdown next to each (see
+  [Review Agents](Review-Agents.md#per-agent-model)), plus per-run
+  overrides for the run-wide model, agent concurrency
+  (`review.agent_concurrency`), max budget (`review.max_budget_usd`),
+  and extra instructions appended to the review prompt. Everything is
+  remembered per project; cleared fields revert to the configured
+  defaults, and the agent selection and model picks are shared with the
+  TUI. Once the MR has a stored review, runs default to an incremental
+  re-review (only the changes since the last reviewed commit, previous
+  findings and their curation states carried forward); a *full
+  re-review* checkbox forces scanning the entire diff.
 - **Review progress** — the run log streams live over server-sent events,
   with a per-agent status strip (running / done with finding count /
   failed) above it; the page jumps to the findings when the run

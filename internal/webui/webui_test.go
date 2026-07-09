@@ -841,8 +841,8 @@ func TestReviewPerAgentModel(t *testing.T) {
 	rev := &recordingReviewer{result: defaultResult()}
 	env := newTestEnv(t, rev)
 
-	// The detail page renders a per-agent model dropdown.
-	_, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	// The review options page renders a per-agent model dropdown.
+	_, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if !strings.Contains(body, `name="model:bug"`) {
 		t.Fatalf("no per-agent model dropdown:\n%s", body)
 	}
@@ -864,9 +864,117 @@ func TestReviewPerAgentModel(t *testing.T) {
 	}
 
 	// It is remembered: reopening the form pre-selects it.
-	_, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	_, body = env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if !strings.Contains(body, `<option value="opus" selected>opus</option>`) {
 		t.Fatalf("remembered model not pre-selected:\n%s", body)
+	}
+}
+
+func TestReviewOptionsPage(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	code, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
+	if code != http.StatusOK {
+		t.Fatalf("review options page: %d", code)
+	}
+	for _, want := range []string{
+		`name="agents" value="bug"`,
+		`name="model:bug"`,
+		`name="run_model"`,
+		`name="concurrency"`,
+		`name="budget"`,
+		`name="instructions"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("review options page missing %q:\n%s", want, body)
+		}
+	}
+	// Concurrency is seeded from the effective config default.
+	if !strings.Contains(body, `name="concurrency" id="concurrency" min="1" step="1" value="3"`) {
+		t.Fatalf("concurrency not seeded from config:\n%s", body)
+	}
+}
+
+func TestReviewStartWithOverrides(t *testing.T) {
+	rev := &recordingReviewer{result: defaultResult()}
+	env := newTestEnv(t, rev)
+
+	code, _ := env.post("/i/default/mr/review", mrForm(url.Values{
+		"agents":       {"bug"},
+		"run_model":    {"opus"},
+		"concurrency":  {"1"},
+		"budget":       {"2.5"},
+		"instructions": {"check migrations"},
+	}))
+	if code != http.StatusOK {
+		t.Fatalf("review start: %d", code)
+	}
+	run := waitRun(t, env.srv)
+
+	// The overrides reached the reviewer via this run's config copy.
+	reqs := rev.requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests: %+v", reqs)
+	}
+	if reqs[0].Model != "opus" {
+		t.Fatalf("run model not applied: %+v", reqs[0])
+	}
+	if reqs[0].MaxBudgetUSD != 2.5 {
+		t.Fatalf("budget not applied: %+v", reqs[0])
+	}
+	if !strings.Contains(reqs[0].Instructions, "check migrations") {
+		t.Fatalf("instructions not applied: %q", reqs[0].Instructions)
+	}
+	// The run log surfaces what was overridden.
+	lines, _, _ := run.snapshot()
+	if !strings.Contains(strings.Join(lines, "\n"), "run overrides:") {
+		t.Fatalf("override summary missing from run log:\n%s", strings.Join(lines, "\n"))
+	}
+
+	// The choices are remembered: reopening the page pre-fills them.
+	_, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
+	for _, want := range []string{
+		`<option value="opus" selected>opus</option>`,
+		`name="concurrency" id="concurrency" min="1" step="1" value="1"`,
+		`name="budget" id="budget" min="0" step="any" value="2.5"`,
+		`check migrations</textarea>`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("remembered override missing %q:\n%s", want, body)
+		}
+	}
+}
+
+// TestReviewPerAgentPinBeatsRunModel pins one agent's model and sets a
+// different run-wide model: the pin must win for that agent.
+func TestReviewPerAgentPinBeatsRunModel(t *testing.T) {
+	rev := &recordingReviewer{result: defaultResult()}
+	env := newTestEnv(t, rev)
+
+	env.post("/i/default/mr/review", mrForm(url.Values{
+		"agents": {"bug"}, "model:bug": {"haiku"}, "run_model": {"opus"},
+	}))
+	waitRun(t, env.srv)
+	reqs := rev.requests()
+	if len(reqs) != 1 || reqs[0].Model != "haiku" {
+		t.Fatalf("per-agent pin must beat the run model: %+v", reqs)
+	}
+}
+
+func TestReviewStartInvalidOverrides(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+
+	for name, form := range map[string]url.Values{
+		"zero concurrency":     {"concurrency": {"0"}},
+		"negative concurrency": {"concurrency": {"-2"}},
+		"junk concurrency":     {"concurrency": {"lots"}},
+		"negative budget":      {"budget": {"-1"}},
+		"junk budget":          {"budget": {"free"}},
+	} {
+		code, _ := env.post("/i/default/mr/review", mrForm(form))
+		if code != http.StatusBadRequest {
+			t.Fatalf("%s: want 400, got %d", name, code)
+		}
 	}
 }
 
@@ -1189,14 +1297,14 @@ func TestRunEventsStream(t *testing.T) {
 func TestAgentSelectionDrivesRunAndBadge(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 
-	// The MR page offers the agent checkboxes, all builtins pre-checked.
-	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	// The review options page offers the agent checkboxes, all builtins pre-checked.
+	code, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if code != http.StatusOK {
 		t.Fatalf("mr page: %d", code)
 	}
 	for _, want := range []string{`name="agents" value="bug"`, `name="agents" value="security"`, "checked"} {
 		if !strings.Contains(body, want) {
-			t.Fatalf("mr page missing %q", want)
+			t.Fatalf("review options page missing %q", want)
 		}
 	}
 
@@ -1227,7 +1335,7 @@ func TestAgentSelectionDrivesRunAndBadge(t *testing.T) {
 	}
 }
 
-func TestMRDetailOffersRepoAgents(t *testing.T) {
+func TestReviewFormOffersRepoAgents(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 	env.svc.repoFilesByDir = map[string][]gitlabx.RepoFile{
 		agents.ProjectAgentsDir: {{
@@ -1240,7 +1348,7 @@ func TestMRDetailOffersRepoAgents(t *testing.T) {
 		}},
 	}
 
-	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	code, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if code != http.StatusOK {
 		t.Fatalf("mr page: %d", code)
 	}
@@ -1253,11 +1361,11 @@ func TestMRDetailOffersRepoAgents(t *testing.T) {
 	}
 }
 
-func TestMRDetailSurvivesRepoAgentFetchFailure(t *testing.T) {
+func TestReviewFormSurvivesRepoAgentFetchFailure(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 	env.svc.repoFilesErr = errors.New("boom")
 
-	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	code, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if code != http.StatusOK {
 		t.Fatalf("mr page: %d", code)
 	}
@@ -1269,7 +1377,7 @@ func TestMRDetailSurvivesRepoAgentFetchFailure(t *testing.T) {
 	}
 }
 
-func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
+func TestReviewFormOffersLocalCloneAgents(t *testing.T) {
 	root := t.TempDir()
 	clone := filepath.Join(root, "gitlab.example.com", "group", "app")
 	for dir, name := range map[string]string{
@@ -1292,7 +1400,7 @@ func TestMRDetailOffersLocalCloneAgents(t *testing.T) {
 	// The API must not be consulted in root mode.
 	env.svc.repoFilesErr = errors.New("API must not be used")
 
-	code, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	code, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if code != http.StatusOK {
 		t.Fatalf("mr page: %d", code)
 	}
@@ -1420,11 +1528,11 @@ func TestChatUnavailableWithoutChatter(t *testing.T) {
 	}
 }
 
-func TestMRDetailOffersFullReReview(t *testing.T) {
+func TestReviewFormOffersFullReReview(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 
 	// No stored review yet: nothing to be incremental against, no override.
-	_, body := env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	_, body := env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if strings.Contains(body, `name="full"`) {
 		t.Fatalf("full re-review offered without a stored review:\n%s", body)
 	}
@@ -1432,7 +1540,7 @@ func TestMRDetailOffersFullReReview(t *testing.T) {
 	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
 	waitRun(t, env.srv)
 
-	_, body = env.get("/i/default/mr?project=group%2Fapp&iid=5")
+	_, body = env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
 	if !strings.Contains(body, `name="full"`) || !strings.Contains(body, "full re-review") {
 		t.Fatalf("full re-review override missing once a review is stored:\n%s", body)
 	}

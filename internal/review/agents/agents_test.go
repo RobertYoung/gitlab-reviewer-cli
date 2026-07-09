@@ -346,6 +346,52 @@ func TestSelectionStoreModels(t *testing.T) {
 	}
 }
 
+func TestSelectionStoreOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state", "agent-selection.json")
+	s := NewSelectionStore(path)
+
+	if got := s.LoadOptions("group/proj"); got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+
+	// Options coexist with names and models without clobbering them.
+	budget := 2.5
+	s.Save("group/proj", []string{"bug"})
+	s.SaveOptions("group/proj", &RunOptions{Concurrency: 5, Model: "opus", MaxBudgetUSD: &budget, Instructions: "check migrations"})
+	got := s.LoadOptions("group/proj")
+	if got == nil || got.Concurrency != 5 || got.Model != "opus" || got.MaxBudgetUSD == nil || *got.MaxBudgetUSD != 2.5 || got.Instructions != "check migrations" {
+		t.Fatalf("options: %+v", got)
+	}
+	if names := s.Load("group/proj"); !slices.Equal(names, []string{"bug"}) {
+		t.Fatalf("names lost after SaveOptions: %v", names)
+	}
+
+	// Re-saving names preserves the stored options.
+	s.Save("group/proj", []string{"docs"})
+	if got := s.LoadOptions("group/proj"); got == nil || got.Model != "opus" {
+		t.Fatalf("options lost after Save: %+v", got)
+	}
+
+	// A remembered explicit 0 budget (unlimited) survives on its own.
+	zero := 0.0
+	s.SaveOptions("group/proj", &RunOptions{MaxBudgetUSD: &zero})
+	if got := s.LoadOptions("group/proj"); got == nil || got.MaxBudgetUSD == nil || *got.MaxBudgetUSD != 0 {
+		t.Fatalf("explicit zero budget not remembered: %+v", got)
+	}
+
+	// All-default options clear the record.
+	s.SaveOptions("group/proj", &RunOptions{})
+	if got := s.LoadOptions("group/proj"); got != nil {
+		t.Fatalf("options not cleared: %+v", got)
+	}
+
+	var nilStore *SelectionStore
+	nilStore.SaveOptions("x", &RunOptions{Concurrency: 2}) // must not panic
+	if got := nilStore.LoadOptions("x"); got != nil {
+		t.Fatalf("nil store load options: %+v", got)
+	}
+}
+
 // TestSelectionStoreLegacyFormat reads a state file written before per-agent
 // models existed, when a project mapped straight to an array of names.
 func TestSelectionStoreLegacyFormat(t *testing.T) {

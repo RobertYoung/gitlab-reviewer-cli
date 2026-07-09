@@ -20,10 +20,26 @@ type SelectionStore struct {
 func NewSelectionStore(path string) *SelectionStore { return &SelectionStore{path: path} }
 
 // projectSelection is the per-project record: the checked agent names plus
-// any per-agent model overrides (agent name → model ID).
+// any per-agent model overrides (agent name → model ID) and remembered
+// run options.
 type projectSelection struct {
-	Agents []string          `json:"agents"`
-	Models map[string]string `json:"models,omitempty"`
+	Agents  []string          `json:"agents"`
+	Models  map[string]string `json:"models,omitempty"`
+	Options *RunOptions       `json:"options,omitempty"`
+}
+
+// RunOptions are the per-run review overrides remembered for a project.
+// Zero/empty fields mean "use the configured default".
+type RunOptions struct {
+	Concurrency  int      `json:"concurrency,omitempty"`
+	Model        string   `json:"model,omitempty"`
+	MaxBudgetUSD *float64 `json:"max_budget_usd,omitempty"`
+	Instructions string   `json:"instructions,omitempty"`
+}
+
+// empty reports whether every field is at its "use the default" value.
+func (o *RunOptions) empty() bool {
+	return o == nil || (o.Concurrency == 0 && o.Model == "" && o.MaxBudgetUSD == nil && o.Instructions == "")
 }
 
 // UnmarshalJSON accepts both the current object form and the legacy form,
@@ -81,6 +97,31 @@ func (s *SelectionStore) Save(project string, names []string) {
 	all := s.read()
 	sel := all[project]
 	sel.Agents = names
+	all[project] = sel
+	s.write(all)
+}
+
+// LoadOptions returns the remembered run options for a project, or nil if
+// none.
+func (s *SelectionStore) LoadOptions(project string) *RunOptions {
+	return s.read()[project].Options
+}
+
+// SaveOptions remembers the run options for a project, preserving the stored
+// agent selection and model overrides. All-default options clear the record
+// so cleared fields revert to config.
+func (s *SelectionStore) SaveOptions(project string, opts *RunOptions) {
+	if s == nil || s.path == "" || project == "" {
+		return
+	}
+	all := s.read()
+	sel := all[project]
+	if opts.empty() {
+		sel.Options = nil
+	} else {
+		copied := *opts
+		sel.Options = &copied
+	}
 	all[project] = sel
 	s.write(all)
 }

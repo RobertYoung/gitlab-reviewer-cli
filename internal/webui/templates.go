@@ -50,9 +50,6 @@ var tmplFuncs = template.FuncMap{
 			"FindingsURL": content.FindingsURL,
 		}
 	},
-	"reviewformargs": func(nav mrNav, opts []agentOption, warnings []string, prevReviewHead string) map[string]any {
-		return map[string]any{"Nav": nav, "AgentOptions": opts, "AgentWarnings": warnings, "PrevReviewHead": prevReviewHead}
-	},
 	"triagerow": func(f review.Finding, content findingsContent) map[string]any {
 		return map[string]any{
 			"F": f, "Nav": content.Nav, "StateURL": content.StateURL,

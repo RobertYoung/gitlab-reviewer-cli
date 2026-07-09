@@ -14,7 +14,7 @@
 
   <div class="actions">
     <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
-    {{template "reviewform" (reviewformargs $c.Nav $c.AgentOptions $c.AgentWarnings $c.PrevReviewHead)}}
+    <a class="button review" href="{{$c.Nav.ReviewFormURL}}">{{template "icon" "play"}} Run AI review</a>
     <form method="post" action="{{$c.Nav.ChatURL}}">
       <input type="hidden" name="project" value="{{$c.Nav.Project}}">
       <input type="hidden" name="iid" value="{{$c.Nav.IID}}">

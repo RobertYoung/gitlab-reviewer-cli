@@ -5,12 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/publisher"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runner"
@@ -156,11 +158,53 @@ func (g *runRegistry) get(id string) *reviewRun {
 	return g.runs[id]
 }
 
+// reviewStartOptions carries the per-run choices from the review options
+// form into startRun.
+type reviewStartOptions struct {
+	AgentNames  []string
+	AgentModels map[string]string
+	Incremental bool
+	// Overrides are applied on top of the effective config for this run
+	// only; nil or zero fields keep the configured defaults.
+	Overrides *agents.RunOptions
+}
+
+// applyRunOverrides folds the form's per-run overrides into this run's
+// config copy and returns a human-readable summary of what changed, or ""
+// when everything is at its configured default. Extra instructions append
+// to any configured ones rather than replacing them.
+func applyRunOverrides(cfg *config.Config, o *agents.RunOptions) string {
+	if o == nil {
+		return ""
+	}
+	var parts []string
+	if o.Concurrency > 0 && o.Concurrency != cfg.Review.AgentConcurrency {
+		cfg.Review.AgentConcurrency = o.Concurrency
+		parts = append(parts, fmt.Sprintf("concurrency %d", o.Concurrency))
+	}
+	if o.Model != "" && o.Model != cfg.Review.Model {
+		cfg.Review.Model = o.Model
+		parts = append(parts, "model "+o.Model)
+	}
+	if o.MaxBudgetUSD != nil && *o.MaxBudgetUSD != cfg.Review.MaxBudgetUSD {
+		cfg.Review.MaxBudgetUSD = *o.MaxBudgetUSD
+		parts = append(parts, fmt.Sprintf("budget $%g", *o.MaxBudgetUSD))
+	}
+	if o.Instructions != "" {
+		if cfg.Review.Instructions != "" {
+			cfg.Review.Instructions += "\n\n"
+		}
+		cfg.Review.Instructions += o.Instructions
+		parts = append(parts, "extra instructions")
+	}
+	return strings.Join(parts, ", ")
+}
+
 // start launches a review in a server goroutine, mirroring the TUI review
 // screen: run through the shared runner, then fold the diff view's pending
 // manual comments and the auto-accept threshold into the stored record so
 // the findings page opens with the same curation state the TUI would show.
-func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, agentNames []string, agentModels map[string]string, incremental bool) *reviewRun {
+func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, diffs []gitlabx.FileDiff, commits []gitlabx.Commit, opts reviewStartOptions) *reviewRun {
 	s.runs.mu.Lock()
 	s.runs.seq++
 	run := &reviewRun{
@@ -181,6 +225,9 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 	run.cancel = cancel
 
 	cfg := d.cfgFor(detail.ProjectPath)
+	if summary := applyRunOverrides(&cfg, opts.Overrides); summary != "" {
+		run.append("run overrides: " + summary)
+	}
 	key := mrKey(instance, detail.ProjectPath, detail.IID)
 
 	go func() {
@@ -191,11 +238,11 @@ func (s *Server) startRun(d *Deps, instance string, detail gitlabx.MRDetail, dif
 			Reviewer:    d.Reviewer,
 			Checkout:    d.Checkout,
 			Catalog:     d.Agents,
-			AgentNames:  agentNames,
-			AgentModels: agentModels,
+			AgentNames:  opts.AgentNames,
+			AgentModels: opts.AgentModels,
 			Logs:        d.Logs,
 			Results:     d.Results,
-			Incremental: incremental,
+			Incremental: opts.Incremental,
 		}
 		out := r.Run(ctx, detail, diffs, commits, run.append)
 
