@@ -83,7 +83,7 @@ other modality (keyboard-driven vs browser-native).
 | Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | GUI updates in place (no reloads), with a sticky count bar and state/severity filters |
 | Keyboard triage | ✅ | ✅ | TUI: `↑`/`↓`/`a`/`x`/`e`/`A`; GUI: `j`/`k`/`a`/`x`/`e`/`A` |
 | Publish immediately or as a draft review | ✅ | ✅ | |
-| Auto-publish with `publish.auto_comment` | ✅ | ✅ | Both publish qualifying findings without confirmation after a run; draft mode leaves a one-click "publish review" |
+| Auto-publish with `publish.auto_comment` | ✅ | ✅ | Both publish qualifying findings without a manual step after a run; the GUI confirms the immediate-mode outcome with a findings-page banner, and draft mode leaves a one-click "publish review" |
 | Position fallback to a general note | ✅ | ✅ | Shared publisher |
 | Past reviews: reopen findings with curation state | ✅ | ✅ | Shared result store — cross-frontend |
 | View a run's progress log later | ✅ | ✅ | |

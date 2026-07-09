@@ -3,6 +3,9 @@
 {{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
 <section class="panel findings-page" data-record="{{$c.RecordName}}">
   <h2>Findings · {{$c.Detail.Ref}}</h2>
+  {{if $c.AutoPublished}}
+  <p class="ok" role="status">{{template "icon" "check"}} Auto-published {{$c.AutoPublished}} qualifying finding(s) to GitLab (<code>publish.auto_comment</code>). No further action needed.</p>
+  {{end}}
   {{if $c.Rec.Summary}}<pre class="prose summary">{{$c.Rec.Summary}}</pre>{{end}}
   {{range $c.Rec.Warnings}}<p class="warning">{{template "icon" "warn"}} {{.}}</p>{{end}}
 
@@ -69,6 +72,7 @@
     <span class="count ok"><b id="count-accepted">{{$c.Accepted}}</b> accepted</span>
     <span class="count danger"><b id="count-rejected">{{$c.Rejected}}</b> rejected</span>
     <span class="count"><b id="count-pending">{{$c.Pending}}</b> pending</span>
+    {{if $c.Published}}<span class="count ok"><b id="count-published">{{$c.Published}}</b> published</span>{{end}}
   </span>
   <span class="spacer"></span>
   <span class="subtle kbd-hint">press ? for keyboard shortcuts</span>

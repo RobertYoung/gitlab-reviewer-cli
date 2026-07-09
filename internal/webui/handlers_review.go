@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,7 +89,14 @@ func (s *Server) runURLs(inst string, run *reviewRun, out *runOutcome) (findings
 		return "", ""
 	}
 	if out.RecName != "" {
-		findings = mrURL(inst, "/mr/findings", run.Project, run.IID, url.Values{"record": {out.RecName}})
+		q := url.Values{"record": {out.RecName}}
+		// Immediate-mode auto-publish redirects straight here; carry the count
+		// so the findings page confirms what was posted instead of landing on
+		// published findings silently. Draft mode surfaces on the run page.
+		if out.Published > 0 && !out.DraftReady {
+			q.Set("published", strconv.Itoa(out.Published))
+		}
+		findings = mrURL(inst, "/mr/findings", run.Project, run.IID, q)
 	}
 	if out.LogName != "" {
 		log = mrURL(inst, "/mr/log", run.Project, run.IID, url.Values{"name": {out.LogName}})
@@ -228,10 +236,15 @@ type findingsContent struct {
 	Accepted   int
 	Rejected   int
 	Pending    int
-	StateURL   string // POST target
-	PublishURL string
-	DiffURL    string // the diff view with this record's findings inline
-	LogURL     string
+	Published  int // findings already posted to GitLab (published + notes)
+	// AutoPublished is set from the ?published= redirect param when an
+	// immediate-mode auto-publish run just posted findings, so the page can
+	// confirm the outcome with a banner. Zero on reopened records.
+	AutoPublished int
+	StateURL      string // POST target
+	PublishURL    string
+	DiffURL       string // the diff view with this record's findings inline
+	LogURL        string
 }
 
 // handleFindings shows a stored review for triage: accept, reject, edit,
@@ -264,6 +277,9 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request, d *Deps)
 		PublishURL: mrURL(inst, "/mr/publish", project, iid, url.Values{"record": {recName}}),
 		DiffURL:    mrURL(inst, "/mr/diff", project, iid, url.Values{"record": {recName}}),
 	}
+	if n, err := strconv.Atoi(r.FormValue("published")); err == nil && n > 0 {
+		content.AutoPublished = n
+	}
 	if rec.LogPath != "" {
 		content.LogURL = mrURL(inst, "/mr/log", project, iid, url.Values{"name": {filepath.Base(rec.LogPath)}})
 	}
@@ -276,6 +292,8 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request, d *Deps)
 			content.Rejected++
 		case review.StatePending:
 			content.Pending++
+		case review.StatePublished, review.StateFellBack:
+			content.Published++
 		}
 	}
 	s.render(w, http.StatusOK, "findings", pageData{
