@@ -98,7 +98,10 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request, _ *Deps)
 	if content.FocusLabel != "" {
 		title = "chat · " + content.FocusLabel
 	}
-	s.render(w, http.StatusOK, "chat", pageData{Title: title, Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "chat", pageData{
+		Title: title, Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, cs.Ref, "chat"), Content: content,
+	})
 }
 
 // handleChatSend runs one turn with the posted message.

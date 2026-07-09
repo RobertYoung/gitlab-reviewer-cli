@@ -118,7 +118,10 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request, _ *Deps) 
 		PublishReviewURL: instPath(inst, "/mr/publish/review"),
 	}
 	content.FindingsURL, content.LogURL = s.runURLs(inst, run, out)
-	s.render(w, http.StatusOK, "run", pageData{Title: "reviewing " + run.Ref, Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "run", pageData{
+		Title: "reviewing " + run.Ref, Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, run.Ref, "review"), Content: content,
+	})
 }
 
 // handleRunEvents streams a run's progress as server-sent events: replayed
@@ -275,7 +278,10 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request, d *Deps)
 			content.Pending++
 		}
 	}
-	s.render(w, http.StatusOK, "findings", pageData{Title: "findings · " + detail.Ref(), Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "findings", pageData{
+		Title: "findings · " + detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "findings"), Content: content,
+	})
 }
 
 // handleFindingState curates a stored review: accept, reject, accept-all,
@@ -419,15 +425,18 @@ func (s *Server) handlePublishForm(w http.ResponseWriter, r *http.Request, d *De
 		return
 	}
 	cfg := d.cfgFor(detail.ProjectPath)
-	s.render(w, http.StatusOK, "publish", pageData{Title: "publish · " + detail.Ref(), Instance: inst, Content: publishContent{
-		Nav:        newMRNav(inst, project, iid),
-		Detail:     detail,
-		Items:      items,
-		Mode:       cfg.Publish.Mode,
-		Source:     r.FormValue("source"),
-		RecordName: r.FormValue("record"),
-		PostURL:    instPath(inst, "/mr/publish"),
-	}})
+	s.render(w, http.StatusOK, "publish", pageData{
+		Title: "publish · " + detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(newMRNav(inst, project, iid), detail.Ref(), "publish"), Content: publishContent{
+			Nav:        newMRNav(inst, project, iid),
+			Detail:     detail,
+			Items:      items,
+			Mode:       cfg.Publish.Mode,
+			Source:     r.FormValue("source"),
+			RecordName: r.FormValue("record"),
+			PostURL:    instPath(inst, "/mr/publish"),
+		},
+	})
 }
 
 // handlePublish posts the accepted findings/comments sequentially through
@@ -514,7 +523,10 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, d *Deps) 
 		}
 	}
 	content.DraftReady = pub.Draft && content.Inline+content.Notes > 0
-	s.render(w, http.StatusOK, "publish", pageData{Title: "publish · " + detail.Ref(), Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "publish", pageData{
+		Title: "publish · " + detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "publish"), Content: content,
+	})
 }
 
 // handlePublishReview publishes all pending draft notes in one action.
@@ -611,11 +623,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, d *Deps) 
 	}
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Started.After(entries[j].Started) })
 
-	s.render(w, http.StatusOK, "history", pageData{Title: "past reviews · " + detail.Ref(), Instance: inst, Content: historyContent{
-		Nav:     newMRNav(inst, project, iid),
-		Detail:  detail,
-		Entries: entries,
-	}})
+	s.render(w, http.StatusOK, "history", pageData{
+		Title: "past reviews · " + detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(newMRNav(inst, project, iid), detail.Ref(), "past reviews"), Content: historyContent{
+			Nav:     newMRNav(inst, project, iid),
+			Detail:  detail,
+			Entries: entries,
+		},
+	})
 }
 
 type logContent struct {
@@ -643,9 +658,13 @@ func (s *Server) handleLogView(w http.ResponseWriter, r *http.Request, _ *Deps) 
 		s.renderError(w, http.StatusNotFound, err)
 		return
 	}
-	s.render(w, http.StatusOK, "log", pageData{Title: "review log", Instance: inst, Content: logContent{
-		Nav:  newMRNav(inst, project, iid),
-		Name: name,
-		Text: string(data),
-	}})
+	nav := newMRNav(inst, project, iid)
+	s.render(w, http.StatusOK, "log", pageData{
+		Title: "review log", Instance: inst,
+		Crumbs: mrCrumbs(nav, fmt.Sprintf("%s!%d", project, iid), "review log"), Content: logContent{
+			Nav:  nav,
+			Name: name,
+			Text: string(data),
+		},
+	})
 }

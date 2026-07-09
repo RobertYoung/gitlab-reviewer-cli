@@ -40,6 +40,23 @@ func parseProject(s string) any {
 	return s
 }
 
+// instCrumbs starts a breadcrumb trail at the instance's MR list.
+func instCrumbs(inst string) []crumb {
+	return []crumb{{Label: inst, URL: instPath(inst, "/")}}
+}
+
+// mrCrumbs is the breadcrumb trail for an MR-scoped page: the instance's
+// MR list, the MR itself, then the current sub-page. An empty page means
+// the MR overview is the current page.
+func mrCrumbs(nav mrNav, ref, page string) []crumb {
+	trail := append(instCrumbs(nav.Instance), crumb{Label: ref, URL: nav.DetailURL})
+	if page == "" {
+		trail[len(trail)-1].URL = ""
+		return trail
+	}
+	return append(trail, crumb{Label: page})
+}
+
 // localRedirect follows a form's "back" target, restricted to local paths
 // so the parameter cannot bounce the browser off the session.
 func localRedirect(w http.ResponseWriter, r *http.Request, back, fallback string) {
@@ -174,7 +191,10 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 	if hasMore {
 		content.NextURL = listPageURL(inst, q, page+1)
 	}
-	s.render(w, http.StatusOK, "mrs", pageData{Title: "merge requests", Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "mrs", pageData{
+		Title: "merge requests", Instance: inst,
+		Crumbs: []crumb{{Label: inst}}, Content: content,
+	})
 }
 
 func splitList(s string) []string {
@@ -391,7 +411,10 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
 		content.PrevReviewHead = prev.HeadSHA
 	}
-	s.render(w, http.StatusOK, "mrdetail", pageData{Title: detail.Ref(), Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "mrdetail", pageData{
+		Title: detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, detail.Ref(), ""), Content: content,
+	})
 }
 
 type diffContent struct {
@@ -506,7 +529,10 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 			content.HasAccepted = true
 		}
 	}
-	s.render(w, http.StatusOK, "diff", pageData{Title: "diff · " + detail.Ref(), Instance: inst, Content: content})
+	s.render(w, http.StatusOK, "diff", pageData{
+		Title: "diff · " + detail.Ref(), Instance: inst,
+		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "diff"), Content: content,
+	})
 }
 
 // handleCommentAdd stores a manual comment (line-anchored or MR-level)
@@ -568,7 +594,8 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request, d *Deps) 
 			ref := fmt.Sprintf("%s!%d", project, iid)
 			if n, gerr := d.Results.LatestBlocking(ref, review.Severity(gate.MinSeverity)); gerr == nil && n > 0 {
 				s.renderError(w, http.StatusConflict, fmt.Errorf(
-					"approval blocked: %d finding(s) at or above %s in the last review (gate.approvals: block)", n, gate.MinSeverity))
+					"approval blocked: %d finding(s) at or above %s in the last review (gate.approvals: block)", n, gate.MinSeverity,
+				))
 				return
 			}
 		}

@@ -162,8 +162,11 @@
   @apply flex items-center gap-3 bg-base-200 border-b border-base-300 sticky top-0 z-10 px-4 py-2;
 }
 .topbar .brand { @apply font-bold text-base-content; }
-.topbar .crumb { color: var(--color-secondary); }
-.topbar .page-title { @apply text-base-content/60 overflow-hidden text-ellipsis whitespace-nowrap; }
+.topbar .crumbs { @apply flex items-center gap-1.5 min-w-0 whitespace-nowrap overflow-hidden; }
+.topbar .crumbs .crumb { color: var(--color-secondary); }
+.topbar .crumbs a.crumb:hover { text-decoration: underline; }
+.topbar .crumbs .sep { @apply text-base-content/40; }
+.topbar .crumbs .current { @apply text-base-content/60 overflow-hidden text-ellipsis; }
 .topbar .spacer, .spacer { flex: 1; }
 .topbar .version { @apply text-base-content/60 text-xs; }
 .iconbtn {
@@ -173,6 +176,21 @@
   cursor: pointer;
 }
 .iconbtn:hover { @apply text-base-content border-base-300 bg-base-300; }
+
+/* page-load indicator: an indeterminate bar across the top of the window,
+   revealed by app.js once a navigation takes noticeably long. */
+.loadbar { @apply fixed top-0 left-0 right-0 z-50 pointer-events-none overflow-hidden; height: 3px; }
+.loadbar .fill {
+  height: 100%;
+  width: 35%;
+  border-radius: 9999px;
+  background: var(--color-primary);
+  animation: loadbar-slide 1s ease-in-out infinite;
+}
+@keyframes loadbar-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(300%); }
+}
 
 main { @apply p-4 max-w-[1400px] mx-auto; }
 /* the diff page gets the full window width — split mode needs it */

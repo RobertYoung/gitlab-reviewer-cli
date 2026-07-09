@@ -24,7 +24,15 @@ type pageData struct {
 	Instance  string
 	Instances []string // >1 shows the instance name in the header
 	Version   string
+	Crumbs    []crumb // topbar breadcrumb trail; the Title alone when unset
 	Content   any
+}
+
+// crumb is one step in the topbar breadcrumb trail; the current page has
+// no URL and renders unlinked.
+type crumb struct {
+	Label string
+	URL   string
 }
 
 var tmplFuncs = template.FuncMap{
@@ -93,6 +101,9 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data pag
 	}
 	if instances := s.instanceList(); len(instances) > 1 {
 		data.Instances = instances
+	}
+	if len(data.Crumbs) == 0 {
+		data.Crumbs = []crumb{{Label: data.Title}}
 	}
 	data.Version = s.opts.Version
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
