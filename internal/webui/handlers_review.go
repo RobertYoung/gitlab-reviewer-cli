@@ -242,9 +242,9 @@ type findingsContent struct {
 	// confirm the outcome with a banner. Zero on reopened records.
 	AutoPublished int
 	StateURL      string // POST target
-	PublishURL string
-	DiffURL    string // the diff view with this record's findings inline
-	LogURL     string
+	PublishURL    string
+	DiffURL       string // the diff view with this record's findings inline
+	LogURL        string
 }
 
 // handleFindings shows a stored review for triage: accept, reject, edit,
