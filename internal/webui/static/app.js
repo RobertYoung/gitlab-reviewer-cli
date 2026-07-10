@@ -63,16 +63,33 @@
     }
   });
 
-  // --- review run page: stream progress, then jump to the findings ------
-  var runPage = $(".runpage");
-  if (runPage) {
-    var log = $("#runlog");
-
-    // Per-agent progress chips, derived from the run log's "[agent] text"
-    // line grammar (see runner.go): first sight means running, "done: N
-    // finding(s)" and "failed: …" are terminal.
-    var strip = $("#agent-strip");
+  // --- run log: per-agent chips and filtering ---------------------------
+  // Shared by the live run page and the stored full-log page. Chips derive
+  // from the run log's "[agent] text" line grammar (see runner.go): first
+  // sight means running, "done: N finding(s)" and "failed: …" are terminal.
+  // Each chip is a toggle that filters the log to the selected agent(s);
+  // with none selected every line shows.
+  var log = $("#runlog");
+  var strip = $("#agent-strip");
+  var logAddLine = null;
+  var logReset = null;
+  if (log && strip) {
     var agents = new Map();
+    var selected = new Set();
+    var allLines = [];
+    var agentOf = function (line) {
+      var m = line.match(/^\s*\S+\s+\[([^\]]+)\]/);
+      return m ? m[1] : null;
+    };
+    var lineVisible = function (line) {
+      if (selected.size === 0) return true;
+      var name = agentOf(line);
+      return name !== null && selected.has(name);
+    };
+    var renderLog = function () {
+      var shown = allLines.filter(lineVisible);
+      log.textContent = shown.length ? shown.join("\n") + "\n" : "";
+    };
     var feedAgentStrip = function (line) {
       var m = line.match(/^\s*\S+\s+\[([^\]]+)\]\s*(.*)$/);
       if (!m) return;
@@ -89,12 +106,15 @@
       renderAgentStrip();
     };
     var renderAgentStrip = function () {
-      if (!strip || agents.size === 0) return;
+      if (agents.size === 0) return;
       strip.hidden = false;
       strip.replaceChildren();
       agents.forEach(function (st, name) {
-        var chip = document.createElement("span");
-        chip.className = "agent-chip " + st.status;
+        var chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "agent-chip " + st.status + (selected.has(name) ? " selected" : "");
+        chip.setAttribute("aria-pressed", selected.has(name) ? "true" : "false");
+        chip.title = selected.has(name) ? "Show all agents" : "Show only " + name;
         if (st.status === "running") {
           var spin = document.createElement("span");
           spin.className = "spinner";
@@ -114,24 +134,46 @@
           n.textContent = " · " + st.findings;
           chip.appendChild(n);
         }
+        chip.addEventListener("click", function () {
+          if (selected.has(name)) selected.delete(name);
+          else selected.add(name);
+          renderAgentStrip();
+          renderLog();
+        });
         strip.appendChild(chip);
       });
     };
-    // Parse the server-rendered snapshot (finished runs have no stream).
-    if (log) log.textContent.split("\n").forEach(feedAgentStrip);
+    logAddLine = function (line) {
+      allLines.push(line);
+      feedAgentStrip(line);
+      if (lineVisible(line)) {
+        log.textContent += line + "\n";
+        log.scrollTop = log.scrollHeight;
+      }
+    };
+    logReset = function () {
+      allLines = [];
+      log.textContent = "";
+    };
+    // Parse the server-rendered snapshot (finished runs and stored logs
+    // have no stream).
+    allLines = log.textContent.split("\n");
+    while (allLines.length && allLines[allLines.length - 1] === "") allLines.pop();
+    allLines.forEach(feedAgentStrip);
+  }
 
+  // --- review run page: stream progress, then jump to the findings ------
+  var runPage = $(".runpage");
+  if (runPage) {
     if (!runPage.dataset.done) {
       var es = new EventSource(runPage.dataset.events);
       // The stream replays the full history on every (re)connect; drop the
       // server-rendered snapshot so lines are not duplicated.
       es.onopen = function () {
-        log.textContent = "";
+        if (logReset) logReset();
       };
       es.addEventListener("line", function (ev) {
-        var line = JSON.parse(ev.data);
-        log.textContent += line + "\n";
-        log.scrollTop = log.scrollHeight;
-        feedAgentStrip(line);
+        if (logAddLine) logAddLine(JSON.parse(ev.data));
       });
       es.addEventListener("done", function (ev) {
         es.close();

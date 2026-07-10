@@ -614,7 +614,8 @@ tr.inline-comment td { @apply border-t border-b border-base-300; }
 
 /* per-agent progress chips above the run log — same free-shape trick as
    .badge, since .agent-chip doesn't collide with any DaisyUI class name we
-   just define the look directly. */
+   just define the look directly. Chips are buttons that toggle filtering
+   the log to their agent's lines. */
 .agent-chip {
   @apply rounded-selector border border-base-300;
   display: inline-flex;
@@ -622,9 +623,18 @@ tr.inline-comment td { @apply border-t border-b border-base-300; }
   gap: 0.4rem;
   padding: 0.15rem 0.7rem;
   font-size: 12.5px;
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  cursor: pointer;
 }
 .agent-strip { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
 .agent-chip .icon { flex: none; }
+.agent-chip:hover { @apply bg-base-200; }
+.agent-chip.selected {
+  background: color-mix(in oklab, currentColor 18%, transparent);
+  box-shadow: inset 0 0 0 1px currentColor;
+}
 .agent-chip.running { border-color: var(--color-primary); }
 .agent-chip.done { @apply border-success text-success; }
 .agent-chip.failed { @apply border-error text-error; }
