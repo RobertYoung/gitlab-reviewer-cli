@@ -25,23 +25,25 @@
   {{if $c.Err}}<p class="error">{{$c.Err}}</p>{{end}}
 
   {{if $c.MRs}}
+  <div class="table-scroll">
   <table class="list">
     <thead><tr><th>!IID</th><th>Title</th><th>Project</th><th>Author</th><th>Target</th><th>Status</th><th>Review</th><th>Updated</th></tr></thead>
     <tbody>
       {{range $i, $m := $c.MRs}}
       <tr>
         <td>!{{$m.IID}}</td>
-        <td><a href="{{call $c.MRURL $m}}">{{if $m.Draft}}<span class="badge draft">draft</span> {{end}}{{$m.Title}}</a></td>
+        <td class="mr-title"><a href="{{call $c.MRURL $m}}">{{if $m.Draft}}<span class="badge draft">draft</span> {{end}}{{$m.Title}}</a></td>
         <td class="subtle">{{$m.ProjectPath}}</td>
-        <td class="subtle">{{$m.AuthorDisplay}}</td>
+        <td class="subtle mr-author">{{$m.AuthorDisplay}}</td>
         <td class="subtle">{{$m.TargetBranch}}</td>
         <td class="mr-status" data-status-url="{{call $c.StatusURL $m}}"></td>
         <td>{{with index $c.Reviewed $i}}<a class="badge reviewed" href="{{.URL}}" title="last reviewed {{reltime .When}} — {{.Findings}} finding(s), {{.Accepted}} accepted">{{template "icon" "check"}} reviewed{{if .Findings}} · {{.Findings}}{{end}}</a>{{end}}</td>
-        <td class="subtle">{{reltime $m.UpdatedAt}}</td>
+        <td class="subtle mr-updated">{{reltime $m.UpdatedAt}}</td>
       </tr>
       {{end}}
     </tbody>
   </table>
+  </div>
   {{else if not $c.NeedsScope}}
   <p class="note">No merge requests match.</p>
   {{end}}
