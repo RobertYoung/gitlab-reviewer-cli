@@ -263,6 +263,17 @@ a.badge.ci:hover { @apply no-underline bg-base-300; }
 .badge.threads-resolved { @apply text-base-content/50; }
 td.mr-status { white-space: nowrap; }
 td.mr-status .badge + .badge { margin-left: 0.3rem; }
+/* The nowrap status badges and long author names otherwise win the auto
+   table-layout width fight and starve the title into a many-line sliver:
+   width:100% hands the title column all the spare space instead. */
+td.mr-title { width: 45%; min-width: 14rem; }
+td.mr-updated { white-space: nowrap; }
+/* "Name (@username)" contains a long unbreakable token; without a break
+   opportunity its min-content width forces the whole table past the panel. */
+td.mr-author { width: 20%; min-width: 9rem; overflow-wrap: anywhere; }
+/* When the nowrap columns' minimum widths still exceed the panel, scroll the
+   table sideways rather than clipping the last columns at the panel edge. */
+.table-scroll { overflow-x: auto; }
 
 /* lists — DaisyUI's own .list component (an unrelated vertical-list-with-
    dividers pattern) sets display:flex, which would otherwise break the
