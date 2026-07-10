@@ -3,6 +3,7 @@
 {{template "mrnav" (navargs $c.Nav "")}}
 <section class="panel">
   <h2>Review log <span class="subtle">{{$c.Name}}</span></h2>
-  <pre class="runlog">{{$c.Text}}</pre>
+  <div class="agent-strip" id="agent-strip" hidden></div>
+  <pre class="runlog" id="runlog">{{$c.Text}}</pre>
 </section>
 {{end}}
