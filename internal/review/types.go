@@ -193,6 +193,14 @@ type Request struct {
 	Model        string
 	Timeout      time.Duration
 	MaxBudgetUSD float64
+
+	// AllowedDomains grants WebFetch scoped to these domains only, for this
+	// request; empty means WebFetch stays fully denied. Mirrors Model's
+	// per-request-with-Backend-fallback shape.
+	AllowedDomains []string
+	// AllowedCommands grants Bash scoped to these command patterns only,
+	// for this request; empty means Bash stays fully denied.
+	AllowedCommands []string
 }
 
 // EventKind classifies progress events streamed during a review.

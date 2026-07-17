@@ -34,6 +34,11 @@ type reviewOptionsContent struct {
 	Concurrency    int
 	Budget         float64
 	Instructions   string
+	// DomainOptions/CommandOptions are empty (and so hidden by the template)
+	// unless the project's config configures review.allowed_domains/
+	// allowed_commands; nothing is pre-checked by default.
+	DomainOptions  []permOption
+	CommandOptions []permOption
 }
 
 // handleReviewForm shows the review options page: agent selection, per-agent
@@ -54,14 +59,16 @@ func (s *Server) handleReviewForm(w http.ResponseWriter, r *http.Request, d *Dep
 	}
 
 	content := reviewOptionsContent{
-		Nav:           newMRNav(inst, detail.ProjectPath, detail.IID),
-		Detail:        detail,
-		AgentOptions:  agentOptions(d, cat, detail.ProjectPath),
-		AgentWarnings: append(cat.Warnings(), fetchWarnings...),
-		RunModels:     modelMenu(cfg.ModelOptions(), opts.Model, cfg.Review.Model),
-		Concurrency:   cfg.Review.AgentConcurrency,
-		Budget:        cfg.Review.MaxBudgetUSD,
-		Instructions:  opts.Instructions,
+		Nav:            newMRNav(inst, detail.ProjectPath, detail.IID),
+		Detail:         detail,
+		AgentOptions:   agentOptions(d, cat, detail.ProjectPath),
+		AgentWarnings:  append(cat.Warnings(), fetchWarnings...),
+		RunModels:      modelMenu(cfg.ModelOptions(), opts.Model, cfg.Review.Model),
+		Concurrency:    cfg.Review.AgentConcurrency,
+		Budget:         cfg.Review.MaxBudgetUSD,
+		Instructions:   opts.Instructions,
+		DomainOptions:  permOptions(cfg.Review.AllowedDomains, opts.Domains),
+		CommandOptions: permOptions(cfg.Review.AllowedCommands, opts.Commands),
 	}
 	if opts.Concurrency > 0 {
 		content.Concurrency = opts.Concurrency
@@ -84,6 +91,11 @@ func parseRunOverrides(form url.Values) (*agents.RunOptions, error) {
 	o := &agents.RunOptions{
 		Model:        strings.TrimSpace(form.Get("run_model")),
 		Instructions: strings.TrimSpace(form.Get("instructions")),
+		// Validated against the configured catalog in applyRunOverrides
+		// (intersect): a posted value outside review.allowed_domains/
+		// allowed_commands is silently dropped there, never granted.
+		Domains:  form["domains"],
+		Commands: form["commands"],
 	}
 	if v := strings.TrimSpace(form.Get("concurrency")); v != "" {
 		n, err := strconv.Atoi(v)

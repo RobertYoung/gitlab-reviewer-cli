@@ -35,11 +35,19 @@ type RunOptions struct {
 	Model        string   `json:"model,omitempty"`
 	MaxBudgetUSD *float64 `json:"max_budget_usd,omitempty"`
 	Instructions string   `json:"instructions,omitempty"`
+	// Domains and Commands are the subset of the configured
+	// review.allowed_domains/allowed_commands catalog picked for this run.
+	// Empty means none granted — never "use the configured default", since
+	// network/shell access must be opted into per run, not silently
+	// inherited when a form field is left blank.
+	Domains  []string `json:"domains,omitempty"`
+	Commands []string `json:"commands,omitempty"`
 }
 
 // empty reports whether every field is at its "use the default" value.
 func (o *RunOptions) empty() bool {
-	return o == nil || (o.Concurrency == 0 && o.Model == "" && o.MaxBudgetUSD == nil && o.Instructions == "")
+	return o == nil || (o.Concurrency == 0 && o.Model == "" && o.MaxBudgetUSD == nil && o.Instructions == "" &&
+		len(o.Domains) == 0 && len(o.Commands) == 0)
 }
 
 // UnmarshalJSON accepts both the current object form and the legacy form,

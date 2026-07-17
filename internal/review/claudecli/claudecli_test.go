@@ -404,4 +404,34 @@ func TestBuildArgsToolPolicy(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("allowed domains and commands are granted only as scoped rules", func(t *testing.T) {
+		b := &Backend{AllowedDomains: []string{"docs.example.com"}, AllowedCommands: []string{"npm test:*"}}
+		args := b.buildArgs(req)
+
+		if got := find(args, "--tools"); got != "" {
+			t.Errorf("--tools must be omitted once a scoped grant exists, got %q", got)
+		}
+		if got := find(args, "--allowedTools"); got != "WebFetch(domain:docs.example.com),Bash(npm test:*)" {
+			t.Errorf("allowedTools = %q", got)
+		}
+		disallowed := find(args, "--disallowedTools")
+		if strings.Contains(disallowed, "WebFetch") || strings.Contains(disallowed, "Bash") {
+			t.Errorf("WebFetch/Bash must not be bare-denied once scoped rules grant them: %q", disallowed)
+		}
+		for _, want := range []string{"Edit", "Write", "WebSearch"} {
+			if !strings.Contains(disallowed, want) {
+				t.Errorf("disallowed missing %s: %q", want, disallowed)
+			}
+		}
+	})
+
+	t.Run("a request's domains/commands win over the backend default", func(t *testing.T) {
+		b := &Backend{AllowedDomains: []string{"global.example.com"}}
+		reqWithOverride := review.Request{AllowedDomains: []string{"scoped.example.com"}}
+		args := b.buildArgs(reqWithOverride)
+		if got := find(args, "--allowedTools"); got != "WebFetch(domain:scoped.example.com)" {
+			t.Errorf("allowedTools = %q, want the request's domains, not the backend default", got)
+		}
+	})
 }
