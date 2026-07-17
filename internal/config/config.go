@@ -110,6 +110,21 @@ type Review struct {
 	// the review sandbox exists to close, so grant only servers whose
 	// egress you trust and keep the grant per-project where possible.
 	MCPServers map[string]MCPServer `koanf:"mcp_servers"`
+	// AllowedDomains grants WebFetch scoped to these domains only, via
+	// fine-grained permission rules (settings file only). WebFetch stays
+	// fully denied when empty: an unscoped grant reopens the exfiltration
+	// channel the review sandbox exists to close, so list only domains you
+	// trust the reviewer to reach and keep the grant per-project where
+	// possible. The GUI's per-run picker can narrow this list further but
+	// never widen it.
+	AllowedDomains []string `koanf:"allowed_domains"`
+	// AllowedCommands grants Bash scoped to these command patterns only
+	// (Claude Code prefix rules, e.g. "npm test:*", "git log:*"); settings
+	// file only. Bash stays fully denied when empty, for the same
+	// exfiltration/blast-radius reason as AllowedDomains — an arbitrary
+	// shell is a much bigger grant than a scoped one, so list only the
+	// specific commands a review genuinely needs.
+	AllowedCommands []string `koanf:"allowed_commands"`
 }
 
 // MCPServer is one MCP server definition in review.mcp_servers, mirroring
@@ -315,6 +330,8 @@ func (c Config) Validate() error {
 		errs = append(errs, fmt.Errorf("bedrock.region: required when review.provider is bedrock (or set AWS_REGION)"))
 	}
 	errs = append(errs, validateMCPServers(c.Review.MCPServers)...)
+	errs = append(errs, validateAllowRules("review.allowed_domains", c.Review.AllowedDomains)...)
+	errs = append(errs, validateAllowRules("review.allowed_commands", c.Review.AllowedCommands)...)
 
 	if err := oneOf("checkout.mode", c.Checkout.Mode, "clone", "path", "root"); err != nil {
 		errs = append(errs, err)
@@ -371,6 +388,23 @@ func (c Config) Validate() error {
 		msgs[i] = "  - " + e.Error()
 	}
 	return fmt.Errorf("invalid configuration:\n%s", strings.Join(msgs, "\n"))
+}
+
+// validateAllowRules rejects entries that would break the fine-grained
+// permission rule syntax they get wrapped in (e.g. "WebFetch(domain:x)",
+// "Bash(x)"): empty, or containing a parenthesis.
+func validateAllowRules(field string, entries []string) []error {
+	var errs []error
+	for _, e := range entries {
+		if strings.TrimSpace(e) == "" {
+			errs = append(errs, fmt.Errorf("%s: entries must not be empty", field))
+			continue
+		}
+		if strings.ContainsAny(e, "()") {
+			errs = append(errs, fmt.Errorf("%s: %q must not contain parentheses", field, e))
+		}
+	}
+	return errs
 }
 
 // mcpNameRe restricts server names: they become tool-name prefixes

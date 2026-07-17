@@ -197,7 +197,36 @@ func applyRunOverrides(cfg *config.Config, o *agents.RunOptions) string {
 		cfg.Review.Instructions += o.Instructions
 		parts = append(parts, "extra instructions")
 	}
+	// A run's grant is always the intersection of what was picked with the
+	// configured catalog — including an empty pick, which clears the grant
+	// entirely — never the catalog itself: network/shell access must be
+	// opted into per run, not silently inherited from config.
+	cfg.Review.AllowedDomains = intersect(cfg.Review.AllowedDomains, o.Domains)
+	if len(cfg.Review.AllowedDomains) > 0 {
+		parts = append(parts, "domains: "+strings.Join(cfg.Review.AllowedDomains, ", "))
+	}
+	cfg.Review.AllowedCommands = intersect(cfg.Review.AllowedCommands, o.Commands)
+	if len(cfg.Review.AllowedCommands) > 0 {
+		parts = append(parts, "commands: "+strings.Join(cfg.Review.AllowedCommands, ", "))
+	}
 	return strings.Join(parts, ", ")
+}
+
+// intersect returns the elements of picked that also appear in catalog,
+// in catalog order: a run can only narrow the admin-configured allowlist,
+// never widen it, even if a posted form field is tampered with.
+func intersect(catalog, picked []string) []string {
+	want := make(map[string]bool, len(picked))
+	for _, p := range picked {
+		want[p] = true
+	}
+	var out []string
+	for _, c := range catalog {
+		if want[c] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // start launches a review in a server goroutine, mirroring the TUI review

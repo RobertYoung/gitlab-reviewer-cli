@@ -103,6 +103,8 @@ unset is an **error**, not a silent fallback to the shared token.
 | `review.claude_plugins` | — (file only, list) | — | `[]` | Claude Code plugins whose agents join the catalog — see [Review Agents](Review-Agents.md#claude-code-plugin-agents) |
 | `review.env` | — (file only, map) | `--review-env KEY=VALUE` (repeatable) | `{}` | extra env for the `claude` subprocess; `GITLAB*` keys are stripped |
 | `review.mcp_servers` | — (file only, map) | — | `{}` | see [MCP Servers](MCP-Servers.md) |
+| `review.allowed_domains` | — (file only, list) | — | `[]` | grants `WebFetch` scoped to these domains only; the GUI's per-run picker can narrow this, never widen it |
+| `review.allowed_commands` | — (file only, list) | — | `[]` | grants `Bash` scoped to these command patterns only (e.g. `npm test:*`); same per-run narrowing as above |
 
 Notes:
 

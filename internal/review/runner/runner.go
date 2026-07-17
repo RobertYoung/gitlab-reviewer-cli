@@ -585,17 +585,19 @@ func BuildRequests(cfg config.Config, detail gitlabx.MRDetail, diffs []gitlabx.F
 	reqs := make([]review.Request, 0, len(chunks))
 	for i, chunk := range chunks {
 		req := review.Request{
-			RepoPath:     repoPath,
-			MR:           detail,
-			Diffs:        chunk,
-			Commits:      commits,
-			Template:     template,
-			Excluded:     excluded,
-			Unavailable:  unavailable,
-			Instructions: instructions,
-			Model:        cfg.Review.Model,
-			Timeout:      cfg.Review.Timeout,
-			MaxBudgetUSD: cfg.Review.MaxBudgetUSD,
+			RepoPath:        repoPath,
+			MR:              detail,
+			Diffs:           chunk,
+			Commits:         commits,
+			Template:        template,
+			Excluded:        excluded,
+			Unavailable:     unavailable,
+			Instructions:    instructions,
+			Model:           cfg.Review.Model,
+			Timeout:         cfg.Review.Timeout,
+			MaxBudgetUSD:    cfg.Review.MaxBudgetUSD,
+			AllowedDomains:  cfg.Review.AllowedDomains,
+			AllowedCommands: cfg.Review.AllowedCommands,
 		}
 		// On-disk diffs join the first pass only, so multi-pass reviews
 		// don't report the same oversized files twice.

@@ -430,6 +430,28 @@ func modelMenu(choices []string, pick, fallback string) []agentModelOption {
 	return menu
 }
 
+// permOption is one checkbox in the allowed-domains/allowed-commands picker.
+type permOption struct {
+	Name    string
+	Checked bool
+}
+
+// permOptions builds checkboxes for a configured catalog of allowed domains
+// or commands. Unlike agentOptions, nothing is checked by default: network
+// and shell access must be explicitly opted into per run, never granted
+// just because the form posted with an empty selection.
+func permOptions(candidates, selected []string) []permOption {
+	checked := map[string]bool{}
+	for _, s := range selected {
+		checked[s] = true
+	}
+	opts := make([]permOption, 0, len(candidates))
+	for _, c := range candidates {
+		opts = append(opts, permOption{Name: c, Checked: checked[c]})
+	}
+	return opts
+}
+
 // handleMRDetail shows one MR: metadata, description, commits, pending
 // comments, and the actions (diff, review, history, publish, GitLab).
 func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps) {

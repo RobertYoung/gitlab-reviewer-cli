@@ -62,6 +62,40 @@
       <span class="help">appended to the review prompt; remembered for this project</span>
     </div>
 
+    {{if $c.DomainOptions}}
+    <div class="setting">
+      <span class="setting-label">Allowed web domains</span>
+      <div class="agent-select">
+      <fieldset>
+        {{range $c.DomainOptions}}
+        <label>
+          <input type="checkbox" name="domains" value="{{.Name}}"{{if .Checked}} checked{{end}}>
+          {{.Name}}
+        </label>
+        {{end}}
+      </fieldset>
+      </div>
+      <span class="help">grants WebFetch scoped to these domains only, for this run; none checked = no web access</span>
+    </div>
+    {{end}}
+
+    {{if $c.CommandOptions}}
+    <div class="setting">
+      <span class="setting-label">Allowed bash commands</span>
+      <div class="agent-select">
+      <fieldset>
+        {{range $c.CommandOptions}}
+        <label>
+          <input type="checkbox" name="commands" value="{{.Name}}"{{if .Checked}} checked{{end}}>
+          <code>{{.Name}}</code>
+        </label>
+        {{end}}
+      </fieldset>
+      </div>
+      <span class="help">grants Bash scoped to these command patterns only, for this run; none checked = no shell access</span>
+    </div>
+    {{end}}
+
     <div class="actions">
       <button type="submit" class="button primary review">{{template "icon" "play"}} Run AI review</button>
       <a class="button" href="{{$c.Nav.DetailURL}}">Cancel</a>

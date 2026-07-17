@@ -44,8 +44,13 @@ type Backend struct {
 	// allow-listed by name; --strict-mcp-config stays on so nothing
 	// beyond this explicit grant is ever loaded.
 	MCPServers map[string]config.MCPServer
-	Bedrock    config.Bedrock
-	ExtraEnv   map[string]string
+	// AllowedDomains/AllowedCommands are the global (config-level) fallback
+	// grants; a request's own fields (set per run from the GUI picker) win
+	// when non-empty, mirroring how Model falls back to b.Model.
+	AllowedDomains  []string
+	AllowedCommands []string
+	Bedrock         config.Bedrock
+	ExtraEnv        map[string]string
 	// DumpDir receives raw stream transcripts for debugging; empty disables.
 	DumpDir string
 	// LookupEnv defaults to os.LookupEnv; injectable for tests.
@@ -55,15 +60,17 @@ type Backend struct {
 // New builds a Backend from configuration.
 func New(cfg config.Config, dumpDir string) *Backend {
 	return &Backend{
-		ClaudePath: cfg.Review.ClaudePath,
-		Provider:   cfg.Review.Provider,
-		Model:      cfg.Review.Model,
-		Bare:       cfg.Review.Bare,
-		UseAgents:  cfg.Review.UseAgents,
-		MCPServers: cfg.Review.MCPServers,
-		Bedrock:    cfg.Bedrock,
-		ExtraEnv:   cfg.Review.Env,
-		DumpDir:    dumpDir,
+		ClaudePath:      cfg.Review.ClaudePath,
+		Provider:        cfg.Review.Provider,
+		Model:           cfg.Review.Model,
+		Bare:            cfg.Review.Bare,
+		UseAgents:       cfg.Review.UseAgents,
+		MCPServers:      cfg.Review.MCPServers,
+		AllowedDomains:  cfg.Review.AllowedDomains,
+		AllowedCommands: cfg.Review.AllowedCommands,
+		Bedrock:         cfg.Bedrock,
+		ExtraEnv:        cfg.Review.Env,
+		DumpDir:         dumpDir,
 	}
 }
 
@@ -254,40 +261,64 @@ func (b *Backend) Chat(ctx context.Context, req review.ChatRequest, onEvent func
 }
 
 // toolArgs returns the read-only tool grant shared by every session:
-// mutating and network tools are denied as permission rules, which cascade
-// into subagents when UseAgents grants the Task tool.
-func (b *Backend) toolArgs() (tools, disallowed string) {
+// mutating tools are always denied, which cascades into subagents when
+// UseAgents grants the Task tool. Bash and WebFetch are denied too unless
+// the caller holds a scoped allow rule for them (hasBash/hasWebFetch), in
+// which case buildArgs grants them only through fine-grained --allowedTools
+// rules (bashAllowRules/webFetchAllowRules) — never as a bare, unscoped grant.
+func (b *Backend) toolArgs(hasWebFetch, hasBash bool) (tools, disallowed string) {
 	if b.UseAgents {
-		return "Read,Grep,Glob,Task", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch"
+		tools, disallowed = "Read,Grep,Glob,Task", "Edit,Write,NotebookEdit,WebSearch"
+	} else {
+		tools, disallowed = "Read,Grep,Glob", "Edit,Write,NotebookEdit,WebSearch,Task,Agent"
 	}
-	return "Read,Grep,Glob", "Bash,Edit,Write,NotebookEdit,WebFetch,WebSearch,Task,Agent"
+	if !hasBash {
+		disallowed = "Bash," + disallowed
+	}
+	if !hasWebFetch {
+		disallowed = "WebFetch," + disallowed
+	}
+	return tools, disallowed
 }
 
 // buildArgs assembles the headless review invocation. Configured MCP
-// servers are the one deliberate network exception to the read-only
-// sandbox: loaded from an inline --mcp-config and allow-listed explicitly
-// (dontAsk mode denies MCP tools that lack an allow rule).
+// servers, allowed domains, and allowed commands are the deliberate
+// exceptions to the read-only sandbox: loaded/granted explicitly via
+// --mcp-config and fine-grained --allowedTools rules (dontAsk mode denies
+// any tool, or tool grant, that lacks an allow rule).
 //
 // An explicit --tools list strips MCP tools no matter how they are named
-// in it (verified against claude 2.1.199), so MCP-enabled runs omit the
-// flag and enforce read-only purely through permissions: an extended deny
-// list, plus dontAsk denying every remaining tool that is not read-only
-// or MCP-allow-listed.
+// in it (verified against claude 2.1.199), so any session with one of these
+// grants omits the flag and enforces read-only purely through permissions:
+// an extended deny list, plus dontAsk denying every remaining tool that is
+// not read-only or explicitly allow-listed.
 func (b *Backend) buildArgs(req review.Request) []string {
-	tools, disallowed := b.toolArgs()
+	domains := req.AllowedDomains
+	if len(domains) == 0 {
+		domains = b.AllowedDomains
+	}
+	commands := req.AllowedCommands
+	if len(commands) == 0 {
+		commands = b.AllowedCommands
+	}
+	tools, disallowed := b.toolArgs(len(domains) > 0, len(commands) > 0)
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
 		"--verbose",
 		"--json-schema", review.OutputSchema,
 	}
-	if len(b.MCPServers) > 0 {
+	if len(b.MCPServers) > 0 || len(domains) > 0 || len(commands) > 0 {
 		// No --tools: the full built-in set loads, so deny the tools that
 		// --tools used to leave out and that carry any capability.
 		disallowed += ",SlashCommand,Skill"
+		var allow []string
+		allow = append(allow, mcpAllowRules(b.MCPServers)...)
+		allow = append(allow, webFetchAllowRules(domains)...)
+		allow = append(allow, bashAllowRules(commands)...)
 		args = append(args,
 			"--mcp-config", mcpConfigJSON(b.MCPServers),
-			"--allowedTools", strings.Join(mcpAllowRules(b.MCPServers), ","),
+			"--allowedTools", strings.Join(allow, ","),
 		)
 	} else {
 		args = append(args, "--tools", tools)
@@ -318,10 +349,10 @@ func (b *Backend) buildArgs(req review.Request) []string {
 
 // buildChatArgs assembles the headless chat invocation: same read-only
 // sandbox as reviews, conversational persona instead of the finding schema,
-// and session resume on follow-up turns. Chats never get MCP servers —
-// review.mcp_servers is a grant to the review session only.
+// and session resume on follow-up turns. Chats never get MCP servers or
+// scoped domain/command grants — those are grants to the review session only.
 func (b *Backend) buildChatArgs(req review.ChatRequest) []string {
-	tools, disallowed := b.toolArgs()
+	tools, disallowed := b.toolArgs(false, false)
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -387,6 +418,27 @@ func mcpAllowRules(servers map[string]config.MCPServer) []string {
 		for _, tool := range s.Tools {
 			rules = append(rules, "mcp__"+name+"__"+tool)
 		}
+	}
+	return rules
+}
+
+// webFetchAllowRules builds fine-grained WebFetch permission rules scoped to
+// each configured domain, so the grant never widens past what config.Review
+// (or a per-run picker, narrowed to that config) allows.
+func webFetchAllowRules(domains []string) []string {
+	rules := make([]string, 0, len(domains))
+	for _, d := range domains {
+		rules = append(rules, "WebFetch(domain:"+d+")")
+	}
+	return rules
+}
+
+// bashAllowRules builds fine-grained Bash permission rules scoped to each
+// configured command prefix pattern (Claude Code's "Bash(prefix:*)" syntax).
+func bashAllowRules(commands []string) []string {
+	rules := make([]string, 0, len(commands))
+	for _, c := range commands {
+		rules = append(rules, "Bash("+c+")")
 	}
 	return rules
 }
