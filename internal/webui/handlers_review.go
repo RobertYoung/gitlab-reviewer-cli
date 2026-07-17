@@ -595,6 +595,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, d *Deps) 
 		mode = cfg.Publish.Mode
 	}
 	pub.Draft = mode == "draft"
+	// Best-effort: skip findings that already restate a comment on the MR.
+	// A fetch error just means duplicate detection is unavailable this run.
+	_ = pub.LoadExisting(r.Context())
 
 	content := publishContent{
 		Nav:        newMRNav(inst, project, iid),

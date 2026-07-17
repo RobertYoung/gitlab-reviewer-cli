@@ -19,6 +19,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/agents"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/dedupe"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/delta"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/resultstore"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/runlog"
@@ -302,15 +303,24 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 				final.Findings[i].Line.OldLine = nil
 			}
 		}
-		// Prepend the carried findings (curation states intact) and renumber
-		// everything so IDs stay unique within the combined record.
+		// Prepend the carried findings (curation states intact); IDs are
+		// renumbered below once cross-agent duplicates have been dropped.
 		final.Findings = append(append([]review.Finding(nil), plan.carried...), final.Findings...)
-		for i := range final.Findings {
-			final.Findings[i].ID = fmt.Sprintf("f%03d", i+1)
-		}
 	}
-	// Surface pre-review warnings (chunking, rebase status, failed agents)
-	// in the findings screen, not just the transient progress log.
+	// Independent agents (or an agent plus carried-forward findings) can
+	// restate the same underlying issue; drop near-duplicates before
+	// publishing so running more agents doesn't clutter the MR with repeats.
+	var droppedDup []review.Finding
+	final.Findings, droppedDup = dedupe.Findings(final.Findings)
+	if len(droppedDup) > 0 {
+		warnings = append(warnings, fmt.Sprintf("dropped %d duplicate finding(s) reported by more than one agent", len(droppedDup)))
+	}
+	for i := range final.Findings {
+		final.Findings[i].ID = fmt.Sprintf("f%03d", i+1)
+	}
+	// Surface pre-review warnings (chunking, rebase status, failed agents,
+	// dropped duplicates) in the findings screen, not just the transient
+	// progress log.
 	final.Warnings = append(warnings, final.Warnings...)
 	return final, nil
 }

@@ -348,6 +348,11 @@ func autoPublish(ctx context.Context, d *Deps, cfg config.Config, detail gitlabx
 		emit("warning: comment template ignored: " + tmplErr.Error())
 	}
 	pub.Draft = cfg.Publish.Mode == "draft"
+	// Best-effort: skip findings that already restate a comment on the MR.
+	// A fetch error just means duplicate detection is unavailable this run.
+	if err := pub.LoadExisting(ctx); err != nil {
+		emit("warning: could not check for already-posted comments: " + err.Error())
+	}
 	emit(fmt.Sprintf("auto-publishing %d accepted finding(s) in %s mode…", len(accepted), cfg.Publish.Mode))
 	for _, i := range accepted {
 		pctx, cancel := context.WithTimeout(ctx, 30*time.Second)
