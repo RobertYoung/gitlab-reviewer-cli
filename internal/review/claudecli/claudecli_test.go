@@ -182,6 +182,42 @@ func TestReviewRetryEventSurfaced(t *testing.T) {
 	}
 }
 
+// TestConsumeStreamHugeLine guards against the old bufio.Scanner behaviour:
+// a single NDJSON event larger than the scanner's buffer cap would stop the
+// scan, dropping that line and every event after it (including the terminal
+// result). consumeStream must read a giant line whole and still reach the
+// events that follow it.
+func TestConsumeStreamHugeLine(t *testing.T) {
+	// A tool_use event whose input dwarfs the old 32MB cap, followed by more
+	// progress and the final result.
+	huge := strings.Repeat("x", 40*1024*1024)
+	stream := strings.Join([]string{
+		`{"type":"system","subtype":"init","model":"claude-fable-5"}`,
+		fmt.Sprintf(`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":%q}}]}}`, huge),
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Grep","input":{"pattern":"needle"}}]}}`,
+		`{"type":"result","subtype":"success","session_id":"sess-huge"}`,
+	}, "\n") + "\n"
+
+	var texts []string
+	b := &Backend{}
+	final, transcript, err := b.consumeStream(strings.NewReader(stream), func(e review.Event) {
+		texts = append(texts, e.Text)
+	})
+	if err != nil {
+		t.Fatalf("consumeStream: %v", err)
+	}
+	if final == nil || final.SessionID != "sess-huge" {
+		t.Fatalf("result event lost after huge line: %+v", final)
+	}
+	joined := strings.Join(texts, "|")
+	if !strings.Contains(joined, "Grep needle") {
+		t.Errorf("events after huge line dropped: %v", texts)
+	}
+	if len(transcript) < len(huge) {
+		t.Errorf("transcript truncated: %d bytes", len(transcript))
+	}
+}
+
 func TestCheckAvailable(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		b := backend(t, "happy.jsonl")
