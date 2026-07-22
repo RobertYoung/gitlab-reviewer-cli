@@ -14,6 +14,7 @@ import (
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx/position"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review/dedupe"
 )
 
 // Publisher posts findings for one MR. Draft selects the publish mode:
@@ -28,6 +29,82 @@ type Publisher struct {
 	// Draft is the publish mode for subsequent PublishOne calls; frontends
 	// may let the user toggle it before posting starts.
 	Draft bool
+
+	// existing holds comments already on the MR, loaded by LoadExisting, so
+	// PublishOne can skip findings that substantially restate one of them.
+	existing []existingComment
+}
+
+// existingComment is a comment already on the MR, reduced to what
+// PublishOne needs to check a finding against it.
+type existingComment struct {
+	file             string
+	oldLine, newLine *int
+	body             string
+}
+
+// LoadExisting fetches the MR's current discussions so PublishOne can skip
+// findings that substantially match a comment already posted — from this
+// tool or a human — rather than posting the same finding again. Call once
+// before a batch of PublishOne calls; a fetch error is advisory, so callers
+// may choose to proceed without duplicate detection rather than block
+// publishing on it.
+func (p *Publisher) LoadExisting(ctx context.Context) error {
+	discussions, err := p.svc.ListDiscussions(ctx, p.detail.Project(), p.detail.IID)
+	if err != nil {
+		return err
+	}
+	existing := make([]existingComment, 0, len(discussions))
+	for _, d := range discussions {
+		for _, n := range d.Notes {
+			if n.System || n.Body == "" {
+				continue
+			}
+			ec := existingComment{body: n.Body}
+			if n.Position != nil {
+				ec.file = n.Position.NewPath
+				if ec.file == "" {
+					ec.file = n.Position.OldPath
+				}
+				ec.oldLine = n.Position.OldLine
+				ec.newLine = n.Position.NewLine
+			}
+			existing = append(existing, ec)
+		}
+	}
+	p.existing = existing
+	return nil
+}
+
+// duplicatesExisting reports whether f substantially restates a comment
+// already on the MR: same file and (when positioned) an overlapping line,
+// with similar text.
+func (p *Publisher) duplicatesExisting(f review.Finding) bool {
+	for _, e := range p.existing {
+		if !sameCommentPosition(f, e) {
+			continue
+		}
+		if dedupe.SimilarText(e.body, f.Title+" "+f.Body) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameCommentPosition(f review.Finding, e existingComment) bool {
+	if f.File != e.file {
+		return false
+	}
+	fLineless := f.Line.NewLine == nil && f.Line.OldLine == nil
+	eLineless := e.newLine == nil && e.oldLine == nil
+	if fLineless || eLineless {
+		return fLineless == eLineless
+	}
+	return intPtrEq(f.Line.NewLine, e.newLine) || intPtrEq(f.Line.OldLine, e.oldLine)
+}
+
+func intPtrEq(a, b *int) bool {
+	return a != nil && b != nil && *a == *b
 }
 
 // New builds a publisher for one MR. A bad body template falls back to the
@@ -59,6 +136,12 @@ func (p *Publisher) PublishOne(ctx context.Context, f review.Finding) (review.Fi
 	// reviewer's own words and always publish.
 	if !f.Manual && f.Severity.Valid() && !f.Severity.AtLeast(review.Severity(p.cfg.MinSeverity)) {
 		return review.StateBelowThreshold, nil
+	}
+	// A finding that substantially restates a comment already on the MR
+	// (this tool's own from a previous run, or a human's) is already
+	// visible there; posting it again would just be noise.
+	if p.duplicatesExisting(f) {
+		return review.StatePublished, nil
 	}
 	project := p.detail.Project()
 	body := f.RenderBody(p.tmpl, p.cfg.Attribution)

@@ -134,6 +134,11 @@ func (s *publish) wait() tea.Cmd {
 func (s *publish) run() {
 	iid := s.detail.IID
 	s.pub.Draft = s.mode == "draft"
+	// Best-effort: skip findings that already restate a comment on the MR.
+	// A fetch error just means duplicate detection is unavailable this run.
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	_ = s.pub.LoadExisting(loadCtx)
+	loadCancel()
 	for i, f := range s.items {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		state, err := s.pub.PublishOne(ctx, f)
