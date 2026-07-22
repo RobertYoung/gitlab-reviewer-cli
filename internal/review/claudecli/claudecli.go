@@ -5,6 +5,7 @@ package claudecli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -501,49 +502,64 @@ func (b *Backend) consumeStream(r io.Reader, onEvent func(review.Event)) (*strea
 		transcript strings.Builder
 		final      *streamEvent
 	)
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		transcript.Write(line)
-		transcript.WriteByte('\n')
-
-		var ev streamEvent
-		if err := json.Unmarshal(line, &ev); err != nil {
-			continue // tolerate non-JSON noise on stdout
+	// A bufio.Reader (not Scanner) so a single NDJSON event of any size is
+	// read whole: the claude CLI can emit very large events (a big tool
+	// result, or the final result carrying the full transcript), and a
+	// Scanner would stop at its buffer cap, silently dropping that line and
+	// every event after it.
+	br := bufio.NewReader(r)
+	for {
+		line, err := br.ReadBytes('\n')
+		if len(line) > 0 {
+			transcript.Write(line)
+			consumeLine(bytes.TrimRight(line, "\n"), onEvent, &final)
 		}
-		switch ev.Type {
-		case "system":
-			switch ev.Subtype {
-			case "init":
-				onEvent(review.Event{Kind: review.EventInit, Text: "session started (model " + ev.Model + ")"})
-			case "api_retry":
-				onEvent(review.Event{Kind: review.EventRetry, Text: "API error, retrying…"})
+		if err != nil {
+			if err == io.EOF {
+				return final, []byte(transcript.String()), nil
 			}
-		case "assistant":
-			if ev.Message == nil {
-				continue
-			}
-			for _, c := range ev.Message.Content {
-				switch c.Type {
-				case "tool_use":
-					if c.Name == "StructuredOutput" {
-						onEvent(review.Event{Kind: review.EventStatus, Text: "writing findings…"})
-					} else {
-						onEvent(review.Event{Kind: review.EventToolUse, Text: c.Name + " " + toolTarget(c.Input)})
-					}
-				case "text":
-					if t := strings.TrimSpace(c.Text); t != "" {
-						onEvent(review.Event{Kind: review.EventText, Text: firstLine(t)})
-					}
-				}
-			}
-		case "result":
-			evCopy := ev
-			final = &evCopy
+			return final, []byte(transcript.String()), err
 		}
 	}
-	return final, []byte(transcript.String()), scanner.Err()
+}
+
+// consumeLine decodes one NDJSON event and forwards progress. Non-JSON noise
+// on stdout is tolerated and ignored.
+func consumeLine(line []byte, onEvent func(review.Event), final **streamEvent) {
+	var ev streamEvent
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return // tolerate non-JSON noise on stdout
+	}
+	switch ev.Type {
+	case "system":
+		switch ev.Subtype {
+		case "init":
+			onEvent(review.Event{Kind: review.EventInit, Text: "session started (model " + ev.Model + ")"})
+		case "api_retry":
+			onEvent(review.Event{Kind: review.EventRetry, Text: "API error, retrying…"})
+		}
+	case "assistant":
+		if ev.Message == nil {
+			return
+		}
+		for _, c := range ev.Message.Content {
+			switch c.Type {
+			case "tool_use":
+				if c.Name == "StructuredOutput" {
+					onEvent(review.Event{Kind: review.EventStatus, Text: "writing findings…"})
+				} else {
+					onEvent(review.Event{Kind: review.EventToolUse, Text: c.Name + " " + toolTarget(c.Input)})
+				}
+			case "text":
+				if t := strings.TrimSpace(c.Text); t != "" {
+					onEvent(review.Event{Kind: review.EventText, Text: firstLine(t)})
+				}
+			}
+		}
+	case "result":
+		evCopy := ev
+		*final = &evCopy
+	}
 }
 
 // toolTarget pulls the most useful argument out of a tool call for display.
