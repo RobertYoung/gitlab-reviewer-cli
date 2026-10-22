@@ -3,6 +3,7 @@ package webui
 import (
 	"bytes"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"io/fs"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -22,21 +24,15 @@ import (
 type pageData struct {
 	Title     string
 	Instance  string
-	Instances []string // >1 shows the instance name in the header
+	Host      string   // the instance's GitLab host, beside its name
+	Instances []string // >1 turns the instance label into a switcher
 	Version   string
-	Crumbs    []crumb // topbar breadcrumb trail; the Title alone when unset
+	Section   string  // top-nav entry to mark current: mrs, browse or settings
+	Band      *mrBand // MR header for MR-scoped pages
 	Content   any
 }
 
-// crumb is one step in the topbar breadcrumb trail; the current page has
-// no URL and renders unlinked.
-type crumb struct {
-	Label string
-	URL   string
-}
-
 var tmplFuncs = template.FuncMap{
-	"navargs": func(nav mrNav, webURL string) map[string]any { return map[string]any{"Nav": nav, "WebURL": webURL} },
 	"commentrow": func(c inlineComment, content diffContent) map[string]any {
 		return map[string]any{"C": c, "Nav": content.Nav, "BackURL": content.BackURL}
 	},
@@ -66,6 +62,16 @@ var tmplFuncs = template.FuncMap{
 	"datetime":      func(t time.Time) string { return t.Local().Format("2006-01-02 15:04") },
 	"query":         url.QueryEscape,
 	"pathesc":       url.PathEscape,
+	"plural":        plural,
+	"inc":           func(i int) int { return i + 1 },
+	"triagegroups":  triageGroups,
+	"cilabel":       ciLabel,
+	"ciicon":        ciIcon,
+	"pager": func(prev, next, prevLabel, nextLabel string) map[string]string {
+		return map[string]string{"Prev": prev, "Next": next, "PrevLabel": prevLabel, "NextLabel": nextLabel}
+	},
+	"initials": initials,
+	"hue":      hue,
 }
 
 // parseTemplates builds one template set per page, each sharing the layout
@@ -99,8 +105,14 @@ func (s *Server) render(w http.ResponseWriter, status int, page string, data pag
 	if instances := s.instanceList(); len(instances) > 1 {
 		data.Instances = instances
 	}
-	if len(data.Crumbs) == 0 {
-		data.Crumbs = []crumb{{Label: data.Title}}
+	if data.Section == "" && data.Band != nil {
+		data.Section = "mrs"
+	}
+	if instances := s.instanceList(); data.Instance == "" && len(instances) == 1 {
+		data.Instance = instances[0] // pages outside an instance still offer its navigation
+	}
+	if data.Instance != "" {
+		data.Host = instanceHost(s.currentConfig(), data.Instance)
 	}
 	data.Version = s.opts.Version
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -160,6 +172,107 @@ func findingLocation(f review.Finding) string {
 	default:
 		return f.File
 	}
+}
+
+// ciLabel and ciIcon present a GitLab pipeline status the same way on every
+// page; app.js mirrors them for the MR list's lazily loaded rows.
+func ciLabel(status string) string {
+	switch status {
+	case "success":
+		return "Passed"
+	case "waiting_for_resource":
+		return "Waiting"
+	case "":
+		return ""
+	}
+	return strings.ToUpper(status[:1]) + strings.ReplaceAll(status[1:], "_", " ")
+}
+
+func ciIcon(status string) string {
+	switch status {
+	case "success":
+		return "check-circle"
+	case "failed":
+		return "x-circle"
+	case "running":
+		return "sync"
+	case "canceled", "canceling", "skipped":
+		return "skip"
+	}
+	return "clock"
+}
+
+// triageGroup is one state section of the findings page's list.
+type triageGroup struct {
+	State string
+	Label string
+	Items []findingItem
+}
+
+// triageGroups sorts findings into the list's sections, every section
+// present even when empty so the page script can move rows between them as
+// findings are triaged. Notes that fell back count as published.
+func triageGroups(items []findingItem) []triageGroup {
+	groups := []triageGroup{
+		{State: "pending", Label: "Pending"},
+		{State: "accepted", Label: "Accepted"},
+		{State: "published", Label: "Published"},
+		{State: "rejected", Label: "Rejected"},
+		{State: "below-threshold", Label: "Below threshold"},
+	}
+	for _, it := range items {
+		key := it.F.State.String()
+		if key == "note" {
+			key = "published"
+		}
+		for i := range groups {
+			if groups[i].State == key {
+				groups[i].Items = append(groups[i].Items, it)
+			}
+		}
+	}
+	return groups
+}
+
+// instanceHost is the GitLab host an instance name points at, or "" when
+// the name is unknown or its base URL does not parse.
+func instanceHost(cfg config.Config, name string) string {
+	base := cfg.GitLab.BaseURL
+	for _, inst := range cfg.GitLab.Instances {
+		if inst.Name == name {
+			base = inst.BaseURL
+		}
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
+// initials is the two-letter avatar label for a person: the first letters
+// of their first and last names, or of the username when no name is known.
+func initials(name, username string) string {
+	name, _, _ = strings.Cut(name, " (") // "Name (@user)" display strings
+	words := strings.Fields(name)
+	if len(words) == 0 {
+		words = strings.FieldsFunc(username, func(r rune) bool { return r == '.' || r == '-' || r == '_' })
+	}
+	out := ""
+	for i, w := range words {
+		if i == 0 || i == len(words)-1 {
+			out += strings.ToUpper(string([]rune(w)[:1]))
+		}
+	}
+	return out
+}
+
+// hue picks one of the avatar tints from a stable hash of the username, so
+// a person keeps their colour across pages.
+func hue(username string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(username))
+	return fmt.Sprintf("h%d", h.Sum32()%5+1)
 }
 
 // relTime renders a compact "3h ago" style timestamp for list views.

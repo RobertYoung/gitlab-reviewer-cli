@@ -1,92 +1,114 @@
 {{define "content"}}
 {{$c := .Content}}
-{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
-<section class="panel">
-  <h2>{{if $c.Detail.Draft}}<span class="badge draft">draft</span> {{end}}{{$c.Detail.Title}}</h2>
-  {{template "mrhead" $c.Detail}}
+{{$b := .Band}}
+<div class="overview">
+  <div class="stack">
+    {{if $c.RebaseWarning}}<div class="notice warn">{{template "icon" "warn"}}<div>{{$c.RebaseWarning}}</div></div>{{end}}
+    {{with $b.Gate}}{{if .Blocking}}<div class="notice warn">{{template "icon" "warn"}}<div>{{.Blocking}} finding(s) at or above {{.Severity}} in the last review{{if .Blocked}}; approval is blocked until they are resolved or rejected{{end}}</div></div>{{end}}{{end}}
 
-  {{if $c.RebaseWarning}}<p class="warning">{{template "icon" "warn"}} {{$c.RebaseWarning}}</p>{{end}}
-  {{with $c.Approvals}}
-    {{if .ApprovedBy}}<p class="ok">{{template "icon" "check"}} Approved by {{join .ApprovedBy ", "}}</p>
-    {{else if .ApprovalsRequired}}<p class="subtle">{{.ApprovalsLeft}} of {{.ApprovalsRequired}} required approval(s) outstanding</p>{{end}}
-  {{end}}
-  {{if $c.GateBlocking}}<p class="warning">{{template "icon" "warn"}} {{$c.GateBlocking}} finding(s) at or above {{$c.GateSeverity}} in the last review{{if $c.GateBlocked}} — approval is blocked until they are resolved or rejected{{end}}</p>{{end}}
+    <section class="card">
+      <header class="card-head"><h2>Description</h2></header>
+      <div class="card-body md">
+        {{if $c.Detail.Description}}{{markdown $c.Detail.Description}}{{else}}<p class="muted">No description provided.</p>{{end}}
+      </div>
+    </section>
 
-  <div class="actions">
-    <a class="button primary" href="{{$c.Nav.DiffURL}}">View diff</a>
-    <a class="button review" href="{{$c.Nav.ReviewFormURL}}">{{template "icon" "play"}} Run AI review</a>
-    <form method="post" action="{{$c.Nav.ChatURL}}">
-      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-      <button type="submit" class="button">{{template "icon" "chat"}} Chat with Claude</button>
-    </form>
-    <a class="button" href="{{$c.Nav.HistoryURL}}">{{template "icon" "history"}} Past reviews</a>
-    {{if $c.HasAccepted}}<a class="button" href="{{$c.Nav.PublishURL}}">Publish comments</a>{{end}}
-    {{if and $c.Approvals $c.Approvals.UserCanApprove}}
-    <form method="post" action="{{$c.Nav.ApproveURL}}">
-      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-      <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
-      {{if $c.Approvals.UserHasApproved}}
-      <input type="hidden" name="action" value="unapprove">
-      <button type="submit" class="button">Unapprove</button>
-      {{else if $c.GateBlocked}}
-      <button type="button" class="button" disabled title="blocked by gate.min_severity ({{$c.GateSeverity}})">{{template "icon" "check"}} Approve</button>
-      {{else}}
-      <input type="hidden" name="sha" value="{{$c.Detail.HeadSHA}}">
-      <button type="submit" class="button ok">{{template "icon" "check"}} {{if $c.GateBlocking}}Approve anyway{{else}}Approve{{end}}</button>
-      {{end}}
-    </form>
+    {{if $c.Commits}}
+    <section class="card">
+      <header class="card-head"><h2>Commits</h2><span class="count">{{len $c.Commits}}</span></header>
+      <ul class="commits">
+        {{range $c.Commits}}
+        <li>{{template "icon" "commit"}}<span class="ctitle">{{.Title}}</span><code class="sha">{{.ShortID}}</code></li>
+        {{end}}
+      </ul>
+    </section>
     {{end}}
+
+    <section class="card" id="comments">
+      <header class="card-head">
+        <h2>Your pending comments</h2>
+        {{if $c.Pending}}<span class="count">{{len $c.Pending}}</span>{{end}}
+        <span class="spacer"></span>
+        {{if $c.HasAccepted}}<a class="btn btn-sm" href="{{$c.Nav.PublishURL}}">{{template "icon" "send"}} Publish comments</a>{{end}}
+      </header>
+      {{if $c.Pending}}
+      <ul class="pending-comments">
+        {{range $c.Pending}}
+        <li id="c-{{.ID}}">
+          <span class="pill manual">{{fstate .State}}</span>
+          <span class="loc">{{floc .}}</span>
+          <span class="body">{{ftitle .}}</span>
+          {{if eq (fstate .State) "accepted"}}
+          <form method="post" action="{{$c.Nav.DeleteURL}}" class="inline-form">
+            <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+            <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
+            <button type="submit" class="btn btn-ghost btn-xs btn-reject" title="delete this comment">{{template "icon" "trash"}} Delete</button>
+          </form>
+          {{end}}
+        </li>
+        {{end}}
+      </ul>
+      {{else}}
+      <p class="card-body muted">None yet. Add one below or from the diff with the <b>+</b> beside any line; they publish together with accepted review findings, or on their own.</p>
+      {{end}}
+      <details class="new-comment">
+        <summary class="btn btn-sm">{{template "icon" "plus"}} Add an MR-level comment</summary>
+        <form method="post" action="{{$c.Nav.CommentURL}}" class="stack-form">
+          <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+          <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+          <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
+          <textarea name="body" rows="4" placeholder="Posted verbatim as your own comment. Markdown supported." aria-label="comment"></textarea>
+          <div class="row"><button type="submit" class="btn btn-primary">Add comment</button></div>
+        </form>
+      </details>
+    </section>
   </div>
 
-  {{if $c.Detail.Description}}
-  <h3>Description</h3>
-  <div class="md">{{markdown $c.Detail.Description}}</div>
-  {{end}}
+  <aside class="stack">
+    <section class="card" id="approval">
+      <header class="card-head"><h2>Approval</h2></header>
+      <div class="card-body">
+        {{with $b.Approvals}}
+          {{if .ApprovedBy}}<p class="ok">{{template "icon" "check"}} Approved by {{join .ApprovedBy ", "}}</p>
+          {{else if .ApprovalsRequired}}<p class="muted">{{.ApprovalsLeft}} of {{.ApprovalsRequired}} required approval(s) outstanding</p>
+          {{else}}<p class="muted">No approvals yet.</p>{{end}}
+          {{if .UserCanApprove}}
+          <form method="post" action="{{$c.Nav.ApproveURL}}" class="approve-form">
+            <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+            <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+            <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
+            {{if .UserHasApproved}}
+            <input type="hidden" name="action" value="unapprove">
+            <button type="submit" class="btn">Unapprove</button>
+            {{else if $b.Gate.Blocked}}
+            <button type="button" class="btn" disabled title="blocked by gate.min_severity ({{$b.Gate.Severity}})">{{template "icon" "check"}} Approve</button>
+            {{else}}
+            <input type="hidden" name="sha" value="{{$c.Detail.HeadSHA}}">
+            <button type="submit" class="btn btn-accept">{{template "icon" "check"}} {{if $b.Gate.Blocking}}Approve anyway{{else}}Approve{{end}}</button>
+            {{end}}
+          </form>
+          {{end}}
+        {{else}}
+          <p class="muted">This instance reports no approval data for the MR.</p>
+        {{end}}
+      </div>
+    </section>
 
-  {{if $c.Commits}}
-  <h3>Commits</h3>
-  <ul class="commits">
-    {{range $c.Commits}}
-    <li><code>{{.ShortID}}</code> {{.Title}}</li>
-    {{end}}
-  </ul>
-  {{end}}
-
-  <h3>Your pending comments</h3>
-  {{if $c.Pending}}
-  <ul class="pending-comments">
-    {{range $c.Pending}}
-    <li id="c-{{.ID}}">
-      <span class="badge manual">{{fstate .State}}</span>
-      <span class="subtle">{{floc .}}</span>
-      <span class="body">{{ftitle .}}</span>
-      {{if eq (fstate .State) "accepted"}}
-      <form method="post" action="{{$c.Nav.DeleteURL}}" class="inline-form">
-        <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-        <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-        <input type="hidden" name="id" value="{{.ID}}">
-        <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
-        <button type="submit" class="link danger">delete</button>
-      </form>
-      {{end}}
-    </li>
-    {{end}}
-  </ul>
-  {{else}}
-  <p class="note">None yet — add them below or from the diff view. They publish together with accepted review findings, or on their own.</p>
-  {{end}}
-
-  <details class="new-comment">
-    <summary>Add an MR-level comment</summary>
-    <form method="post" action="{{$c.Nav.CommentURL}}">
-      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-      <input type="hidden" name="back" value="{{$c.Nav.DetailURL}}">
-      <textarea name="body" rows="4" placeholder="posted verbatim as your own comment — markdown supported"></textarea>
-      <button type="submit" class="button">Add comment</button>
-    </form>
-  </details>
-</section>
+    <section class="card">
+      <header class="card-head"><h2>Details</h2></header>
+      <dl class="facts">
+        <dt>Pipeline</dt>
+        <dd>{{with $c.Detail.Pipeline}}{{if .WebURL}}<a class="ci ci-{{.Status}}" href="{{.WebURL}}" target="_blank" rel="noopener">{{template "icon" (ciicon .Status)}} {{cilabel .Status}}</a>{{else}}<span class="ci ci-{{.Status}}">{{template "icon" (ciicon .Status)}} {{cilabel .Status}}</span>{{end}}{{else}}<span class="muted">none</span>{{end}}</dd>
+        <dt>Source</dt><dd><span class="branch">{{$c.Detail.SourceBranch}}</span></dd>
+        <dt>Target</dt><dd><span class="branch">{{$c.Detail.TargetBranch}}</span></dd>
+        <dt>Author</dt><dd>{{$c.Detail.AuthorDisplay}}</dd>
+        <dt>Created</dt><dd>{{reltime $c.Detail.CreatedAt}}</dd>
+        <dt>Updated</dt><dd>{{reltime $c.Detail.UpdatedAt}}</dd>
+        {{with $c.Detail.HeadSHA}}<dt>Head</dt><dd><code class="sha">{{printf "%.8s" .}}</code></dd>{{end}}
+      </dl>
+    </section>
+  </aside>
+</div>
 {{end}}

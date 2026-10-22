@@ -794,7 +794,7 @@ func TestDiffExplorerRendersCollapsibleTree(t *testing.T) {
 		t.Fatalf("diff: %d", code)
 	}
 	// Nested directories become open, toggleable folders; files link by name.
-	for _, want := range []string{"<details open", ">internal/", ">tui/", `class="fname">app.go<`, `class="fname">README.md<`} {
+	for _, want := range []string{"<details open", `class="fname">internal<`, `class="fname">tui<`, `class="fname">app.go<`, `class="fname">README.md<`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("explorer missing %q:\n%s", want, body)
 		}
@@ -1356,7 +1356,7 @@ func TestReviewFormOffersRepoAgents(t *testing.T) {
 	if !strings.Contains(body, `name="agents" value="sql-migrations"`) || !strings.Contains(body, `name="agents" value="conventions"`) {
 		t.Fatalf("form missing a repo agent:\n%s", body)
 	}
-	if !strings.Contains(body, `<span class="badge">project</span>`) {
+	if !strings.Contains(body, `<span class="pill neutral">project</span>`) {
 		t.Fatalf("repo agent missing its project badge:\n%s", body)
 	}
 }
@@ -1541,7 +1541,7 @@ func TestReviewFormOffersFullReReview(t *testing.T) {
 	waitRun(t, env.srv)
 
 	_, body = env.get("/i/default/mr/review?project=group%2Fapp&iid=5")
-	if !strings.Contains(body, `name="full"`) || !strings.Contains(body, "full re-review") {
+	if !strings.Contains(body, `name="full"`) || !strings.Contains(body, "Full re-review") {
 		t.Fatalf("full re-review override missing once a review is stored:\n%s", body)
 	}
 }
@@ -1662,7 +1662,7 @@ func TestDiffShowsStoredFindingsInline(t *testing.T) {
 	if !strings.Contains(body, `data-finding="f001"`) || !strings.Contains(body, "Unused import") {
 		t.Fatalf("stored finding not shown inline:\n%s", body)
 	}
-	if !strings.Contains(body, "Findings from the review") {
+	if !strings.Contains(body, "Findings from the AI review") {
 		t.Fatalf("findings banner missing:\n%s", body)
 	}
 	if !strings.Contains(body, `class="inline-form f-state-form"`) {
@@ -1674,16 +1674,16 @@ func TestMRListShowsReviewedBadge(t *testing.T) {
 	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
 
 	_, body := env.get("/i/default/?projects=group%2Fapp")
-	if strings.Contains(body, `class="badge reviewed"`) {
-		t.Fatalf("badge shown before any review:\n%s", body)
+	if !strings.Contains(body, `class="stage none"`) || strings.Contains(body, "/mr/history?") {
+		t.Fatalf("review stage shown before any review:\n%s", body)
 	}
 
 	env.post("/i/default/mr/review", mrForm(url.Values{"agents": {"bug"}}))
 	waitRun(t, env.srv)
 
 	code, body := env.get("/i/default/?projects=group%2Fapp")
-	if code != http.StatusOK || !strings.Contains(body, `class="badge reviewed"`) {
-		t.Fatalf("reviewed badge missing: %d\n%s", code, body)
+	if code != http.StatusOK || !strings.Contains(body, `class="stage triage" href="/i/default/mr/history?`) {
+		t.Fatalf("review stage missing: %d\n%s", code, body)
 	}
 }
 

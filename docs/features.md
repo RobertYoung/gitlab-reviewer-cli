@@ -21,7 +21,7 @@ other modality (keyboard-driven vs browser-native).
 | Filter by state, search text, author, target branch | ✅ | ✅ | TUI: `s`/`/`/`a`/`t`; GUI: filter bar / URL params |
 | Pagination | ✅ | ✅ | TUI loads more as you scroll; GUI pages |
 | Open MR in browser | ✅ | ✅ | TUI: `o`; GUI: "open in GitLab" link |
-| Reviewed badge on MRs with stored reviews | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): GUI links the badge to the MR's past reviews |
+| AI review stage on MRs with stored reviews | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): the GUI's AI review column shows where the latest review stands (triage with N pending, ready to publish, published, no findings) and links to the MR's past reviews |
 | Pipeline status and unresolved-thread counts on the MR list | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): both need a per-MR API call, so rows hydrate lazily after the list renders; the pipeline badge links to the pipeline |
 
 ## MR detail
@@ -33,6 +33,7 @@ other modality (keyboard-driven vs browser-native).
 | Needs-rebase / conflict warning | ✅ | ✅ | |
 | Approval status (who approved, approvals outstanding) | ✅ | ✅ | |
 | Approve / unapprove | ✅ | ✅ | Approval is pinned to the head commit that was on screen; TUI: `a` |
+| Review pipeline header (AI review → triage → publish → approve) with the next step as one action | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): every GUI MR page shows the four steps and their counts; the next-step button follows triage live and links back to a review still running |
 | Severity-gated approvals (`gate.approvals`: warn/block) | ✅ | ✅ | TUI: warn asks for a confirming second press; GUI: warning banner and "Approve anyway", block disables the button |
 
 ## Diff
@@ -42,7 +43,7 @@ other modality (keyboard-driven vs browser-native).
 | Unified diff with syntax highlighting | ✅ | ✅ | |
 | Split (side-by-side) layout | ✅ | ✅ | TUI: `v` toggles; GUI: layout links in the sidebar; `ui.diff_view` sets the default for both |
 | Word-level change emphasis in modified line pairs | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)) |
-| File explorer: collapsible directory tree, status glyphs, comment counts | ✅ | ✅ | TUI: `e` shows/hides, `h`/`l` fold; GUI: sticky sidebar, folders fold in place, finding counts too |
+| File explorer: collapsible directory tree, status glyphs, comment counts | ✅ | ✅ | TUI: `e` shows/hides, `h`/`l` fold; GUI: sticky sidebar, folders fold in place, a severity dot per finding, a path filter, and the file being read highlighted |
 | Existing GitLab discussions shown inline | ✅ | ✅ | |
 | Review findings shown inline with in-place triage | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): GUI overlays the latest (or `?record=`) stored review on the diff |
 | Viewed-file tracking (collapse + progress) | ❌ | ✅ | Parity gap ([#71](https://github.com/RobertYoung/gitlab-reviewer-cli/issues/71)): per head commit, in browser local storage |
@@ -81,7 +82,7 @@ other modality (keyboard-driven vs browser-native).
 | Live progress log | ✅ | ✅ | GUI streams over server-sent events; lines prefixed per agent |
 | Per-agent progress chips (running / done / failed) | n/a | ✅ | GUI derives them from the log's per-agent lines; the TUI log carries the same prefixes |
 | Cancel a running review | ✅ | ✅ | |
-| Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | GUI updates in place (no reloads), with a sticky count bar and state/severity filters |
+| Findings triage: accept / reject / edit / accept-all | ✅ | ✅ | GUI: a list grouped by state beside one finding's detail, updated in place (no reloads), with state/severity filters; triaging a pending finding moves on to the next pending one |
 | Keyboard triage | ✅ | ✅ | TUI: `↑`/`↓`/`a`/`x`/`e`/`A`; GUI: `j`/`k`/`a`/`x`/`e`/`A` |
 | Publish immediately or as a draft review | ✅ | ✅ | |
 | Auto-publish with `publish.auto_comment` | ✅ | ✅ | Both publish qualifying findings without a manual step after a run; the GUI confirms the immediate-mode outcome with a findings-page banner, and draft mode leaves a one-click "publish review" |
@@ -94,7 +95,7 @@ other modality (keyboard-driven vs browser-native).
 | Feature | TUI | GUI | Notes |
 |---|:-:|:-:|---|
 | Full keyboard driving + `?` help screen | ✅ | ✅ | GUI: `?` overlay lists each page's shortcuts (diff navigation, findings triage); forms still work mouse-only |
-| Light/dark theme | n/a | ✅ | GUI: OS preference + topbar toggle; the TUI inherits the terminal palette |
+| Light/dark theme | n/a | ✅ | GUI: OS preference + top-navigation toggle; the TUI inherits the terminal palette |
 | Session token auth, loopback-only server | n/a | ✅ | GUI security model |
 
 When adding a feature to one frontend, add it to the other (or record it

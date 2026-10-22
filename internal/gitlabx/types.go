@@ -136,6 +136,9 @@ type MRDetail struct {
 	DivergedCommits     int64
 	DetailedMergeStatus string
 	Pipeline            *PipelineStatus // head pipeline; nil when none has run
+	// ChangesCount is GitLab's changed-file count, a string because large
+	// MRs report a capped value such as "1000+"; empty when unknown.
+	ChangesCount string
 }
 
 // PipelineStatus is the outcome of an MR's head pipeline. The list API

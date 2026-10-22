@@ -7,6 +7,16 @@
   var $ = function (sel, root) { return (root || document).querySelector(sel); };
   var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
 
+  function statusIcon(name) {
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "icon");
+    svg.setAttribute("aria-hidden", "true");
+    var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#i-" + name);
+    svg.appendChild(use);
+    return svg;
+  }
+
   // --- toasts ---------------------------------------------------------
   function toast(message, kind) {
     var host = $("#toast-host");
@@ -120,12 +130,7 @@
           spin.className = "spinner";
           chip.appendChild(spin);
         } else {
-          var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-          svg.setAttribute("class", "icon");
-          var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-          use.setAttribute("href", st.status === "done" ? "#i-check" : "#i-cross");
-          svg.appendChild(use);
-          chip.appendChild(svg);
+          chip.appendChild(statusIcon(st.status === "done" ? "check" : "cross"));
         }
         chip.appendChild(document.createTextNode(" " + name));
         if (st.findings !== null && st.status === "done") {
@@ -188,7 +193,7 @@
         }
       });
       es.onerror = function () {
-        // Server gone (ctrl+c) — stop retrying, leave the log on screen.
+        // Server gone (ctrl+c): stop retrying, leave the log on screen.
         if (es.readyState === EventSource.CLOSED) return;
       };
     }
@@ -235,7 +240,7 @@
   // .f-state-form, edits .f-edit-form, plus #accept-all-form. Responses
   // carry every finding's state and the totals.
   function stateBadgeFor(card) {
-    return $(".badge.fstate", card);
+    return $(".fstate", card);
   }
   function applyStates(states) {
     $$("[data-finding]").forEach(function (card) {
@@ -245,7 +250,7 @@
       card.dataset.state = st;
       var badge = stateBadgeFor(card);
       if (badge) {
-        badge.className = "badge fstate state-" + st;
+        badge.className = "pill fstate state-" + st;
         badge.textContent = st;
       }
     });
@@ -261,6 +266,60 @@
     set("#count-publish", out.accepted);
     var publish = $("#publish-button");
     if (publish) publish.classList.toggle("disabled", out.accepted === 0);
+    updateBand(out);
+    if (afterCounts) afterCounts(out);
+  }
+  var afterCounts = null;
+
+  // The MR band's pipeline follows triage as it happens: the triage and
+  // publish steps recount, and the next action moves from triage to publish
+  // once nothing is pending. Only when the change hit the record the band
+  // reports on.
+  function updateBand(out) {
+    var band = $(".band[data-record]");
+    if (!band || !out.record || band.dataset.record !== out.record) return;
+    var total = Object.keys(out.states).length;
+    var setStep = function (key, state, text) {
+      var step = $('.step[data-step="' + key + '"]', band);
+      if (!step) return;
+      step.classList.remove("done", "current", "todo");
+      step.classList.add(state);
+      var node = $(".node", step);
+      if (node) {
+        if (state === "done") {
+          node.replaceChildren(statusIcon("check"));
+        } else {
+          node.textContent = key === "triage" ? "2" : "3";
+        }
+      }
+      var detail = $(".detail", step);
+      if (detail) detail.textContent = text;
+    };
+    var plural = function (n, noun) { return n === 1 ? "1 " + noun : n + " " + noun + "s"; };
+    if (out.pending > 0) {
+      setStep("triage", "current", out.pending + " of " + total + " still pending");
+    } else {
+      setStep("triage", "done", total ? "All " + plural(total, "finding") + " triaged" : "Nothing to triage");
+    }
+    if (out.accepted > 0) {
+      setStep("publish", out.pending > 0 ? "todo" : "current", out.accepted + " accepted, ready to post");
+    } else if (out.pending > 0) {
+      setStep("publish", "todo", "Nothing accepted yet");
+    }
+    var next = $(".next-action", band);
+    if (!next || next.tagName !== "A") return;
+    var label = null, href = null;
+    if (out.pending > 0) {
+      label = "Continue triage";
+      var firstPending = Object.keys(out.states).sort().filter(function (id) { return out.states[id] === "pending"; })[0];
+      href = band.dataset.findingsUrl + "#f-" + encodeURIComponent(firstPending);
+    } else if (out.accepted > 0) {
+      label = "Publish " + out.accepted + " accepted";
+      href = band.dataset.publishUrl;
+    }
+    if (!label) return;
+    next.href = href;
+    next.replaceChildren(statusIcon(out.pending > 0 ? "arrow-right" : "send"), document.createTextNode(" " + label));
   }
   function postState(form, onDone) {
     var data = new URLSearchParams(new FormData(form));
@@ -278,7 +337,7 @@
         if (onDone) onDone(out);
       })
       .catch(function (err) {
-        toast("saving failed: " + err.message + " — reloading", "error");
+        toast("Saving failed (" + err.message + "), reloading", "error");
         setTimeout(function () { window.location.reload(); }, 1200);
       });
   }
@@ -300,50 +359,149 @@
     }
   });
 
-  // Findings page: keyboard triage, filter chips.
+  // Findings page: a list of findings beside one detail pane. Selecting a
+  // row shows its finding; j/k move the selection, a/x/e/A triage it, and
+  // triaged rows move to their state's group. Without this script every
+  // finding is shown at once and the rows are plain anchor links.
   var findingsPage = $(".findings-page");
   if (findingsPage) {
+    var triage = $("#triage");
     var cards = $$("article[data-finding]", findingsPage);
+    var rows = $$(".triage-row", findingsPage);
+    var cardFor = function (id) { return $('article[data-finding="' + id + '"]', findingsPage); };
+    var rowFor = function (id) { return $('.triage-row[data-row-for="' + id + '"]', findingsPage); };
     cards.forEach(function (c) {
       c.dataset.state = (c.className.match(/\bstate-(\S+)/) || [])[1] || "pending";
     });
+    var groupOf = function (state) { return state === "note" ? "published" : state; };
+    // applyStates has already restyled the rows by the time afterCounts runs,
+    // so remember each finding's state to tell what a change moved.
+    var lastState = {};
+    cards.forEach(function (c) { lastState[c.dataset.finding] = c.dataset.state; });
+
+    var selected = null;
+    var select = function (id, scroll, keepURL) {
+      var card = cardFor(id);
+      if (!card) return;
+      if (selected) {
+        var oldRow = rowFor(selected);
+        var oldCard = cardFor(selected);
+        if (oldRow) oldRow.classList.remove("selected");
+        if (oldCard) oldCard.classList.remove("shown", "kfocus");
+      }
+      selected = id;
+      var row = rowFor(id);
+      if (row) {
+        row.classList.add("selected");
+        if (scroll) row.scrollIntoView({ block: "nearest" });
+      }
+      card.classList.add("shown", "kfocus");
+      // Not while loading: Chrome scrolls to whatever fragment the URL has
+      // once parsing finishes, which would jump the page to this card.
+      if (!keepURL && history.replaceState) history.replaceState(null, "", "#f-" + id);
+    };
+    var visibleRows = function () {
+      return $$(".triage-row", findingsPage).filter(function (r) { return !r.classList.contains("filtered"); });
+    };
+
+    if (triage) {
+      triage.classList.add("js");
+      var fromHash = (location.hash.match(/^#f-(.+)$/) || [])[1];
+      var initial = fromHash && cardFor(fromHash) ? fromHash : null;
+      if (!initial) {
+        var firstRow = $('.triage-group[data-group="pending"] .triage-row', findingsPage) || rows[0];
+        if (firstRow) initial = firstRow.dataset.rowFor;
+      }
+      if (initial) select(initial, Boolean(fromHash), true);
+      triage.addEventListener("click", function (ev) {
+        var row = ev.target.closest(".triage-row");
+        if (!row) return;
+        ev.preventDefault();
+        select(row.dataset.rowFor, false);
+      });
+      window.addEventListener("hashchange", function () {
+        var id = (location.hash.match(/^#f-(.+)$/) || [])[1];
+        if (id && cardFor(decodeURIComponent(id))) select(decodeURIComponent(id), true, true);
+      });
+    }
+
+    // Rows follow their finding into its state's group; triaging the
+    // selected finding out of pending moves on to the next pending one.
+    afterCounts = function () {
+      var pendingBefore = selected && lastState[selected] === "pending";
+      var orderBefore = visibleRows().map(function (r) { return r.dataset.rowFor; });
+      cards.forEach(function (c) { lastState[c.dataset.finding] = c.dataset.state; });
+      rows.forEach(function (row) {
+        var card = cardFor(row.dataset.rowFor);
+        var state = card ? card.dataset.state : "pending";
+        row.className = row.className.replace(/\bstate-\S+/g, "").trim() + " state-" + state;
+        var group = $('.triage-group[data-group="' + groupOf(state) + '"]', findingsPage);
+        if (group && row.parentNode !== group) {
+          var after = null;
+          $$(".triage-row", group).some(function (r) {
+            if (rows.indexOf(r) > rows.indexOf(row)) { after = r; return true; }
+            return false;
+          });
+          group.insertBefore(row, after);
+        }
+      });
+      $$(".triage-group", findingsPage).forEach(function (g) {
+        var n = $$(".triage-row", g).length;
+        g.hidden = n === 0;
+        var count = $(".triage-group-head .count", g);
+        if (count) count.textContent = n;
+      });
+      if (pendingBefore && lastState[selected] !== "pending") {
+        var idx = orderBefore.indexOf(selected);
+        var nextPending = orderBefore.slice(idx + 1).concat(orderBefore.slice(0, idx)).filter(function (id) {
+          var r = rowFor(id);
+          return r && r.classList.contains("state-pending") && !r.classList.contains("filtered");
+        })[0];
+        if (nextPending) select(nextPending, true);
+      }
+    };
 
     var filters = $("#finding-filters");
     if (filters && cards.length > 1) {
-      filters.hidden = false;
       var applyFilters = function () {
         var states = $$(".chip.active[data-filter-state]", filters).map(function (c) { return c.dataset.filterState; });
         var sevs = $$(".chip.active[data-filter-sev]", filters).map(function (c) { return c.dataset.filterSev; });
+        var allChip = $("[data-filter-all]", filters);
+        if (allChip) allChip.classList.toggle("active", states.length === 0);
         cards.forEach(function (card) {
           var stateOK = states.length === 0 || states.indexOf(card.dataset.state) >= 0 ||
-            (states.indexOf("accepted") >= 0 && card.dataset.state === "published");
+            (states.indexOf("published") >= 0 && card.dataset.state === "note");
           var sevOK = sevs.length === 0 || sevs.indexOf(card.dataset.severity) >= 0;
-          card.classList.toggle("filtered", !(stateOK && sevOK));
+          var hide = !(stateOK && sevOK);
+          card.classList.toggle("filtered", hide);
+          var row = rowFor(card.dataset.finding);
+          if (row) row.classList.toggle("filtered", hide);
         });
+        if (selected && rowFor(selected) && rowFor(selected).classList.contains("filtered")) {
+          var vis = visibleRows()[0];
+          if (vis) select(vis.dataset.rowFor, true);
+        }
       };
       filters.addEventListener("click", function (ev) {
         var chip = ev.target.closest(".chip");
         if (!chip) return;
-        chip.classList.toggle("active");
+        if (chip.hasAttribute("data-filter-all")) {
+          $$(".chip[data-filter-state]", filters).forEach(function (c) { c.classList.remove("active"); });
+        } else {
+          chip.classList.toggle("active");
+        }
         applyFilters();
       });
     }
 
-    var visible = function () {
-      return cards.filter(function (c) { return !c.classList.contains("filtered"); });
-    };
-    var focused = -1;
-    var focusCard = function (idx) {
-      var vis = visible();
-      if (vis.length === 0) return;
-      idx = Math.max(0, Math.min(idx, vis.length - 1));
-      cards.forEach(function (c) { c.classList.remove("kfocus"); });
-      vis[idx].classList.add("kfocus");
-      vis[idx].scrollIntoView({ block: "center" });
-      focused = idx;
-    };
-    var focusedCard = function () {
-      return visible()[focused] || null;
+    var focusedCard = function () { return selected ? cardFor(selected) : null; };
+    var move = function (delta) {
+      var vis = visibleRows();
+      if (!vis.length) return;
+      var ids = vis.map(function (r) { return r.dataset.rowFor; });
+      var idx = ids.indexOf(selected);
+      var next = idx < 0 ? 0 : Math.max(0, Math.min(idx + delta, ids.length - 1));
+      select(ids[next], true);
     };
     var submitAction = function (card, action) {
       if (!card) return;
@@ -358,19 +516,19 @@
     };
     addShortcuts([
       ["j / k", "next / previous finding"],
-      ["a", "accept the focused finding"],
-      ["x", "reject the focused finding"],
-      ["e", "edit the focused finding's body"],
+      ["a", "accept the selected finding"],
+      ["x", "reject the selected finding"],
+      ["e", "edit the selected finding's body"],
       ["A", "accept all pending findings"],
     ]);
     document.addEventListener("keydown", function (ev) {
       if (typing(ev) || ev.metaKey || ev.ctrlKey || ev.altKey) return;
       switch (ev.key) {
         case "j":
-          focusCard(focused + 1);
+          move(1);
           break;
         case "k":
-          focusCard(focused - 1);
+          move(-1);
           break;
         case "a":
           submitAction(focusedCard(), "accept");
@@ -460,10 +618,45 @@
       var progress = $("#viewed-progress");
       if (progress && files.length) {
         var n = files.filter(function (f) { return viewed.has(f.dataset.path); }).length;
-        progress.textContent = n ? n + "/" + files.length + " viewed" : "";
+        progress.textContent = n + " of " + files.length + " viewed";
+        var bar = $("#viewed-bar");
+        if (bar) bar.style.transform = "scaleX(" + n / files.length + ")";
       }
     };
     updateViewedUI();
+
+    // Filter the explorer by path; folders left with no match fold away.
+    var filterBox = $(".filetree-filter");
+    var filterInput = $("#file-filter");
+    if (filterBox && filterInput && files.length > 1) {
+      filterBox.hidden = false;
+      filterInput.addEventListener("input", function () {
+        var q = filterInput.value.trim().toLowerCase();
+        $$(".filetree li.file-entry").forEach(function (li) {
+          li.hidden = q !== "" && li.dataset.path.toLowerCase().indexOf(q) < 0;
+        });
+        $$(".filetree details").forEach(function (d) {
+          var any = $$("li.file-entry", d).some(function (li) { return !li.hidden; });
+          d.parentNode.hidden = !any;
+        });
+      });
+    }
+
+    // Mark the file being read in the explorer.
+    if ("IntersectionObserver" in window) {
+      var entryFor = function (article) {
+        return $('.filetree li.file-entry[data-path="' + CSS.escape(article.dataset.path) + '"] > a');
+      };
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (!en.isIntersecting) return;
+          $$(".filetree li.file-entry > a.current").forEach(function (a) { a.classList.remove("current"); });
+          var link = entryFor(en.target);
+          if (link) link.classList.add("current");
+        });
+      }, { rootMargin: "-120px 0px -60% 0px" });
+      files.forEach(function (f) { io.observe(f); });
+    }
 
     diffLayout.addEventListener("change", function (ev) {
       var box = ev.target.closest(".viewed-box");
@@ -607,45 +800,44 @@
   // status JSON afterwards, a few at a time. Failures leave the cell empty.
   var statusCells = $$("td.mr-status[data-status-url]");
   if (statusCells.length) {
-    var statusIcon = function (name) {
-      var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("class", "icon");
-      var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-      use.setAttribute("href", "#i-" + name);
-      svg.appendChild(use);
-      return svg;
+    // Same wording and glyphs as the server-rendered ciLabel/ciIcon.
+    var ciIcons = { success: "check-circle", failed: "x-circle", running: "sync", canceled: "skip", canceling: "skip", skipped: "skip" };
+    var ciLabel = function (status) {
+      if (status === "success") return "Passed";
+      if (status === "waiting_for_resource") return "Waiting";
+      return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, " ");
     };
-    var ciLabels = { success: "passed", waiting_for_resource: "waiting" };
     var renderStatus = function (cell, out) {
+      cell.replaceChildren();
       if (out.pipeline && out.pipeline.status) {
         var p = out.pipeline;
         var badge = document.createElement(p.url ? "a" : "span");
-        badge.className = "badge ci ci-" + p.status.replace(/[^a-z_-]/g, "");
+        badge.className = "ci ci-" + p.status.replace(/[^a-z_-]/g, "");
         if (p.url) {
           badge.href = p.url;
           badge.target = "_blank";
           badge.rel = "noopener";
         }
         badge.title = "pipeline: " + p.status;
-        if (p.status === "success") badge.appendChild(statusIcon("check"));
-        if (p.status === "failed") badge.appendChild(statusIcon("cross"));
-        badge.appendChild(document.createTextNode(" " + (ciLabels[p.status] || p.status)));
+        badge.appendChild(statusIcon(ciIcons[p.status] || "clock"));
+        badge.appendChild(document.createTextNode(" " + ciLabel(p.status)));
         cell.appendChild(badge);
       }
-      if (out.threads > 0) {
+      var threadCell = cell.nextElementSibling;
+      if (out.threads > 0 && threadCell) {
         var t = document.createElement("span");
         if (out.unresolved > 0) {
-          t.className = "badge threads-open";
+          t.className = "threads open";
           t.title = out.unresolved + " of " + out.threads + " thread(s) unresolved";
           t.appendChild(statusIcon("chat"));
-          t.appendChild(document.createTextNode(" " + out.unresolved));
+          t.appendChild(document.createTextNode(" " + out.unresolved + " open"));
         } else {
-          t.className = "badge threads-resolved";
+          t.className = "threads";
           t.title = "all " + out.threads + " thread(s) resolved";
           t.appendChild(statusIcon("check"));
-          t.appendChild(document.createTextNode(" " + out.threads));
+          t.appendChild(document.createTextNode(" " + out.threads + " resolved"));
         }
-        cell.appendChild(t);
+        threadCell.appendChild(t);
       }
     };
     var statusQueue = statusCells.slice();
@@ -658,7 +850,7 @@
           return res.json();
         })
         .then(function (out) { renderStatus(cell, out); })
-        .catch(function () { /* row stays plain */ })
+        .catch(function () { cell.replaceChildren(); })
         .then(pumpStatus, pumpStatus);
     };
     for (var s = 0; s < 4 && s < statusCells.length; s++) pumpStatus();
@@ -710,6 +902,39 @@
       var row = btn.closest("[data-instance-row]");
       if (row) row.remove();
     });
+  }
+
+  var settingsNav = $(".settings-nav");
+  if (settingsNav && "IntersectionObserver" in window) {
+    var markSection = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        $$("a", settingsNav).forEach(function (a) { a.classList.toggle("current", a.dataset.section === en.target.id); });
+      });
+    }, { rootMargin: "-80px 0px -70% 0px" });
+    $$(".settings-section").forEach(function (sec) { markSection.observe(sec); });
+  }
+
+  // On narrow screens the file list and MR-level findings start folded so
+  // the diff comes first.
+  if (window.matchMedia && matchMedia("(max-width: 720px)").matches) {
+    $$("details.card.general[open]").forEach(function (d) { d.open = false; });
+  }
+  var treeToggle = $(".filetree-toggle");
+  if (treeToggle && window.matchMedia) {
+    var tree = treeToggle.closest(".filetree");
+    var narrow = window.matchMedia("(max-width: 1000px)");
+    var syncTree = function () {
+      var shown = !narrow.matches || tree.classList.contains("open");
+      treeToggle.setAttribute("aria-expanded", shown ? "true" : "false");
+    };
+    treeToggle.addEventListener("click", function () {
+      if (!narrow.matches) return;
+      tree.classList.toggle("open");
+      syncTree();
+    });
+    narrow.addEventListener("change", syncTree);
+    syncTree();
   }
 
   // --- page-load indicator ----------------------------------------------

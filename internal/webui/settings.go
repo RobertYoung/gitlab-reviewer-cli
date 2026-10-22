@@ -245,7 +245,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
 		HotReload:  s.opts.Reload != nil,
 		FileExists: fileExists(s.settingsFile()),
 	}
-	s.render(w, http.StatusOK, "settings", pageData{Title: "settings", Content: content})
+	s.render(w, http.StatusOK, "settings", pageData{Title: "settings", Section: "settings", Content: content})
 }
 
 // handleSettingsSave round-trips the settings file: it reads the raw file,
@@ -287,7 +287,7 @@ func (s *Server) handleSettingsSave(w http.ResponseWriter, r *http.Request) {
 			Err:        msg,
 			FileExists: fileExists(path),
 		}
-		s.render(w, status, "settings", pageData{Title: "settings", Content: content})
+		s.render(w, status, "settings", pageData{Title: "settings", Section: "settings", Content: content})
 	}
 
 	if len(parseErrs) > 0 {

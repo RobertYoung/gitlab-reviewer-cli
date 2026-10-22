@@ -1,51 +1,62 @@
 {{define "content"}}
 {{$c := .Content}}
-{{template "mrnav" (navargs $c.Nav $c.WebURL)}}
-<section class="panel chatpage" data-events="{{$c.EventsURL}}"{{if not $c.State.Busy}} data-idle="1"{{end}}>
-  <h2>{{template "icon" "chat"}} Chat about {{if $c.FocusLabel}}<code>{{$c.FocusLabel}}</code>{{else}}{{$c.Ref}}{{end}}</h2>
-  <p class="subtle">{{$c.Title}} — Claude answers from a checkout of the MR branch and can read the
-  surrounding code. Nothing here is posted to GitLab.</p>
+<section class="chatpage" data-events="{{$c.EventsURL}}"{{if not $c.State.Busy}} data-idle="1"{{end}}>
+  <div class="chat-intro">
+    <span class="summary-icon">{{template "icon" "discussion"}}</span>
+    <div>
+      <h2>Chat about {{if $c.FocusLabel}}<code>{{$c.FocusLabel}}</code>{{else}}{{$c.Ref}}{{end}}</h2>
+      <p class="muted">Claude answers from a checkout of the MR branch and can read the surrounding code. Nothing here is posted to GitLab.</p>
+    </div>
+  </div>
 
   <div class="chatlog">
     {{range $c.State.Messages}}
     <div class="chat-msg {{if .You}}you{{else}}claude{{end}}">
-      <div class="meta">{{if .You}}you{{else}}claude{{end}}</div>
+      <div class="meta">{{if .You}}<span class="avatar mine" aria-hidden="true">{{template "icon" "person"}}</span>You{{else}}<span class="avatar ai" aria-hidden="true">{{template "icon" "sparkle"}}</span>Claude{{end}}</div>
       <pre class="prose">{{.Text}}</pre>
     </div>
     {{end}}
     {{if and (not $c.State.Messages) (not $c.State.Busy)}}
-    <p class="note">No messages yet — ask a question below.</p>
+    <p class="muted chat-empty">No messages yet. Ask a question below.</p>
+    {{end}}
+    {{if $c.State.Busy}}
+    <div class="chat-msg claude busy">
+      <div class="meta"><span class="avatar ai" aria-hidden="true">{{template "icon" "sparkle"}}</span>Claude <span class="spinner"></span> <span class="muted">working…</span></div>
+      <pre class="runlog chatstatus" id="chatstatus">{{range $c.State.Status}}{{.}}
+{{end}}</pre>
+    </div>
     {{end}}
   </div>
 
-  {{if $c.State.Err}}<p class="error">{{$c.State.Err}}</p>{{end}}
+  {{if $c.State.Err}}<div class="notice error">{{template "icon" "warn"}}<div>{{$c.State.Err}}</div></div>{{end}}
 
   {{if $c.State.Busy}}
-  <div class="chat-msg claude">
-    <div class="meta"><span class="spinner"></span> claude is working…</div>
-    <pre class="runlog chatstatus" id="chatstatus">{{range $c.State.Status}}{{.}}
-{{end}}</pre>
+  <div class="row">
+    <form method="post" action="{{$c.CancelURL}}" class="inline-form">
+      <button type="submit" class="btn btn-reject">{{template "icon" "stop"}} Cancel reply</button>
+    </form>
   </div>
-  <form method="post" action="{{$c.CancelURL}}">
-    <button type="submit" class="button danger">Cancel reply</button>
-  </form>
   {{else if $c.State.Closed}}
-  <p class="note">This chat has ended.</p>
+  <div class="notice">{{template "icon" "info"}}<div>This chat has ended.</div></div>
   {{else}}
   <form method="post" action="{{$c.SendURL}}" class="chat-form">
-    <textarea name="message" rows="3" placeholder="ask about this change — ⌘/ctrl+enter sends — markdown supported" autofocus></textarea>
-    <button type="submit" class="button primary">Send</button>
+    <textarea name="message" rows="3" placeholder="Ask about this change. Markdown supported." aria-label="message" autofocus></textarea>
+    <div class="row">
+      <span class="hint"><kbd>⌘</kbd><kbd>↵</kbd> sends</span>
+      <span class="spacer"></span>
+      <button type="submit" class="btn btn-primary">{{template "icon" "send"}} Send</button>
+    </div>
   </form>
   {{end}}
 
-  <div class="actions">
+  <div class="row chat-actions">
     {{if and (not $c.State.Closed) (not $c.State.Busy)}}
-    <form method="post" action="{{$c.EndURL}}">
+    <form method="post" action="{{$c.EndURL}}" class="inline-form">
       <input type="hidden" name="back" value="{{$c.Nav.DiffURL}}">
-      <button type="submit" class="button">End chat</button>
+      <button type="submit" class="btn btn-ghost">End chat</button>
     </form>
     {{end}}
-    <a class="button" href="{{$c.Nav.DiffURL}}">Back to diff</a>
+    <a class="btn btn-ghost" href="{{$c.Nav.DiffURL}}">{{template "icon" "diff"}} Back to diff</a>
   </div>
 </section>
 {{end}}

@@ -115,6 +115,9 @@ type diffFile struct {
 	Rows     []splitRow // side-by-side pairing; only built for the split layout
 	Comments int        // anchored comment count, for the file explorer badge
 	Findings int        // anchored review findings, for the file explorer badge
+	Sevs     []string   // severities of those findings, in line order
+	Adds     int        // added and deleted line counts for the file header
+	Dels     int
 	TooLarge bool
 	Tail     *hunkExpand // downward expander for lines past the last hunk
 }
@@ -220,6 +223,15 @@ func buildDiffFiles(diffs []gitlabx.FileDiff, discussions []gitlabx.Discussion, 
 				f.Comments += len(t.Comments)
 			}
 			f.Findings += len(l.Findings)
+			for _, fd := range l.Findings {
+				f.Sevs = append(f.Sevs, string(fd.Severity))
+			}
+			switch l.Kind {
+			case "add":
+				f.Adds++
+			case "del":
+				f.Dels++
+			}
 		}
 		if split {
 			f.Rows = splitLines(f.Lines)

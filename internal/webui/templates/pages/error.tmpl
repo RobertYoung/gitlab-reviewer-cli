@@ -1,7 +1,10 @@
 {{define "content"}}
-<section class="panel narrow">
-  <h2>Something went wrong</h2>
-  <p class="error">{{.Content}}</p>
-  <p><a href="javascript:history.back()">← back</a> · <a href="/">home</a></p>
+<section class="card centered">
+  <div class="card-body">
+    <span class="hero-icon error">{{template "icon" "warn"}}</span>
+    <h1>Something went wrong</h1>
+    <p class="error">{{.Content}}</p>
+    <div class="row"><a class="btn" href="javascript:history.back()">{{template "icon" "arrow-left"}} Back</a><a class="btn btn-ghost" href="/">Home</a></div>
+  </div>
 </section>
 {{end}}

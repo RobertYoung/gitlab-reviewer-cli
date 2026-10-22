@@ -1,9 +1,9 @@
 {{define "content"}}
-<section class="panel narrow">
-  <h2>Choose a GitLab instance</h2>
-  <ul class="instance-list">
+<section class="card centered">
+  <header class="card-head"><h1>Choose a GitLab instance</h1></header>
+  <ul class="pick-list">
     {{range .Content}}
-    <li><a class="button" href="{{.URL}}">{{.Name}}</a></li>
+    <li><a href="{{.URL}}">{{template "icon" "server"}}<span class="pick-text"><span class="strong">{{.Name}}</span>{{if .Host}}<span class="muted">{{.Host}}</span>{{end}}</span>{{template "icon" "chevron-right"}}</a></li>
     {{end}}
   </ul>
 </section>

@@ -107,13 +107,15 @@ func (s *Store) Latest(ref string) (*Record, error) {
 // Entry describes one stored record, with enough of its content for a
 // history list.
 type Entry struct {
-	Path     string
-	Ref      string
-	Title    string
-	Started  time.Time
-	LogPath  string
-	Findings int
-	Accepted int // accepted, published or fell back to a note
+	Path      string
+	Ref       string
+	Title     string
+	Started   time.Time
+	LogPath   string
+	Findings  int
+	Accepted  int // accepted, published or fell back to a note
+	Pending   int // still awaiting triage
+	Published int // posted to GitLab, inline or as a fallback note
 }
 
 var nameRe = regexp.MustCompile(`^review-\d+-\d+\.json$`)
@@ -151,8 +153,13 @@ func (s *Store) List(ref string) ([]Entry, error) {
 		}
 		for _, f := range rec.Findings {
 			switch f.State {
-			case review.StateAccepted, review.StatePublished, review.StateFellBack:
+			case review.StateAccepted:
 				e.Accepted++
+			case review.StatePublished, review.StateFellBack:
+				e.Accepted++
+				e.Published++
+			case review.StatePending:
+				e.Pending++
 			}
 		}
 		out = append(out, e)

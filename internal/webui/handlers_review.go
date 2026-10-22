@@ -79,9 +79,10 @@ func (s *Server) handleReviewForm(w http.ResponseWriter, r *http.Request, d *Dep
 	if prev, err := d.Results.Latest(detail.Ref()); err == nil && prev != nil && prev.HeadSHA != "" {
 		content.PrevReviewHead = prev.HeadSHA
 	}
+	band := s.band(r, d, bandInput{Inst: inst, Project: detail.ProjectPath, IID: detail.IID, Detail: detail})
+	band.Quiet = true
 	s.render(w, http.StatusOK, "reviewoptions", pageData{
-		Title: "review · " + detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "review"), Content: content,
+		Title: "review · " + detail.Ref(), Instance: inst, Band: band, Content: content,
 	})
 }
 
@@ -211,7 +212,7 @@ func (s *Server) runURLs(inst string, run *reviewRun, out *runOutcome) (findings
 
 // handleRunPage shows one review run: the streamed progress log while it
 // runs (via SSE), then the outcome.
-func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request, _ *Deps) {
+func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request, d *Deps) {
 	inst := r.PathValue("inst")
 	run := s.runs.get(r.PathValue("run"))
 	if run == nil || run.Instance != inst {
@@ -231,9 +232,10 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request, _ *Deps) 
 		PublishReviewURL: instPath(inst, "/mr/publish/review"),
 	}
 	content.FindingsURL, content.LogURL = s.runURLs(inst, run, out)
+	band := s.band(r, d, bandInput{Inst: inst, Project: run.Project, IID: run.IID, Ref: run.Ref, Title: run.Title})
+	band.Quiet = true
 	s.render(w, http.StatusOK, "run", pageData{
-		Title: "reviewing " + run.Ref, Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, run.Ref, "review"), Content: content,
+		Title: "reviewing " + run.Ref, Instance: inst, Band: band, Content: content,
 	})
 }
 
@@ -401,9 +403,9 @@ func (s *Server) handleFindings(w http.ResponseWriter, r *http.Request, d *Deps)
 			content.Published++
 		}
 	}
+	band := s.band(r, d, bandInput{Inst: inst, Project: project, IID: iid, Tab: "findings", Detail: detail, Record: recName})
 	s.render(w, http.StatusOK, "findings", pageData{
-		Title: "findings · " + detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "findings"), Content: content,
+		Title: "findings · " + detail.Ref(), Instance: inst, Band: band, Content: content,
 	})
 }
 
@@ -474,7 +476,7 @@ func (s *Server) handleFindingState(w http.ResponseWriter, r *http.Request, d *D
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"states": states, "accepted": accepted, "rejected": rejected,
-			"pending": pending, "body": body,
+			"pending": pending, "body": body, "record": recName,
 		})
 		return
 	}
@@ -548,9 +550,10 @@ func (s *Server) handlePublishForm(w http.ResponseWriter, r *http.Request, d *De
 		return
 	}
 	cfg := d.cfgFor(detail.ProjectPath)
+	band := s.band(r, d, bandInput{Inst: inst, Project: project, IID: iid, Tab: "findings", Detail: detail, Record: r.FormValue("record")})
+	band.Quiet = true
 	s.render(w, http.StatusOK, "publish", pageData{
-		Title: "publish · " + detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(newMRNav(inst, project, iid), detail.Ref(), "publish"), Content: publishContent{
+		Title: "publish · " + detail.Ref(), Instance: inst, Band: band, Content: publishContent{
 			Nav:        newMRNav(inst, project, iid),
 			Detail:     detail,
 			Items:      items,
@@ -649,9 +652,10 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, d *Deps) 
 		}
 	}
 	content.DraftReady = pub.Draft && content.Inline+content.Notes > 0
+	band := s.band(r, d, bandInput{Inst: inst, Project: project, IID: iid, Tab: "findings", Detail: detail, Record: r.FormValue("record")})
+	band.Quiet = true
 	s.render(w, http.StatusOK, "publish", pageData{
-		Title: "publish · " + detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "publish"), Content: content,
+		Title: "publish · " + detail.Ref(), Instance: inst, Band: band, Content: content,
 	})
 }
 
@@ -683,14 +687,16 @@ type historyRow struct {
 	Title       string
 	Findings    int
 	Accepted    int
-	RecordOnly  bool
+	Pending     int
 	FindingsURL string
 	LogURL      string
 }
 
+func sortHistory(rows []historyRow) {
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].Started.After(rows[j].Started) })
+}
+
 type historyContent struct {
-	Nav     mrNav
-	Detail  *gitlabx.MRDetail
 	Entries []historyRow
 }
 
@@ -708,65 +714,20 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request, d *Deps) 
 		s.renderError(w, http.StatusBadGateway, err)
 		return
 	}
-	records, err := d.Results.List(detail.Ref())
-	if err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-		return
-	}
-	logs, err := d.Logs.List(detail.Ref())
-	if err != nil {
-		s.renderError(w, http.StatusInternalServerError, err)
-		return
-	}
-
-	logURL := func(path string) string {
-		if path == "" {
-			return ""
-		}
-		return mrURL(inst, "/mr/log", project, iid, url.Values{"name": {filepath.Base(path)}})
-	}
-	// One entry per run: records lead; logs whose run has a record fold
-	// into it, the rest (runs predating result storage, or failed before a
-	// result) get log-only entries.
-	covered := map[string]bool{}
-	var entries []historyRow
-	for _, rec := range records {
-		covered[rec.LogPath] = true
-		entries = append(entries, historyRow{
-			Started:     rec.Started,
-			Title:       rec.Title,
-			Findings:    rec.Findings,
-			Accepted:    rec.Accepted,
-			FindingsURL: mrURL(inst, "/mr/findings", project, iid, url.Values{"record": {filepath.Base(rec.Path)}}),
-			LogURL:      logURL(rec.LogPath),
-		})
-	}
-	for _, l := range logs {
-		if covered[l.Path] {
-			continue
-		}
-		entries = append(entries, historyRow{Started: l.Started, Title: l.Title, LogURL: logURL(l.Path)})
-	}
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Started.After(entries[j].Started) })
-
+	band := s.band(r, d, bandInput{Inst: inst, Project: project, IID: iid, Tab: "reviews", Detail: detail})
 	s.render(w, http.StatusOK, "history", pageData{
-		Title: "past reviews · " + detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(newMRNav(inst, project, iid), detail.Ref(), "past reviews"), Content: historyContent{
-			Nav:     newMRNav(inst, project, iid),
-			Detail:  detail,
-			Entries: entries,
-		},
+		Title: "past reviews · " + detail.Ref(), Instance: inst, Band: band,
+		Content: historyContent{Entries: s.historyRows(d, inst, project, iid, detail.Ref())},
 	})
 }
 
 type logContent struct {
-	Nav  mrNav
 	Name string
 	Text string
 }
 
 // handleLogView shows one stored run log.
-func (s *Server) handleLogView(w http.ResponseWriter, r *http.Request, _ *Deps) {
+func (s *Server) handleLogView(w http.ResponseWriter, r *http.Request, d *Deps) {
 	inst := r.PathValue("inst")
 	project, iid, err := mrQuery(r)
 	if err != nil {
@@ -784,11 +745,9 @@ func (s *Server) handleLogView(w http.ResponseWriter, r *http.Request, _ *Deps) 
 		s.renderError(w, http.StatusNotFound, err)
 		return
 	}
-	nav := newMRNav(inst, project, iid)
+	band := s.band(r, d, bandInput{Inst: inst, Project: project, IID: iid, Tab: "reviews"})
 	s.render(w, http.StatusOK, "log", pageData{
-		Title: "review log", Instance: inst,
-		Crumbs: mrCrumbs(nav, fmt.Sprintf("%s!%d", project, iid), "review log"), Content: logContent{
-			Nav:  nav,
+		Title: "review log", Instance: inst, Band: band, Content: logContent{
 			Name: name,
 			Text: string(data),
 		},

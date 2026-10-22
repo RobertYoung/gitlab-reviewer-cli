@@ -43,23 +43,6 @@ func parseProject(s string) any {
 	return s
 }
 
-// instCrumbs starts a breadcrumb trail at the instance's MR list.
-func instCrumbs(inst string) []crumb {
-	return []crumb{{Label: inst, URL: instPath(inst, "/")}}
-}
-
-// mrCrumbs is the breadcrumb trail for an MR-scoped page: the instance's
-// MR list, the MR itself, then the current sub-page. An empty page means
-// the MR overview is the current page.
-func mrCrumbs(nav mrNav, ref, page string) []crumb {
-	trail := append(instCrumbs(nav.Instance), crumb{Label: ref, URL: nav.DetailURL})
-	if page == "" {
-		trail[len(trail)-1].URL = ""
-		return trail
-	}
-	return append(trail, crumb{Label: page})
-}
-
 // localRedirect follows a form's "back" target, restricted to local paths
 // so the parameter cannot bounce the browser off the session.
 func localRedirect(w http.ResponseWriter, r *http.Request, back, fallback string) {
@@ -79,11 +62,13 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 	type instanceItem struct {
 		Name string
+		Host string
 		URL  string
 	}
+	cfg := s.currentConfig()
 	items := make([]instanceItem, 0, len(instances))
 	for _, name := range instances {
-		items = append(items, instanceItem{Name: name, URL: instPath(name, "/")})
+		items = append(items, instanceItem{Name: name, Host: instanceHost(cfg, name), URL: instPath(name, "/")})
 	}
 	s.render(w, http.StatusOK, "home", pageData{Title: "instances", Content: items})
 }
@@ -104,17 +89,74 @@ type mrListContent struct {
 	PrevURL    string
 	NextURL    string
 	Err        string
+	StateTabs  []stateTab
+	Scope      string // the projects and groups being listed
 	MRURL      func(gitlabx.MRSummary) string
 	StatusURL  func(gitlabx.MRSummary) string // lazy pipeline/thread JSON per row
+}
+
+// stateTab is one of the MR list's state filters, keeping the other filters.
+type stateTab struct {
+	Label   string
+	URL     string
+	Current bool
+}
+
+func stateTabs(inst string, q url.Values) []stateTab {
+	current := q.Get("state")
+	if current == "" {
+		current = "opened"
+	}
+	tabs := make([]stateTab, 0, 4)
+	for _, st := range []struct{ value, label string }{{"opened", "Open"}, {"merged", "Merged"}, {"closed", "Closed"}, {"all", "All"}} {
+		nq := url.Values{}
+		for k, vs := range q {
+			nq[k] = vs
+		}
+		nq.Set("state", st.value)
+		nq.Del("page")
+		tabs = append(tabs, stateTab{Label: st.label, URL: instPath(inst, "/") + "?" + nq.Encode(), Current: st.value == current})
+	}
+	return tabs
+}
+
+// scopeLabel names what the MR list covers: the request's override, or the
+// configured projects and groups.
+func scopeLabel(projects, groups []string) string {
+	all := append(append([]string(nil), projects...), groups...)
+	if len(all) > 4 {
+		return strings.Join(all[:3], ", ") + fmt.Sprintf(" and %d more", len(all)-3)
+	}
+	return strings.Join(all, ", ")
 }
 
 // mrReviewedInfo decorates a listed MR that has stored reviews: how the
 // latest one went, linking to the past-reviews page.
 type mrReviewedInfo struct {
-	Findings int
-	Accepted int
-	When     time.Time
-	URL      string // past reviews of this MR
+	Findings  int
+	Accepted  int // accepted, including those already posted
+	Pending   int
+	Published int
+	When      time.Time
+	URL       string // past reviews of this MR
+}
+
+// Stage names where the latest review stands, for the MR list's AI review
+// column: triage while findings are pending, publish while accepted ones
+// wait to be posted, then published (or clean when nothing was found).
+func (i mrReviewedInfo) Stage() string {
+	switch {
+	case i.Findings == 0:
+		return "clean"
+	case i.Pending > 0:
+		return "triage"
+	case i.Accepted > i.Published:
+		return "publish"
+	case i.Published > 0:
+		return "published"
+	default:
+		return "triaged"
+	}
 }
 
 // handleMRList lists merge requests with the same filters as the TUI list.
@@ -144,6 +186,7 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 		NeedsScope: len(d.Cfg.GitLab.Projects) == 0 && len(d.Cfg.GitLab.Groups) == 0,
 		BrowseURL:  instPath(inst, "/browse"),
 		Page:       page,
+		StateTabs:  stateTabs(inst, q),
 		MRURL: func(m gitlabx.MRSummary) string {
 			project := m.ProjectPath
 			if project == "" {
@@ -167,6 +210,11 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 		return
 	}
 
+	if len(filter.Projects) > 0 || len(filter.Groups) > 0 {
+		content.Scope = scopeLabel(filter.Projects, filter.Groups)
+	} else {
+		content.Scope = scopeLabel(d.Cfg.GitLab.Projects, d.Cfg.GitLab.Groups)
+	}
 	mrs, hasMore, err := d.Svc.ListOpenMergeRequests(r.Context(), filter,
 		gitlabx.Page{Number: page, PerPage: d.Cfg.GitLab.PerPage})
 	if err != nil {
@@ -190,10 +238,12 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 			continue
 		}
 		content.Reviewed[i] = &mrReviewedInfo{
-			Findings: e.Findings,
-			Accepted: e.Accepted,
-			When:     e.Started,
-			URL:      mrURL(inst, "/mr/history", m.ProjectPath, m.IID, nil),
+			Findings:  e.Findings,
+			Accepted:  e.Accepted,
+			Pending:   e.Pending,
+			Published: e.Published,
+			When:      e.Started,
+			URL:       mrURL(inst, "/mr/history", m.ProjectPath, m.IID, nil),
 		}
 	}
 	if page > 1 {
@@ -203,8 +253,7 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 		content.NextURL = listPageURL(inst, q, page+1)
 	}
 	s.render(w, http.StatusOK, "mrs", pageData{
-		Title: "merge requests", Instance: inst,
-		Crumbs: []crumb{{Label: inst}}, Content: content,
+		Title: "merge requests", Instance: inst, Section: "mrs", Content: content,
 	})
 }
 
@@ -337,15 +386,8 @@ type mrDetailContent struct {
 	Detail        *gitlabx.MRDetail
 	Commits       []gitlabx.Commit
 	Pending       []review.Finding
-	Approvals     *gitlabx.Approvals // nil when the instance exposes none
 	RebaseWarning string
 	HasAccepted   bool
-	// GateBlocking is how many findings in the last stored review block the
-	// severity gate (0 when the gate is off or satisfied); GateSeverity is
-	// its threshold and GateBlocked whether approval is refused outright.
-	GateBlocking int
-	GateSeverity string
-	GateBlocked  bool
 }
 
 // agentOption is one review agent offered on the run-review form.
@@ -466,16 +508,15 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 		s.renderError(w, http.StatusBadGateway, err)
 		return
 	}
-	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), iid)    // best-effort
-	approvals, _ := d.Svc.GetApprovals(r.Context(), detail.Project(), iid) // decoration; page works without it
+	commits, _ := d.Svc.ListCommits(r.Context(), detail.Project(), iid) // best-effort
 	pending := s.comments.list(mrKey(inst, project, iid))
+	band := s.band(r, d, bandInput{Inst: inst, Project: project, IID: iid, Tab: "overview", Detail: detail})
 
 	content := mrDetailContent{
-		Nav:       newMRNav(inst, project, iid),
-		Detail:    detail,
-		Commits:   commits,
-		Pending:   pending,
-		Approvals: approvals,
+		Nav:     newMRNav(inst, project, iid),
+		Detail:  detail,
+		Commits: commits,
+		Pending: pending,
 	}
 	for _, f := range pending {
 		if f.State == review.StateAccepted {
@@ -485,18 +526,8 @@ func (s *Server) handleMRDetail(w http.ResponseWriter, r *http.Request, d *Deps)
 	if detail.NeedsRebase() {
 		content.RebaseWarning = runner.RebaseWarning(*detail)
 	}
-	// Severity gate status for the approve action; best-effort, an
-	// unreadable store must not break the page.
-	if gate := d.cfgFor(detail.ProjectPath).Gate; gate.Enabled() && gate.Approvals != "off" {
-		if n, err := d.Results.LatestBlocking(detail.Ref(), review.Severity(gate.MinSeverity)); err == nil && n > 0 {
-			content.GateBlocking = n
-			content.GateSeverity = gate.MinSeverity
-			content.GateBlocked = gate.Approvals == "block"
-		}
-	}
 	s.render(w, http.StatusOK, "mrdetail", pageData{
-		Title: detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, detail.Ref(), ""), Content: content,
+		Title: detail.Ref(), Instance: inst, Band: band, Content: content,
 	})
 }
 
@@ -606,9 +637,12 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request, d *Deps) {
 			content.HasAccepted = true
 		}
 	}
+	band := s.band(r, d, bandInput{
+		Inst: inst, Project: project, IID: iid, Tab: "changes", Detail: detail,
+		Record: recName, BackURL: content.BackURL,
+	})
 	s.render(w, http.StatusOK, "diff", pageData{
-		Title: "diff · " + detail.Ref(), Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, detail.Ref(), "diff"), Content: content,
+		Title: "diff · " + detail.Ref(), Instance: inst, Band: band, Content: content,
 	})
 }
 
