@@ -163,7 +163,7 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 	// An empty scope with nothing configured would query nothing useful;
 	// send the user to the scope picker instead.
 	if content.NeedsScope && len(filter.Projects) == 0 && len(filter.Groups) == 0 {
-		http.Redirect(w, r, content.BrowseURL, http.StatusSeeOther) //nolint:gosec // local path with the instance segment escaped
+		http.Redirect(w, r, content.BrowseURL, http.StatusSeeOther)
 		return
 	}
 
