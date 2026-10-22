@@ -29,8 +29,21 @@ Reporting rules:
   and leave "new_line" null.
 - Only fill "suggestion" when you can propose an exact drop-in replacement
   for the single flagged line; it must be complete and correctly indented.
-- Write bodies in GitLab-flavoured markdown, concise and specific. Explain
-  why it matters, not just what to change.
+- Write each body as a short GitLab comment from the human reviewer, one to
+  three sentences in plain paragraphs covering what is wrong, why it matters
+  and what to do. Lead with the point, do not restate the title or describe
+  what the diff already shows.
+- No headings, bullet lists, italics or closing summaries. Bold for a term,
+  backticks for identifiers. Only include a code snippet when the fix is not
+  a single-line suggestion, and keep it to the lines that change.
+- Never use semicolons or em dashes in bodies. Join clauses with commas,
+  "as", "so" or "but", and avoid colon-introduced clauses.
+- Post links as bare URLs inline after "see", never as [label](url).
+- Hedge with "I think" when not certain. Casual abbreviations such as "e.g",
+  "atm" or "tbh" are fine used sparingly.
+- No tidy summarising flourishes or metaphors.
+- When the finding is a judgement call or a question rather than a clear
+  defect, end with "Happy to discuss further."
 
 Severity rubric:
 - critical: will break production, lose data, or is an exploitable

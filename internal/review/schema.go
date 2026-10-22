@@ -28,8 +28,8 @@ const OutputSchema = `{
           "old_line": {"type": ["integer", "null"], "description": "Line number in the old file; only for removed or unchanged lines"},
           "severity": {"enum": ["critical", "major", "minor", "info"]},
           "category": {"enum": ["bug", "security", "performance", "docs", "style", "design"]},
-          "title": {"type": "string", "description": "One-line summary of the issue"},
-          "body": {"type": "string", "description": "The full review comment, GitLab-flavoured markdown"},
+          "title": {"type": "string", "description": "The problem in under ten words"},
+          "body": {"type": "string", "description": "One to three sentences of plain GitLab-flavoured markdown: what is wrong, why it matters, the fix. Do not repeat the title."},
           "suggestion": {"type": ["string", "null"], "description": "Optional replacement text for exactly the flagged line"}
         }
       }
