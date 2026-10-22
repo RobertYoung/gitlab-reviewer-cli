@@ -13,7 +13,9 @@
     t = window.matchMedia && matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
   }
   document.documentElement.dataset.theme = t;
+  document.documentElement.classList.add("js");
 })()</script>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%231f6feb'/%3E%3Cpath fill='%23fff' d='M8 7.5h8a1.5 1.5 0 0 1 1.5 1.5v5a1.5 1.5 0 0 1-1.5 1.5h-3.2L10 18v-2.5H8A1.5 1.5 0 0 1 6.5 14V9A1.5 1.5 0 0 1 8 7.5Z'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/app.css">
 <link rel="stylesheet" href="/static/chroma.css">
 <script src="/static/app.js" defer></script>
@@ -21,33 +23,48 @@
 <body>
 {{template "iconsprite"}}
 <div id="loadbar" class="loadbar" hidden aria-hidden="true"><div class="fill"></div></div>
-<header class="topbar">
-  <a class="brand" href="/">gitlab-reviewer</a>
-  <nav class="crumbs" aria-label="breadcrumb">
-    {{- range $i, $c := .Crumbs}}
-    {{- if $i}}<span class="sep" aria-hidden="true">/</span>{{end}}
-    {{- if $c.URL}}<a class="crumb" href="{{$c.URL}}">{{$c.Label}}</a>{{else}}<span class="crumb current" aria-current="page">{{$c.Label}}</span>{{end}}
+<header class="topnav">
+  <a class="brand" href="/" aria-label="gitlab-reviewer home"><span class="logo">{{template "icon" "logo"}}</span><span class="wordmark">gitlab-reviewer</span></a>
+  {{- if .Instance}}
+  {{- if .Instances}}
+  <details class="menu instance">
+    <summary class="inst" title="switch GitLab instance"><span class="dot"></span>{{.Instance}}{{with .Host}}<span class="host"> · {{.}}</span>{{end}} {{template "icon" "chevron-down"}}</summary>
+    <div class="menu-pop" role="menu">
+      {{- range .Instances}}
+      <a role="menuitem" href="/i/{{pathesc .}}/"{{if eq . $.Instance}} aria-current="true"{{end}}>{{template "icon" "server"}} {{.}}</a>
+      {{- end}}
+    </div>
+  </details>
+  {{- else}}
+  <span class="inst"><span class="dot"></span>{{with .Host}}{{.}}{{else}}{{.Instance}}{{end}}</span>
+  {{- end}}
+  {{- end}}
+  <nav class="navlinks" aria-label="main">
+    {{- if .Instance}}
+    <a href="/i/{{pathesc .Instance}}/"{{if eq .Section "mrs"}} class="current" aria-current="page"{{end}}>Merge requests</a>
+    <a href="/i/{{pathesc .Instance}}/browse"{{if eq .Section "browse"}} class="current" aria-current="page"{{end}}>Browse</a>
+    {{- else}}
+    <a href="/">Merge requests</a>
     {{- end}}
+    <a href="/settings"{{if eq .Section "settings"}} class="current" aria-current="page"{{end}}>Settings</a>
   </nav>
   <span class="spacer"></span>
-  <a class="iconbtn" href="/settings" title="settings">
-    <svg class="icon" aria-hidden="true"><use href="#i-gear"/></svg>
-  </a>
-  <button type="button" class="iconbtn" id="help-toggle" title="keyboard shortcuts (?)" hidden>?</button>
-  <button type="button" class="iconbtn" id="theme-toggle" title="switch between light and dark theme">
+  <button type="button" class="iconbtn" id="help-toggle" title="Keyboard shortcuts (?)" aria-label="keyboard shortcuts" hidden>{{template "icon" "question"}}</button>
+  <button type="button" class="iconbtn" id="theme-toggle" title="Switch between light and dark theme" aria-label="switch theme">
     <svg class="icon only-dark" aria-hidden="true"><use href="#i-sun"/></svg>
     <svg class="icon only-light" aria-hidden="true"><use href="#i-moon"/></svg>
   </button>
-  {{if .Version}}<span class="version">{{.Version}}</span>{{end}}
+  {{- if .Version}}<span class="version">{{.Version}}</span>{{end}}
 </header>
-<main>
+{{with .Band}}{{template "band" .}}{{end}}
+<main class="page">
 {{template "content" .}}
 </main>
 <div id="toast-host" aria-live="polite"></div>
 <dialog id="help-dialog" class="help-dialog">
-  <h3>Keyboard shortcuts</h3>
+  <h2>Keyboard shortcuts</h2>
   <div id="help-body"></div>
-  <form method="dialog"><button class="button">Close</button></form>
+  <form method="dialog"><button class="btn">Close</button></form>
 </dialog>
 </body>
 </html>

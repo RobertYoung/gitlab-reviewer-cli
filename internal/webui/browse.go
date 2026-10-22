@@ -22,11 +22,12 @@ type browseRow struct {
 }
 
 type browseContent struct {
-	Instance string
-	Group    string // group drilled into ("" at the top level)
-	Mine     bool   // member-projects mode
-	Search   string
-	Rows     []browseRow
+	Instance   string
+	Group      string // group drilled into ("" at the top level)
+	Mine       bool   // member-projects mode
+	Search     string
+	NeedsScope bool // nothing configured: browsing is how the MR list gets scoped
+	Rows       []browseRow
 	// GroupMRsURL browses the whole drilled-into group's MRs.
 	GroupMRsURL string
 	BackURL     string
@@ -50,10 +51,11 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, d *Deps) {
 	search := q.Get("search")
 
 	content := browseContent{
-		Instance: inst,
-		Group:    group,
-		Mine:     mine,
-		Search:   search,
+		Instance:   inst,
+		Group:      group,
+		Mine:       mine,
+		Search:     search,
+		NeedsScope: len(d.Cfg.GitLab.Projects) == 0 && len(d.Cfg.GitLab.Groups) == 0,
 	}
 	title := "select a group or project"
 	switch {
@@ -104,8 +106,7 @@ func (s *Server) handleBrowse(w http.ResponseWriter, r *http.Request, d *Deps) {
 		content.NextURL = browsePageURL(inst, q, page+1)
 	}
 	s.render(w, http.StatusOK, "browse", pageData{
-		Title: title, Instance: inst,
-		Crumbs: append(instCrumbs(inst), crumb{Label: title}), Content: content,
+		Title: title, Instance: inst, Section: "browse", Content: content,
 	})
 }
 

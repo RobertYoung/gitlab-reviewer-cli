@@ -1,28 +1,96 @@
-{{define "mrnav"}}
-<nav class="mrnav">
-  <a href="{{.Nav.DetailURL}}">overview</a>
-  <a href="{{.Nav.DiffURL}}">diff</a>
-  <a href="{{.Nav.HistoryURL}}">past reviews</a>
-  {{if .WebURL}}<a href="{{.WebURL}}" target="_blank" rel="noopener">open in GitLab {{template "icon" "external"}}</a>{{end}}
-</nav>
+{{/* band is the MR header shared by every MR-scoped page; dot is the
+     *mrBand. The pipeline's next action is the page's only primary button. */}}
+{{define "band"}}
+<section class="band"{{with .Review}} data-record="{{.Name}}" data-findings-url="{{.FindingsURL}}" data-publish-url="{{.PublishURL}}"{{end}}>
+  <div class="band-inner">
+    <nav class="crumbs" aria-label="breadcrumb">
+      <a href="/i/{{pathesc .Nav.Instance}}/">Merge requests</a>{{template "icon" "chevron-right"}}<span>{{.Nav.Project}}</span>{{template "icon" "chevron-right"}}<span class="mono" aria-current="page">!{{.Nav.IID}}</span>
+    </nav>
+    <div class="band-title">
+      <h1>{{.Title}}</h1>
+      {{with .Detail}}{{template "mrstate" .}}{{end}}
+    </div>
+    {{with .Detail}}{{template "mrmeta" .}}{{end}}
+    <ol class="pipeline" aria-label="review progress">
+      {{- range $i, $s := .Steps}}
+      <li class="step {{$s.State}}" data-step="{{$s.Key}}">
+        <a href="{{$s.URL}}"{{if eq $s.State "current"}} aria-current="step"{{end}}>
+          <span class="node">{{if eq $s.State "done"}}{{template "icon" "check"}}{{else}}{{inc $i}}{{end}}</span>
+          <span class="text"><b>{{$s.Label}}</b><span class="detail" data-step-detail="{{$s.Key}}">{{$s.Detail}}</span></span>
+        </a>
+      </li>
+      {{- end}}
+      {{- if and (not .Quiet) (or .Next (and .Review (not .RunURL)))}}
+      <li class="next">
+        {{- if and .Review (not .RunURL)}}
+        <a class="btn btn-ghost" href="{{.Nav.ReviewFormURL}}" title="run another AI review of this MR">{{template "icon" "play"}} Run again</a>
+        {{- end}}
+        {{- with .Next}}
+        {{- if .Approve}}
+        <form method="post" action="{{$.Nav.ApproveURL}}" class="inline-form">
+          <input type="hidden" name="project" value="{{$.Nav.Project}}">
+          <input type="hidden" name="iid" value="{{$.Nav.IID}}">
+          <input type="hidden" name="back" value="{{$.BackURL}}">
+          <input type="hidden" name="sha" value="{{$.Detail.HeadSHA}}">
+          <button type="submit" class="btn btn-primary next-action">{{template "icon" .Icon}} {{.Label}}</button>
+        </form>
+        {{- else}}
+        <a class="btn {{if .Go}}btn-go{{else}}btn-primary{{end}} next-action" href="{{.URL}}">{{template "icon" .Icon}} {{.Label}}</a>
+        {{- end}}
+        {{- end}}
+      </li>
+      {{- end}}
+    </ol>
+    <nav class="tabs" aria-label="merge request">
+      <a class="tab{{if eq .Tab "overview"}} current{{end}}" href="{{.Nav.DetailURL}}"{{if eq .Tab "overview"}} aria-current="page"{{end}}>{{template "icon" "book"}} Overview</a>
+      <a class="tab{{if eq .Tab "changes"}} current{{end}}" href="{{.Nav.DiffURL}}"{{if eq .Tab "changes"}} aria-current="page"{{end}}>{{template "icon" "diff"}} Changes{{with .Detail}}{{with .ChangesCount}} <span class="count">{{.}}</span>{{end}}{{end}}</a>
+      {{- with .Review}}
+      <a class="tab{{if eq $.Tab "findings"}} current{{end}}" href="{{.FindingsURL}}"{{if eq $.Tab "findings"}} aria-current="page"{{end}}>{{template "icon" "checklist"}} Findings <span class="count">{{.Findings}}</span></a>
+      {{- else}}
+      <span class="tab disabled" title="no stored review yet: run an AI review first">{{template "icon" "checklist"}} Findings</span>
+      {{- end}}
+      <a class="tab{{if eq .Tab "reviews"}} current{{end}}" href="{{.Nav.HistoryURL}}"{{if eq .Tab "reviews"}} aria-current="page"{{end}}>{{template "icon" "history"}} Past reviews{{if .Runs}} <span class="count">{{.Runs}}</span>{{end}}</a>
+      {{- if eq .Tab "chat"}}
+      <span class="tab current" aria-current="page">{{template "icon" "discussion"}} Chat</span>
+      {{- end}}
+      <span class="spacer"></span>
+      <form method="post" action="{{.Nav.ChatURL}}" class="inline-form">
+        <input type="hidden" name="project" value="{{.Nav.Project}}">
+        <input type="hidden" name="iid" value="{{.Nav.IID}}">
+        <button type="submit" class="btn btn-ghost btn-sm">{{template "icon" "discussion"}} Chat with Claude</button>
+      </form>
+    </nav>
+  </div>
+</section>
 {{end}}
 
-{{/* mrhead is the MR metadata line; dot is the *gitlabx.MRDetail. Each part
+{{/* mrstate is the MR's state pill; dot is the *gitlabx.MRDetail. */}}
+{{define "mrstate"}}
+{{- if eq .State "merged"}}<span class="pill merged">{{template "icon" "mr-merged"}} Merged</span>
+{{- else if eq .State "closed"}}<span class="pill closed">{{template "icon" "mr-closed"}} Closed</span>
+{{- else if .Draft}}<span class="pill draft">{{template "icon" "mr-draft"}} Draft</span>
+{{- else}}<span class="pill open">{{template "icon" "mr"}} Open</span>{{end}}
+{{- end}}
+
+{{/* mrmeta is the MR metadata line; dot is the *gitlabx.MRDetail. Each part
      links to its GitLab page when the URL is derivable from the MR's WebURL. */}}
-{{define "mrhead"}}
+{{define "mrmeta"}}
 {{$src := .BranchWebURL .SourceBranch}}{{$tgt := .BranchWebURL .TargetBranch}}
-<p class="subtle mrhead">
-  {{if .WebURL}}<a href="{{.WebURL}}" target="_blank" rel="noopener">{{.Ref}}</a>{{else}}{{.Ref}}{{end}}
-  · {{if .AuthorWebURL}}<a href="{{.AuthorWebURL}}" target="_blank" rel="noopener">{{.AuthorDisplay}}</a>{{else}}{{.AuthorDisplay}}{{end}}
-  · {{if $src}}<a href="{{$src}}" target="_blank" rel="noopener">{{.SourceBranch}}</a>{{else}}{{.SourceBranch}}{{end}}
-  → {{if $tgt}}<a href="{{$tgt}}" target="_blank" rel="noopener">{{.TargetBranch}}</a>{{else}}{{.TargetBranch}}{{end}}
-  · updated {{reltime .UpdatedAt}} · {{.State}}
+<p class="band-meta">
+  <span class="avatar {{hue .Author}}" aria-hidden="true">{{initials .AuthorName .Author}}</span>
+  {{if .AuthorWebURL}}<a class="who" href="{{.AuthorWebURL}}" target="_blank" rel="noopener">{{.AuthorDisplay}}</a>{{else}}<span class="who">{{.AuthorDisplay}}</span>{{end}}
+  <span>wants to merge</span>
+  {{if $src}}<a class="branch" href="{{$src}}" target="_blank" rel="noopener">{{.SourceBranch}}</a>{{else}}<span class="branch">{{.SourceBranch}}</span>{{end}}
+  <span>into</span>
+  {{if $tgt}}<a class="branch" href="{{$tgt}}" target="_blank" rel="noopener">{{.TargetBranch}}</a>{{else}}<span class="branch">{{.TargetBranch}}</span>{{end}}
+  <span class="sep" aria-hidden="true">·</span><span>updated {{reltime .UpdatedAt}}</span>
+  {{if .WebURL}}<span class="sep" aria-hidden="true">·</span><span class="gitlab-link"><a href="{{.WebURL}}" target="_blank" rel="noopener">{{.Ref}}</a>{{template "icon" "external"}}</span>{{end}}
 </p>
 {{end}}
 
-{{define "sevbadge"}}{{if .Manual}}<span class="badge manual">manual</span>{{else}}<span class="badge sev-{{.Severity}}">{{.Severity}}{{if .Category}} · {{.Category}}{{end}}{{if and .Agent (ne .Agent (printf "%s" .Category))}} · {{.Agent}}{{end}}</span>{{end}}{{end}}
+{{define "sevbadge"}}{{if .Manual}}<span class="pill manual">manual</span>{{else}}<span class="pill sev sev-{{.Severity}}">{{.Severity}}</span>{{if .Category}} <span class="fcat">{{.Category}}{{if and .Agent (ne .Agent (printf "%s" .Category))}} · {{.Agent}}{{end}}</span>{{end}}{{end}}{{end}}
 
-{{define "statebadge"}}<span class="badge fstate state-{{fstate .}}">{{fstate .}}</span>{{end}}
+{{define "statebadge"}}<span class="pill fstate state-{{fstate .}}">{{fstate .}}</span>{{end}}
 
 {{/* findingactions are the accept/reject forms for one finding; dot carries
      F, Nav, StateURL, RecordName and an optional BackURL to return to. The
@@ -35,7 +103,7 @@
   <input type="hidden" name="id" value="{{.F.ID}}">
   <input type="hidden" name="back" value="{{.BackURL}}">
   <input type="hidden" name="action" value="accept">
-  <button type="submit" class="button ok">{{template "icon" "check"}} Accept</button>
+  <button type="submit" class="btn btn-sm btn-accept">{{template "icon" "check"}} Accept</button>
 </form>
 <form method="post" action="{{.StateURL}}" class="inline-form f-state-form">
   <input type="hidden" name="project" value="{{.Nav.Project}}">
@@ -44,7 +112,7 @@
   <input type="hidden" name="id" value="{{.F.ID}}">
   <input type="hidden" name="back" value="{{.BackURL}}">
   <input type="hidden" name="action" value="reject">
-  <button type="submit" class="button danger">{{template "icon" "cross"}} Reject</button>
+  <button type="submit" class="btn btn-sm btn-reject">{{template "icon" "cross"}} Reject</button>
 </form>
 {{end}}
 
@@ -66,10 +134,21 @@
 {{end}}
 {{end}}
 
+{{/* pager is the newer/older pair under paginated lists; dot carries PrevURL
+     and NextURL plus the two labels. */}}
+{{define "pager"}}
+{{if or .Prev .Next}}
+<nav class="pager" aria-label="pagination">
+  {{if .Prev}}<a class="btn btn-sm" href="{{.Prev}}">{{template "icon" "chevron-left"}} {{.PrevLabel}}</a>{{else}}<span class="btn btn-sm" aria-disabled="true">{{template "icon" "chevron-left"}} {{.PrevLabel}}</span>{{end}}
+  {{if .Next}}<a class="btn btn-sm" href="{{.Next}}">{{.NextLabel}} {{template "icon" "chevron-right"}}</a>{{else}}<span class="btn btn-sm" aria-disabled="true">{{.NextLabel}} {{template "icon" "chevron-right"}}</span>{{end}}
+</nav>
+{{end}}
+{{end}}
+
 {{/* diffcontext renders the unchanged lines revealed by expanding a hunk's
      context: unified or split rows the diff page splices around the hunk. */}}
 {{define "diffcontext"}}{{if .Split}}{{range .Rows}}{{template "ctxrow-split" .}}{{end}}{{else}}{{range .Rows}}{{template "ctxrow-unified" .}}{{end}}{{end}}{{end}}
 
-{{define "ctxrow-unified"}}<tr class="line ctx" data-file="{{.File}}" data-old="{{.Old}}" data-new="{{.New}}"><td class="ln">{{.Old}}</td><td class="ln">{{.New}}</td><td class="gutter"><button type="button" class="add-comment" title="add a comment on this line">+</button></td><td class="code">{{.HTML}}</td></tr>{{end}}
+{{define "ctxrow-unified"}}<tr class="line ctx" data-file="{{.File}}" data-old="{{.Old}}" data-new="{{.New}}"><td class="ln">{{.Old}}</td><td class="ln">{{.New}}</td><td class="gutter"><button type="button" class="add-comment" title="add a comment on this line" aria-label="add a comment on this line"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></td><td class="code">{{.HTML}}</td></tr>{{end}}
 
-{{define "ctxrow-split"}}<tr class="line"><td class="ln ctx">{{.Old}}</td><td class="gutter ctx"></td><td class="code ctx">{{.HTML}}</td><td class="ln ctx">{{.New}}</td><td class="gutter ctx"><button type="button" class="add-comment" title="add a comment on this line" data-file="{{.File}}" data-old="{{.Old}}" data-new="{{.New}}">+</button></td><td class="code ctx">{{.HTML}}</td></tr>{{end}}
+{{define "ctxrow-split"}}<tr class="line"><td class="ln ctx">{{.Old}}</td><td class="gutter ctx"></td><td class="code ctx">{{.HTML}}</td><td class="ln ctx">{{.New}}</td><td class="gutter ctx"><button type="button" class="add-comment" title="add a comment on this line" aria-label="add a comment on this line" data-file="{{.File}}" data-old="{{.Old}}" data-new="{{.New}}"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></td><td class="code ctx">{{.HTML}}</td></tr>{{end}}

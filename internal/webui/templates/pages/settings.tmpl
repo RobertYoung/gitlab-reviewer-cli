@@ -1,43 +1,55 @@
 {{define "content"}}
 {{$c := .Content}}
-<section class="panel narrow-wide">
-  <h2>Settings</h2>
-  <p class="subtle">Editing <code>{{$c.FilePath}}</code>{{if not $c.FileExists}} <span class="note">(not created yet — saving creates it)</span>{{end}}.</p>
-  <p class="note">These are the effective values. Environment variables and command-line flags still override the file at runtime. {{if $c.HotReload}}Saved changes apply to subsequent actions without a restart.{{else}}Saved changes apply the next time you start the GUI.{{end}}</p>
-  {{if $c.Saved}}
-  {{if $c.Applied}}<p class="ok">{{template "icon" "check"}} Saved to {{$c.FilePath}} and applied.</p>
-  {{else if $c.HotReload}}<p class="warning">{{template "icon" "warn"}} Saved to {{$c.FilePath}}, but the running session kept the previous settings — restart the GUI to apply.</p>
-  {{else}}<p class="ok">{{template "icon" "check"}} Saved to {{$c.FilePath}}. Restart the GUI to apply.</p>{{end}}
-  {{end}}
-  {{if $c.Err}}<div class="warning">{{template "icon" "warn"}} Could not save:</div><pre class="error">{{$c.Err}}</pre>{{end}}
-</section>
-
-<form method="post" action="{{$c.SaveURL}}" class="settings-form" autocomplete="off">
-  {{range $c.Sections}}
-  <section class="panel settings-section" id="sec-{{.Anchor}}">
-    <h3>{{.Title}}</h3>
-    {{if .Help}}<p class="subtle">{{.Help}}</p>{{end}}
-    {{range .Views}}
-    {{template "settingfield" .}}
-    {{end}}
-  </section>
-  {{end}}
-
-  <section class="panel settings-section" id="sec-instances">
-    <h3>GitLab instances</h3>
-    <p class="subtle">Named GitLab connections to switch between at startup. Leave this empty to use the single connection under GitLab above. To remove an instance, clear its name (or press Remove) and save; a blank token keeps the value already stored.</p>
-    <div class="instance-editor" id="instance-editor" data-next-index="{{len $c.Instances}}">
-      {{range $c.Instances}}{{template "instancerow" .}}{{end}}
-      {{template "instancerow" (blankinstance (len $c.Instances))}}
-    </div>
-    <button type="button" class="button" id="add-instance">Add instance</button>
-  </section>
-
-  <div class="actions settings-actions">
-    <button type="submit" class="button primary">Save settings</button>
-    <a class="button" href="/">Cancel</a>
+<div class="pagehead">
+  <div>
+    <h1>Settings</h1>
+    <p class="sub">Editing <code>{{$c.FilePath}}</code>{{if not $c.FileExists}} (not created yet; saving creates it){{end}}. These are the effective values: environment variables and command-line flags still override the file at runtime. {{if $c.HotReload}}Saved changes apply to subsequent actions without a restart.{{else}}Saved changes apply the next time you start the GUI.{{end}}</p>
   </div>
-</form>
+</div>
+
+{{if $c.Saved}}
+{{if $c.Applied}}<div class="notice ok">{{template "icon" "check"}}<div>Saved to {{$c.FilePath}} and applied.</div></div>
+{{else if $c.HotReload}}<div class="notice warn">{{template "icon" "warn"}}<div>Saved to {{$c.FilePath}}, but the running session kept the previous settings: restart the GUI to apply.</div></div>
+{{else}}<div class="notice ok">{{template "icon" "check"}}<div>Saved to {{$c.FilePath}}. Restart the GUI to apply.</div></div>{{end}}
+{{end}}
+{{if $c.Err}}<div class="notice error">{{template "icon" "warn"}}<div>Could not save:<pre class="error">{{$c.Err}}</pre></div></div>{{end}}
+
+<div class="settings-layout">
+  <nav class="settings-nav" aria-label="settings sections">
+    {{range $c.Sections}}<a href="#sec-{{.Anchor}}" data-section="sec-{{.Anchor}}">{{.Title}}</a>{{end}}
+    <a href="#sec-instances" data-section="sec-instances">GitLab instances</a>
+  </nav>
+
+  <form method="post" action="{{$c.SaveURL}}" class="settings-form" autocomplete="off">
+    {{range $c.Sections}}
+    <section class="card settings-section" id="sec-{{.Anchor}}">
+      <header class="card-head"><h2>{{.Title}}</h2>{{if .Help}}<span class="muted">{{.Help}}</span>{{end}}</header>
+      <div class="card-body">
+        {{range .Views}}
+        {{template "settingfield" .}}
+        {{end}}
+      </div>
+    </section>
+    {{end}}
+
+    <section class="card settings-section" id="sec-instances">
+      <header class="card-head"><h2>GitLab instances</h2></header>
+      <div class="card-body">
+        <p class="help">Named GitLab connections to switch between at startup. Leave this empty to use the single connection under GitLab above. To remove an instance, clear its name (or press Remove) and save; a blank token keeps the value already stored.</p>
+        <div class="instance-editor" id="instance-editor" data-next-index="{{len $c.Instances}}">
+          {{range $c.Instances}}{{template "instancerow" .}}{{end}}
+          {{template "instancerow" (blankinstance (len $c.Instances))}}
+        </div>
+        <button type="button" class="btn btn-sm" id="add-instance">{{template "icon" "plus"}} Add instance</button>
+      </div>
+    </section>
+
+    <div class="actionbar settings-actions">
+      <button type="submit" class="btn btn-primary">Save settings</button>
+      <a class="btn btn-ghost" href="/">Cancel</a>
+    </div>
+  </form>
+</div>
 {{end}}
 
 {{define "instancerow"}}
@@ -53,14 +65,14 @@
   </div>
   <div class="setting">
     <label class="setting-label" for="inst-{{.Index}}-token">Token</label>
-    <input type="password" id="inst-{{.Index}}-token" name="instance.{{.Index}}.token" autocomplete="new-password" placeholder="{{if .TokenSet}}configured — leave blank to keep{{else}}not set — or use a token env var{{end}}">
+    <input type="password" id="inst-{{.Index}}-token" name="instance.{{.Index}}.token" autocomplete="new-password" placeholder="{{if .TokenSet}}configured; leave blank to keep{{else}}not set, or use a token env var{{end}}">
   </div>
   <div class="setting">
     <label class="setting-label" for="inst-{{.Index}}-tokenenv">Token env var</label>
     <input type="text" id="inst-{{.Index}}-tokenenv" name="instance.{{.Index}}.token_env" value="{{.TokenEnv}}" spellcheck="false" placeholder="e.g. WORK_GITLAB_TOKEN">
     <span class="help">Environment variable read for the token when Token is left blank.</span>
   </div>
-  <button type="button" class="button danger" data-remove-instance>Remove</button>
+  <button type="button" class="btn btn-sm btn-reject" data-remove-instance>{{template "icon" "trash"}} Remove</button>
 </fieldset>
 {{end}}
 
@@ -79,14 +91,14 @@
   {{$val := .Value}}
   <select id="f-{{.Key}}" name="{{.Key}}">
     {{range .Options}}
-    <option value="{{.}}" {{if eq . $val}}selected{{end}}>{{if eq . ""}}(unset — disabled){{else}}{{.}}{{end}}</option>
+    <option value="{{.}}" {{if eq . $val}}selected{{end}}>{{if eq . ""}}(unset, disabled){{else}}{{.}}{{end}}</option>
     {{end}}
   </select>
   {{else if or (.Is "list") (.Is "map")}}
   <textarea id="f-{{.Key}}" name="{{.Key}}" rows="4" spellcheck="false">{{.Text}}</textarea>
   {{else if .Is "secret"}}
   <input type="password" id="f-{{.Key}}" name="{{.Key}}" autocomplete="new-password"
-    placeholder="{{if .TokenSet}}configured — leave blank to keep{{else}}not set{{end}}">
+    placeholder="{{if .TokenSet}}configured; leave blank to keep{{else}}not set{{end}}">
   {{else if .Is "int"}}
   <input type="number" step="1" id="f-{{.Key}}" name="{{.Key}}" value="{{.Value}}">
   {{else if .Is "float"}}

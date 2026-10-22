@@ -238,6 +238,7 @@ func (c *Client) GetMergeRequest(ctx context.Context, project any, iid int64) (*
 		HasConflicts:        mr.HasConflicts,
 		DivergedCommits:     mr.DivergedCommitsCount,
 		DetailedMergeStatus: mr.DetailedMergeStatus,
+		ChangesCount:        mr.ChangesCount,
 	}
 	if mr.HeadPipeline != nil {
 		detail.Pipeline = &PipelineStatus{

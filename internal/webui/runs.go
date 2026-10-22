@@ -131,6 +131,12 @@ func (r *reviewRun) outcomeLocked() *runOutcome {
 	return out
 }
 
+func (r *reviewRun) finished() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.done
+}
+
 func (r *reviewRun) snapshot() (lines []string, done bool, out *runOutcome) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -156,6 +162,18 @@ func (g *runRegistry) get(id string) *reviewRun {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.runs[id]
+}
+
+// active returns the MR's review run that is still in progress, if any.
+func (g *runRegistry) active(inst, project string, iid int64) *reviewRun {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, run := range g.runs {
+		if run.Instance == inst && run.Project == project && run.IID == iid && !run.finished() {
+			return run
+		}
+	}
+	return nil
 }
 
 // reviewStartOptions carries the per-run choices from the review options

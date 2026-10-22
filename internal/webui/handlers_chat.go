@@ -74,7 +74,7 @@ func (s *Server) chatFromRequest(r *http.Request) *chatSession {
 
 // handleChatPage shows one conversation: the transcript, the reply in
 // progress (streamed via SSE), and the composer.
-func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request, _ *Deps) {
+func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request, d *Deps) {
 	inst := r.PathValue("inst")
 	cs := s.chatFromRequest(r)
 	if cs == nil {
@@ -98,9 +98,9 @@ func (s *Server) handleChatPage(w http.ResponseWriter, r *http.Request, _ *Deps)
 	if content.FocusLabel != "" {
 		title = "chat · " + content.FocusLabel
 	}
+	band := s.band(r, d, bandInput{Inst: inst, Project: cs.Project, IID: cs.IID, Tab: "chat", Ref: cs.Ref, Title: cs.Title})
 	s.render(w, http.StatusOK, "chat", pageData{
-		Title: title, Instance: inst,
-		Crumbs: mrCrumbs(content.Nav, cs.Ref, "chat"), Content: content,
+		Title: title, Instance: inst, Band: band, Content: content,
 	})
 }
 

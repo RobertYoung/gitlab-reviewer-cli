@@ -1,91 +1,116 @@
 {{define "content"}}
 {{$c := .Content}}
-{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
-<section class="panel findings-page" data-record="{{$c.RecordName}}">
-  <h2>Findings · {{$c.Detail.Ref}}</h2>
+<section class="findings-page" data-record="{{$c.RecordName}}">
   {{if $c.AutoPublished}}
-  <p class="ok" role="status">{{template "icon" "check"}} Auto-published {{$c.AutoPublished}} qualifying finding(s) to GitLab (<code>publish.auto_comment</code>). No further action needed.</p>
+  <div class="notice ok" role="status">{{template "icon" "check"}}<div>Auto-published {{$c.AutoPublished}} qualifying finding(s) to GitLab (<code>publish.auto_comment</code>). No further action needed.</div></div>
   {{end}}
-  {{if $c.Rec.Summary}}<pre class="prose summary">{{$c.Rec.Summary}}</pre>{{end}}
-  {{range $c.Rec.Warnings}}<p class="warning">{{template "icon" "warn"}} {{.}}</p>{{end}}
+  {{range $c.Rec.Warnings}}<div class="notice warn">{{template "icon" "warn"}}<div>{{.}}</div></div>{{end}}
 
-  <div class="actions">
-    <a class="button" href="{{$c.DiffURL}}">View in diff</a>
-    {{if $c.LogURL}}<a class="button" href="{{$c.LogURL}}">{{template "icon" "log"}} Run log</a>{{end}}
-    <span class="spacer"></span>
-    <span class="filter-chips" id="finding-filters" hidden>
-      <button type="button" class="chip" data-filter-state="pending">pending</button>
-      <button type="button" class="chip" data-filter-state="accepted">accepted</button>
-      <button type="button" class="chip" data-filter-state="rejected">rejected</button>
-      <span class="chip-sep"></span>
-      <button type="button" class="chip" data-filter-sev="critical">critical</button>
-      <button type="button" class="chip" data-filter-sev="major">major</button>
-      <button type="button" class="chip" data-filter-sev="minor">minor</button>
-      <button type="button" class="chip" data-filter-sev="info">info</button>
+  {{if $c.Rec.Summary}}
+  <details class="summary">
+    <summary><span class="summary-icon">{{template "icon" "sparkle"}}</span><span class="summary-label">Summary</span><span class="summary-text">{{$c.Rec.Summary}}</span><span class="summary-more">{{template "icon" "chevron-down"}}</span></summary>
+    <div class="summary-body">
+      <p>{{$c.Rec.Summary}}</p>
+      <p class="summary-meta">{{plural (len $c.Items) "finding"}} · {{reltime $c.Rec.Started}}{{if $c.LogURL}} · <a href="{{$c.LogURL}}">{{template "icon" "log"}} Run log</a>{{end}} · <a href="{{$c.DiffURL}}">{{template "icon" "diff"}} View in diff</a></p>
+    </div>
+  </details>
+  {{end}}
+
+  <div class="triage-bar" id="triage-bar">
+    <span class="filter-chips" id="finding-filters">
+      <span class="seg" role="group" aria-label="filter by state">
+        <button type="button" class="chip all active" data-filter-all>All <span class="n">{{len $c.Items}}</span></button>
+        <button type="button" class="chip" data-filter-state="pending">Pending <span class="n" id="count-pending">{{$c.Pending}}</span></button>
+        <button type="button" class="chip" data-filter-state="accepted">Accepted <span class="n" id="count-accepted">{{$c.Accepted}}</span></button>
+        <button type="button" class="chip" data-filter-state="rejected">Rejected <span class="n" id="count-rejected">{{$c.Rejected}}</span></button>
+        {{if $c.Published}}<button type="button" class="chip" data-filter-state="published">Published <span class="n" id="count-published">{{$c.Published}}</span></button>{{end}}
+      </span>
+      <span class="seg" role="group" aria-label="filter by severity">
+        <button type="button" class="chip" data-filter-sev="critical"><span class="sevdot critical"></span>Critical</button>
+        <button type="button" class="chip" data-filter-sev="major"><span class="sevdot major"></span>Major</button>
+        <button type="button" class="chip" data-filter-sev="minor"><span class="sevdot minor"></span>Minor</button>
+        <button type="button" class="chip" data-filter-sev="info"><span class="sevdot info"></span>Info</button>
+      </span>
     </span>
+    <span class="spacer"></span>
+    {{if $c.LogURL}}<a class="btn btn-ghost btn-sm" href="{{$c.LogURL}}">{{template "icon" "log"}} Run log</a>{{end}}
+    <a class="btn btn-ghost btn-sm" href="{{$c.DiffURL}}">{{template "icon" "diff"}} View in diff</a>
+    {{if $c.Items}}
+    <form method="post" action="{{$c.StateURL}}" class="inline-form" id="accept-all-form">
+      <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+      <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+      <input type="hidden" name="record" value="{{$c.RecordName}}">
+      <input type="hidden" name="action" value="accept-all">
+      <button type="submit" class="btn btn-sm">{{template "icon" "check"}} Accept all pending <kbd>A</kbd></button>
+    </form>
+    <a class="btn btn-sm{{if not $c.Accepted}} disabled{{end}}" id="publish-button" href="{{$c.PublishURL}}">{{template "icon" "send"}} Publish <b id="count-publish">{{$c.Accepted}}</b> accepted</a>
+    {{end}}
   </div>
 
   {{if not $c.Items}}
-  <p class="note">The reviewer found nothing to flag.</p>
-  {{end}}
+  <div class="empty">
+    {{template "icon" "check-circle"}}
+    <h2>Nothing to flag</h2>
+    <p>The reviewer found no issues in this change.</p>
+  </div>
+  {{else}}
+  <div class="triage-panes" id="triage">
+    <nav class="triage-list" aria-label="findings">
+      {{range $g := triagegroups $c.Items}}
+      <div class="triage-group" data-group="{{$g.State}}"{{if not $g.Items}} hidden{{end}}>
+        <div class="triage-group-head">{{$g.Label}} <span class="count">{{len $g.Items}}</span></div>
+        {{range $g.Items}}{{$f := .F}}
+        <a class="triage-row state-{{fstate $f.State}}" href="#f-{{$f.ID}}" data-finding="{{$f.ID}}" data-row-for="{{$f.ID}}" data-severity="{{$f.Severity}}">
+          <span class="sevdot {{$f.Severity}}" title="{{$f.Severity}}"></span>
+          <span class="rtext"><span class="rtitle">{{ftitle $f}}</span><span class="rloc">{{floc $f}}</span></span>
+          <span class="rstate" aria-hidden="true"></span>
+        </a>
+        {{end}}
+      </div>
+      {{end}}
+      <p class="triage-keys"><kbd>j</kbd> <kbd>k</kbd> move · <kbd>a</kbd> accept · <kbd>x</kbd> reject · <kbd>e</kbd> edit</p>
+    </nav>
 
-  {{range $c.Items}}
-  {{$f := .F}}
-  <article class="finding state-{{fstate $f.State}}" id="f-{{$f.ID}}" data-finding="{{$f.ID}}" data-severity="{{$f.Severity}}" tabindex="-1">
-    <header>
-      {{template "sevbadge" $f}}
-      <strong class="ftitle">{{ftitle $f}}</strong>
-      <span class="subtle">{{floc $f}}</span>
-      <span class="spacer"></span>
-      {{template "statebadge" $f.State}}
-    </header>
-    <pre class="prose">{{$f.Body}}</pre>
-    {{if $f.Suggestion}}
-    <div class="suggestion">
-      <span class="subtle">suggested replacement:</span>
-      <pre class="prose add">+{{$f.Suggestion}}</pre>
+    <div class="triage-detail">
+      {{range $c.Items}}
+      {{$f := .F}}
+      <article class="finding state-{{fstate $f.State}}" id="f-{{$f.ID}}" data-finding="{{$f.ID}}" data-severity="{{$f.Severity}}" tabindex="-1">
+        <header>
+          {{template "sevbadge" $f}}
+          <span class="spacer"></span>
+          {{template "statebadge" $f.State}}
+        </header>
+        <h2 class="ftitle">{{ftitle $f}}</h2>
+        <a class="floc" href="{{$c.DiffURL}}#df-{{$f.ID}}" title="show this finding in the diff">{{template "icon" "file"}} {{floc $f}}</a>
+        <pre class="prose">{{$f.Body}}</pre>
+        {{if $f.Suggestion}}
+        <div class="suggestion">
+          <div class="suggestion-head">{{template "icon" "bulb"}} Suggested change</div>
+          <pre class="prose add">{{$f.Suggestion}}</pre>
+        </div>
+        {{end}}
+        {{template "excerpt" .Excerpt}}
+        <footer class="actions">
+          {{template "findingactions" (triagerow $f $c)}}
+          <details class="edit">
+            <summary class="btn btn-sm">{{template "icon" "pencil"}} Edit</summary>
+            <form method="post" action="{{$c.StateURL}}" class="f-edit-form">
+              <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+              <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
+              <input type="hidden" name="record" value="{{$c.RecordName}}">
+              <input type="hidden" name="id" value="{{$f.ID}}">
+              <input type="hidden" name="action" value="edit">
+              <textarea name="body" rows="6" aria-label="finding body">{{$f.Body}}</textarea>
+              <div class="row"><button type="submit" class="btn btn-primary btn-sm">Save</button></div>
+            </form>
+          </details>
+          <span class="spacer"></span>
+          <span class="hint"><kbd>a</kbd> accept <kbd>x</kbd> reject <kbd>e</kbd> edit</span>
+        </footer>
+      </article>
+      {{end}}
     </div>
-    {{end}}
-    {{template "excerpt" .Excerpt}}
-    <footer class="actions">
-      {{template "findingactions" (triagerow $f $c)}}
-      <details class="edit">
-        <summary class="button">Edit body</summary>
-        <form method="post" action="{{$c.StateURL}}" class="f-edit-form">
-          <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-          <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-          <input type="hidden" name="record" value="{{$c.RecordName}}">
-          <input type="hidden" name="id" value="{{$f.ID}}">
-          <input type="hidden" name="action" value="edit">
-          <textarea name="body" rows="6">{{$f.Body}}</textarea>
-          <button type="submit" class="button primary">Save</button>
-        </form>
-      </details>
-    </footer>
-  </article>
+  </div>
   {{end}}
 </section>
-
-{{if $c.Items}}
-<footer class="triage-bar" id="triage-bar">
-  <span class="counts">
-    <span class="count ok"><b id="count-accepted">{{$c.Accepted}}</b> accepted</span>
-    <span class="count danger"><b id="count-rejected">{{$c.Rejected}}</b> rejected</span>
-    <span class="count"><b id="count-pending">{{$c.Pending}}</b> pending</span>
-    {{if $c.Published}}<span class="count ok"><b id="count-published">{{$c.Published}}</b> published</span>{{end}}
-  </span>
-  <span class="spacer"></span>
-  <span class="subtle kbd-hint">press ? for keyboard shortcuts</span>
-  <form method="post" action="{{$c.StateURL}}" class="inline-form" id="accept-all-form">
-    <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-    <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-    <input type="hidden" name="record" value="{{$c.RecordName}}">
-    <input type="hidden" name="action" value="accept-all">
-    <button type="submit" class="button">{{template "icon" "check"}} Accept all pending</button>
-  </form>
-  <a class="button primary{{if not $c.Accepted}} disabled{{end}}" id="publish-button" href="{{$c.PublishURL}}">
-    Publish <b id="count-publish">{{$c.Accepted}}</b> accepted
-  </a>
-</footer>
-{{end}}
 {{end}}

@@ -1,105 +1,90 @@
 {{define "content"}}
 {{$c := .Content}}
-{{template "mrnav" (navargs $c.Nav $c.Detail.WebURL)}}
-<section class="panel">
-  <h2>Run AI review of {{$c.Detail.Ref}}</h2>
-  {{template "mrhead" $c.Detail}}
+<form method="post" action="{{$c.Nav.ReviewURL}}" class="review-options">
+  <input type="hidden" name="project" value="{{$c.Nav.Project}}">
+  <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
 
-  <form method="post" action="{{$c.Nav.ReviewURL}}" class="review-options">
-    <input type="hidden" name="project" value="{{$c.Nav.Project}}">
-    <input type="hidden" name="iid" value="{{$c.Nav.IID}}">
-
-    <div class="setting">
-      <span class="setting-label">Agents</span>
-      <div class="agent-select">
-      <fieldset>
-        {{range $c.AgentOptions}}
-        <label title="{{.Description}}">
-          <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
-          {{.Name}}{{if .Source}} <span class="badge">{{.Source}}</span>{{end}}
-          <select name="model:{{.Name}}" class="agent-model" title="model for {{.Name}}">
-            {{range .Models}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-          </select>
-        </label>
-        {{end}}
-      </fieldset>
-      </div>
-      {{range $c.AgentWarnings}}<p class="warning">{{template "icon" "warn"}} {{.}}</p>{{end}}
-    </div>
-
-    {{if $c.PrevReviewHead}}
-    <div class="setting">
-      <label class="setting-check" title="A stored review exists at {{printf "%.8s" $c.PrevReviewHead}}. By default only the changes pushed since then are reviewed and the previous findings — with their accepted/rejected states — carry forward; tick to scan the entire diff again.">
-        <input type="checkbox" name="full" value="1"> full re-review
+  <section class="card">
+    <header class="card-head"><h2>Agents</h2><span class="muted">each checked agent reviews the change in its own pass</span></header>
+    {{range $c.AgentWarnings}}<div class="notice warn inset">{{template "icon" "warn"}}<div>{{.}}</div></div>{{end}}
+    <div class="agent-select">
+      {{range $c.AgentOptions}}
+      <label class="agent-row" title="{{.Description}}">
+        <input type="checkbox" name="agents" value="{{.Name}}"{{if .Checked}} checked{{end}}>
+        <span class="agent-text"><span class="agent-name">{{.Name}}{{if .Source}} <span class="pill neutral">{{.Source}}</span>{{end}}</span>{{if .Description}}<span class="agent-desc">{{.Description}}</span>{{end}}</span>
+        <select name="model:{{.Name}}" class="agent-model" title="model for {{.Name}}" aria-label="model for {{.Name}}">
+          {{range .Models}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
       </label>
-      <span class="help">by default only changes since the last reviewed commit ({{printf "%.8s" $c.PrevReviewHead}}) are reviewed</span>
+      {{end}}
     </div>
-    {{end}}
+  </section>
 
-    <div class="setting">
-      <label class="setting-label" for="run_model">Model</label>
-      <select name="run_model" id="run_model">
-        {{range $c.RunModels}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
-      </select>
-      <span class="help">default model for every agent in this run; per-agent picks above still win</span>
-    </div>
-
-    <div class="setting">
-      <label class="setting-label" for="concurrency">Agent concurrency</label>
-      <input type="number" name="concurrency" id="concurrency" min="1" step="1" value="{{$c.Concurrency}}">
-      <span class="help">how many agent passes run at once</span>
-    </div>
-
-    <div class="setting">
-      <label class="setting-label" for="budget">Max budget (USD)</label>
-      <input type="number" name="budget" id="budget" min="0" step="any" value="{{$c.Budget}}">
-      <span class="help">total for the run, split evenly across agent passes; 0 = unlimited</span>
-    </div>
-
-    <div class="setting">
-      <label class="setting-label" for="instructions">Extra instructions</label>
-      <textarea name="instructions" id="instructions" rows="4">{{$c.Instructions}}</textarea>
-      <span class="help">appended to the review prompt; remembered for this project</span>
-    </div>
-
-    {{if $c.DomainOptions}}
-    <div class="setting">
-      <span class="setting-label">Allowed web domains</span>
-      <div class="agent-select">
-      <fieldset>
-        {{range $c.DomainOptions}}
-        <label>
-          <input type="checkbox" name="domains" value="{{.Name}}"{{if .Checked}} checked{{end}}>
-          {{.Name}}
+  <section class="card">
+    <header class="card-head"><h2>Run settings</h2><span class="muted">remembered for this project; cleared fields use the configured defaults</span></header>
+    <div class="card-body settings-grid">
+      {{if $c.PrevReviewHead}}
+      <div class="setting wide">
+        <label class="setting-check" title="A stored review exists at {{printf "%.8s" $c.PrevReviewHead}}. By default only the changes pushed since then are reviewed and the previous findings, with their accepted/rejected states, carry forward; tick to scan the entire diff again.">
+          <input type="checkbox" name="full" value="1"> <span class="setting-label">Full re-review</span>
         </label>
-        {{end}}
-      </fieldset>
+        <span class="help">By default only changes since the last reviewed commit (<code>{{printf "%.8s" $c.PrevReviewHead}}</code>) are reviewed.</span>
       </div>
-      <span class="help">grants WebFetch scoped to these domains only, for this run; none checked = no web access</span>
-    </div>
-    {{end}}
-
-    {{if $c.CommandOptions}}
-    <div class="setting">
-      <span class="setting-label">Allowed bash commands</span>
-      <div class="agent-select">
-      <fieldset>
-        {{range $c.CommandOptions}}
-        <label>
-          <input type="checkbox" name="commands" value="{{.Name}}"{{if .Checked}} checked{{end}}>
-          <code>{{.Name}}</code>
-        </label>
-        {{end}}
-      </fieldset>
+      {{end}}
+      <div class="setting">
+        <label class="setting-label" for="run_model">Model</label>
+        <select name="run_model" id="run_model">
+          {{range $c.RunModels}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+        </select>
+        <span class="help">Default model for every agent in this run; per-agent picks above still win.</span>
       </div>
-      <span class="help">grants Bash scoped to these command patterns only, for this run; none checked = no shell access</span>
+      <div class="setting">
+        <label class="setting-label" for="concurrency">Agent concurrency</label>
+        <input type="number" name="concurrency" id="concurrency" min="1" step="1" value="{{$c.Concurrency}}">
+        <span class="help">How many agent passes run at once.</span>
+      </div>
+      <div class="setting">
+        <label class="setting-label" for="budget">Max budget (USD)</label>
+        <input type="number" name="budget" id="budget" min="0" step="any" value="{{$c.Budget}}">
+        <span class="help">Total for the run, split evenly across agent passes; 0 means unlimited.</span>
+      </div>
+      <div class="setting wide">
+        <label class="setting-label" for="instructions">Extra instructions</label>
+        <textarea name="instructions" id="instructions" rows="4" placeholder="e.g. focus on error handling in the payments package">{{$c.Instructions}}</textarea>
+        <span class="help">Appended to the review prompt.</span>
+      </div>
     </div>
-    {{end}}
+  </section>
 
-    <div class="actions">
-      <button type="submit" class="button primary review">{{template "icon" "play"}} Run AI review</button>
-      <a class="button" href="{{$c.Nav.DetailURL}}">Cancel</a>
+  {{if or $c.DomainOptions $c.CommandOptions}}
+  <section class="card">
+    <header class="card-head"><h2>Permissions</h2><span class="muted">nothing is granted unless ticked, for this run only</span></header>
+    <div class="card-body settings-grid">
+      {{if $c.DomainOptions}}
+      <div class="setting">
+        <span class="setting-label">{{template "icon" "globe"}} Allowed web domains</span>
+        <div class="check-list">
+          {{range $c.DomainOptions}}<label><input type="checkbox" name="domains" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Name}}</label>{{end}}
+        </div>
+        <span class="help">Grants WebFetch scoped to these domains; none ticked means no web access.</span>
+      </div>
+      {{end}}
+      {{if $c.CommandOptions}}
+      <div class="setting">
+        <span class="setting-label">{{template "icon" "terminal"}} Allowed bash commands</span>
+        <div class="check-list">
+          {{range $c.CommandOptions}}<label><input type="checkbox" name="commands" value="{{.Name}}"{{if .Checked}} checked{{end}}> <code>{{.Name}}</code></label>{{end}}
+        </div>
+        <span class="help">Grants Bash scoped to these command patterns; none ticked means no shell access.</span>
+      </div>
+      {{end}}
     </div>
-  </form>
-</section>
+  </section>
+  {{end}}
+
+  <div class="actionbar">
+    <button type="submit" class="btn btn-go">{{template "icon" "play"}} Run AI review</button>
+    <a class="btn btn-ghost" href="{{$c.Nav.DetailURL}}">Cancel</a>
+  </div>
+</form>
 {{end}}
