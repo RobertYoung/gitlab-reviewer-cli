@@ -64,6 +64,7 @@ func newReviewCmd(st *state) *cobra.Command {
 	cmd.Flags().StringVar(&publishMode, "publish", "none", "publish findings to the MR: none|draft|immediate")
 	cmd.Flags().StringVar(&output, "output", "text", "result format on stdout: text|json")
 	cmd.Flags().BoolVar(&full, "full", false, "review the whole diff even when a stored review allows an incremental run")
+	addStoredReviewCmds(cmd, st)
 	return cmd
 }
 

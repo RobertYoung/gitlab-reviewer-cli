@@ -133,30 +133,9 @@ func scopeLabel(projects, groups []string) string {
 // mrReviewedInfo decorates a listed MR that has stored reviews: how the
 // latest one went, linking to the past-reviews page.
 type mrReviewedInfo struct {
-	Findings  int
-	Accepted  int // accepted, including those already posted
-	Pending   int
-	Published int
-	When      time.Time
-	URL       string // past reviews of this MR
-}
-
-// Stage names where the latest review stands, for the MR list's AI review
-// column: triage while findings are pending, publish while accepted ones
-// wait to be posted, then published (or clean when nothing was found).
-func (i mrReviewedInfo) Stage() string {
-	switch {
-	case i.Findings == 0:
-		return "clean"
-	case i.Pending > 0:
-		return "triage"
-	case i.Accepted > i.Published:
-		return "publish"
-	case i.Published > 0:
-		return "published"
-	default:
-		return "triaged"
-	}
+	resultstore.Counts
+	When time.Time
+	URL  string // past reviews of this MR
 }
 
 // handleMRList lists merge requests with the same filters as the TUI list.
@@ -223,14 +202,7 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 	content.MRs = mrs
 	// Decorate MRs that already have a stored review: one scan of the local
 	// result store, keyed by MR ref (entries come back newest first).
-	latest := map[string]resultstore.Entry{}
-	if entries, err := d.Results.List(""); err == nil {
-		for _, e := range entries {
-			if _, ok := latest[e.Ref]; !ok {
-				latest[e.Ref] = e
-			}
-		}
-	}
+	latest, _ := d.Results.LatestByRef()
 	content.Reviewed = make([]*mrReviewedInfo, len(mrs))
 	for i, m := range mrs {
 		e, ok := latest[m.Ref()]
@@ -238,12 +210,9 @@ func (s *Server) handleMRList(w http.ResponseWriter, r *http.Request, d *Deps) {
 			continue
 		}
 		content.Reviewed[i] = &mrReviewedInfo{
-			Findings:  e.Findings,
-			Accepted:  e.Accepted,
-			Pending:   e.Pending,
-			Published: e.Published,
-			When:      e.Started,
-			URL:       mrURL(inst, "/mr/history", m.ProjectPath, m.IID, nil),
+			Counts: e.Counts,
+			When:   e.Started,
+			URL:    mrURL(inst, "/mr/history", m.ProjectPath, m.IID, nil),
 		}
 	}
 	if page > 1 {
@@ -300,16 +269,7 @@ func (s *Server) handleMRStatus(w http.ResponseWriter, r *http.Request, d *Deps)
 		}
 	}
 	if discErr == nil {
-		var threads, unresolved int
-		for _, disc := range discussions {
-			if !disc.Resolvable() {
-				continue
-			}
-			threads++
-			if disc.Unresolved() {
-				unresolved++
-			}
-		}
+		threads, unresolved := gitlabx.CountThreads(discussions)
 		out["threads"] = threads
 		out["unresolved"] = unresolved
 	}
@@ -736,14 +696,9 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request, d *Deps) 
 	if r.FormValue("action") == "unapprove" {
 		err = d.Svc.Unapprove(r.Context(), parseProject(project), iid)
 	} else {
-		if gate := d.cfgFor(project).Gate; gate.Enabled() && gate.Approvals == "block" {
-			ref := fmt.Sprintf("%s!%d", project, iid)
-			if n, gerr := d.Results.LatestBlocking(ref, review.Severity(gate.MinSeverity)); gerr == nil && n > 0 {
-				s.renderError(w, http.StatusConflict, fmt.Errorf(
-					"approval blocked: %d finding(s) at or above %s in the last review (gate.approvals: block)", n, gate.MinSeverity,
-				))
-				return
-			}
+		if gerr := d.Results.CheckApproval(d.cfgFor(project).Gate, fmt.Sprintf("%s!%d", project, iid)); gerr != nil {
+			s.renderError(w, http.StatusConflict, gerr)
+			return
 		}
 		err = d.Svc.Approve(r.Context(), parseProject(project), iid, r.FormValue("sha"))
 	}

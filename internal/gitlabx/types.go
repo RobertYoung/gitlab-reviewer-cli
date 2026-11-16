@@ -226,6 +226,21 @@ func (d Discussion) Resolvable() bool {
 	return false
 }
 
+// CountThreads counts the resolvable threads among discussions and how
+// many of them are still unresolved.
+func CountThreads(discussions []Discussion) (threads, unresolved int) {
+	for _, d := range discussions {
+		if !d.Resolvable() {
+			continue
+		}
+		threads++
+		if d.Unresolved() {
+			unresolved++
+		}
+	}
+	return threads, unresolved
+}
+
 // Anchor returns the diff position of the discussion's first positioned
 // note, or nil for general (unanchored) threads.
 func (d Discussion) Anchor() *Position {

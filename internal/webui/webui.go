@@ -18,9 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"path"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -378,8 +376,5 @@ func mrQuery(r *http.Request) (project string, iid int64, err error) {
 // safeStoreFile validates a user-supplied record/log reference: it must be
 // a bare well-known file name, resolved inside the reviews directory.
 func (s *Server) safeStoreFile(name, ext string) (string, error) {
-	if name == "" || name != path.Base(name) || !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, ext) {
-		return "", fmt.Errorf("invalid file reference %q", name)
-	}
-	return path.Join(s.opts.ReviewsDir, name), nil
+	return resultstore.SafeFile(s.opts.ReviewsDir, name, ext)
 }

@@ -6,7 +6,7 @@ through the same pipeline, results land in the same stores, and a review
 started in one frontend can be reopened in the other. (The non-interactive
 `gitlab-reviewer review` command drives the same pipeline too — see
 [Headless mode](wiki/Headless-Mode.md) — but as a one-shot command it has
-no screens to track here.) This page tracks
+no screens to track here. Its `mr` and `review` subcommands cover the same list, inspect, triage, publish, submit, and approve steps for agents; see the [CLI Reference](wiki/CLI-Reference.md).) This page tracks
 which user-facing features each frontend offers. Anything marked missing
 on one side is a parity gap; anything marked n/a only makes sense in the
 other modality (keyboard-driven vs browser-native).

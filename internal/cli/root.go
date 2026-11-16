@@ -156,7 +156,7 @@ func newRoot(st *state) *cobra.Command {
 		return st.loaded.Config.ModelOptions(), cobra.ShellCompDirectiveNoFileComp
 	})
 
-	root.AddCommand(newVersionCmd(), newModelsCmd(st), newConfigCmd(st), newCacheCmd(st), newGUICmd(st), newReviewCmd(st))
+	root.AddCommand(newVersionCmd(), newModelsCmd(st), newConfigCmd(st), newCacheCmd(st), newGUICmd(st), newReviewCmd(st), newMRCmd(st))
 	return root
 }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/gitlabx"
@@ -204,4 +205,44 @@ func (p *Publisher) blobURL(f review.Finding) string {
 		url += fmt.Sprintf("#L%d", *f.Line.NewLine)
 	}
 	return url
+}
+
+// Result is the outcome of publishing one finding.
+type Result struct {
+	Finding review.Finding
+	State   review.FindingState
+	Err     error
+}
+
+// PublishAll posts findings one at a time, each with its own timeout, and
+// returns every outcome in order. Sequential on purpose: GitLab rate limits
+// are unkind to bursts.
+func (p *Publisher) PublishAll(ctx context.Context, findings []review.Finding) []Result {
+	results := make([]Result, 0, len(findings))
+	for _, f := range findings {
+		postCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		state, err := p.PublishOne(postCtx, f)
+		cancel()
+		results = append(results, Result{Finding: f, State: state, Err: err})
+	}
+	return results
+}
+
+// Tally counts publish outcomes: inline discussions, general notes (MR-level
+// comments and fallbacks), and failures.
+func Tally(results []Result) (inline, notes, failed int) {
+	for _, r := range results {
+		if r.Err != nil {
+			failed++
+		}
+		switch {
+		case r.State == review.StatePublished && r.Finding.File == "":
+			notes++
+		case r.State == review.StatePublished:
+			inline++
+		case r.State == review.StateFellBack:
+			notes++
+		}
+	}
+	return inline, notes, failed
 }

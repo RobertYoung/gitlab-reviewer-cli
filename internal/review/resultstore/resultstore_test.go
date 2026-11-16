@@ -1,12 +1,14 @@
 package resultstore
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 )
 
@@ -203,5 +205,129 @@ func TestNilStoreIsNoOp(t *testing.T) {
 	}
 	if entries, err := store.List(""); entries != nil || err != nil {
 		t.Errorf("entries=%v err=%v", entries, err)
+	}
+}
+
+func TestCountsStage(t *testing.T) {
+	for want, c := range map[string]Counts{
+		"clean":     {},
+		"triage":    {Findings: 3, Pending: 1, Accepted: 1},
+		"publish":   {Findings: 2, Accepted: 2, Published: 1},
+		"published": {Findings: 2, Accepted: 2, Published: 2},
+		"triaged":   {Findings: 2},
+	} {
+		if got := c.Stage(); got != want {
+			t.Errorf("%+v: stage %q, want %q", c, got, want)
+		}
+	}
+}
+
+func TestCountFindings(t *testing.T) {
+	got := CountFindings([]review.Finding{
+		{State: review.StateAccepted},
+		{State: review.StatePublished},
+		{State: review.StateFellBack},
+		{State: review.StatePending},
+		{State: review.StateRejected},
+		{State: review.StateBelowThreshold},
+	})
+	want := Counts{Findings: 6, Accepted: 3, Rejected: 1, Pending: 1, Published: 2}
+	if got != want {
+		t.Errorf("counts = %+v, want %+v", got, want)
+	}
+}
+
+func TestResolveRejectsTraversal(t *testing.T) {
+	dir := t.TempDir()
+	store := NewStore(dir)
+	for _, name := range []string{
+		"", "../review-1-1.json", "review-1-1.json/../../x.json", "/etc/review-1-1.json",
+		"sub/review-1-1.json", "review-1-1.log", "notes.json", "..",
+	} {
+		if p, err := store.Resolve(name); err == nil {
+			t.Errorf("Resolve(%q) = %q; want error", name, p)
+		}
+	}
+	got, err := store.Resolve("review-7-100.json")
+	if err != nil || got != filepath.Join(dir, "review-7-100.json") {
+		t.Errorf("Resolve = %q, %v", got, err)
+	}
+}
+
+func TestTriage(t *testing.T) {
+	fresh := func() Record {
+		return Record{Findings: []review.Finding{
+			{ID: "a", Body: "one", State: review.StatePending},
+			{ID: "b", Body: "two", State: review.StatePending},
+			{ID: "c", Body: "three", State: review.StateRejected},
+		}}
+	}
+	states := func(r Record) string {
+		var parts []string
+		for _, f := range r.Findings {
+			parts = append(parts, f.ID+"="+f.State.String())
+		}
+		return strings.Join(parts, ",")
+	}
+
+	tests := []struct {
+		action, id, body string
+		want             string
+		wantErr          bool
+	}{
+		{"accept", "a", "", "a=accepted,b=pending,c=rejected", false},
+		{"reject", "b", "", "a=pending,b=rejected,c=rejected", false},
+		{"accept", "c", "", "a=pending,b=pending,c=accepted", false},
+		{"accept-all", "", "", "a=accepted,b=accepted,c=rejected", false},
+		{"accept", "zzz", "", "a=pending,b=pending,c=rejected", true},
+		{"edit", "a", "   ", "a=pending,b=pending,c=rejected", true},
+		{"explode", "a", "", "a=pending,b=pending,c=rejected", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.action+" "+tt.id, func(t *testing.T) {
+			rec := fresh()
+			err := rec.Triage(tt.action, tt.id, tt.body)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if got := states(rec); got != tt.want {
+				t.Errorf("states = %s, want %s", got, tt.want)
+			}
+		})
+	}
+
+	rec := fresh()
+	if err := rec.Triage("edit", "b", "  new body \n"); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Findings[1].Body != "new body" || rec.Findings[1].State != review.StatePending {
+		t.Errorf("edited finding = %+v", rec.Findings[1])
+	}
+}
+
+func TestCheckApproval(t *testing.T) {
+	store := NewStore(t.TempDir())
+	rec := record(1, "a/b!1", time.Unix(100, 0))
+	rec.Findings = []review.Finding{{ID: "f1", Severity: review.SeverityMajor, State: review.StatePending, Body: "b"}}
+	if err := store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+
+	err := store.CheckApproval(config.Gate{MinSeverity: "major", Approvals: "block"}, "a/b!1")
+	var blocked *ApprovalBlockedError
+	if !errors.As(err, &blocked) || blocked.Blocking != 1 || blocked.MinSeverity != "major" {
+		t.Errorf("block mode: err = %v", err)
+	}
+	for _, gate := range []config.Gate{
+		{MinSeverity: "major", Approvals: "warn"},
+		{MinSeverity: "critical", Approvals: "block"},
+		{Approvals: "block"},
+	} {
+		if err := store.CheckApproval(gate, "a/b!1"); err != nil {
+			t.Errorf("gate %+v: err = %v; want nil", gate, err)
+		}
+	}
+	if err := store.CheckApproval(config.Gate{MinSeverity: "major", Approvals: "block"}, "x/y!2"); err != nil {
+		t.Errorf("unreviewed MR: err = %v", err)
 	}
 }
