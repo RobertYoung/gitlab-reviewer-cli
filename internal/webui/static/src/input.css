@@ -674,6 +674,15 @@ pre.prose { white-space: pre-wrap; word-break: break-word; font: inherit; color:
 .suggestion { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
 .suggestion-head { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-bottom: 1px solid var(--border); background: var(--surface); color: var(--muted); font-size: 12px; }
 .suggestion pre.prose.add { padding: 6px 10px; background: var(--add-bg); font: 12px/20px var(--mono); tab-size: 4; }
+.sources { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; }
+.sources > summary { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; background: var(--surface); color: var(--muted); font-size: 12px; cursor: pointer; }
+.sources .merge-note { padding: 8px 10px 0; color: var(--muted); font-size: 12px; }
+.source { padding: 8px 10px; border-top: 1px solid var(--border); }
+.source-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12px; }
+.source-head .stitle { color: var(--strong); font-weight: 600; }
+.source-head .sloc { color: var(--muted); font-family: var(--mono); }
+.source pre.prose { margin-top: 4px; font-size: 13px; }
+.source pre.prose.add { margin-top: 6px; padding: 4px 8px; background: var(--add-bg); font: 12px/20px var(--mono); tab-size: 4; }
 
 .summary-icon { display: inline-grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--purple-soft); color: var(--purple); }
 .summary { margin-bottom: 4px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); }

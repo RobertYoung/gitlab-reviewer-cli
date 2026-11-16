@@ -79,6 +79,7 @@ other modality (keyboard-driven vs browser-native).
 | Incremental re-review of the delta since the last reviewed head | ✅ | ✅ | Default when a stored review exists; previous findings carry forward with their curation states. Override: TUI `f` in the picker, GUI "full re-review" checkbox, CLI `--full` |
 | Agent selection before each scan | ✅ | ✅ | TUI: picker on `r`; GUI: checkboxes on the review form. Last selection remembered per project |
 | Custom review agents (user + repo `.md` definitions) | ✅ | ✅ | Shared catalog; repo > user > builtin on name collision |
+| Aggregate duplicate findings across agents and passes | ✅ | ✅ | Same runner; merged findings keep their contributing agents and original evidence (GUI: *Merged from N findings*, TUI: detail pane). `review.aggregate: false` uses the deterministic heuristic only |
 | Live progress log | ✅ | ✅ | GUI streams over server-sent events; lines prefixed per agent |
 | Per-agent progress chips (running / done / failed) | n/a | ✅ | GUI derives them from the log's per-agent lines; the TUI log carries the same prefixes |
 | Cancel a running review | ✅ | ✅ | |

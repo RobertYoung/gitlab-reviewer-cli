@@ -180,6 +180,7 @@ func addSettingFlags(root *cobra.Command) {
 	f.Float64("max-budget-usd", 0, "maximum spend per review in USD, shared across the selected agents")
 	f.StringSlice("agents", nil, "review agents to run (builtin: bug,security,performance,docs,style,design; plus custom agents by name)")
 	f.Int("agent-concurrency", 0, "how many agent passes run at once (default 3)")
+	f.Bool("aggregate", true, "merge duplicate findings across agents with the aggregation agent (--aggregate=false uses the deterministic heuristic)")
 	f.StringSlice("categories", nil, "finding categories to request (bug,security,performance,docs,style,design)")
 	_ = f.MarkDeprecated("categories", "use --agents; category names are builtin agent names")
 	f.String("instructions", "", "extra review instructions appended to the prompt")

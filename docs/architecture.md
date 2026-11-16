@@ -29,6 +29,8 @@ exists. The runner turns the selection into one reviewer invocation per
 agent per diff chunk, run under a concurrency cap, and stamps each finding
 with the agent that produced it.
 
+Once the passes finish, the runner consolidates duplicates in one place for every frontend: an aggregation agent (`review.Aggregator`, implemented by `claudecli` with no tools) groups the findings by underlying defect, and `internal/review/dedupe` validates the grouping, builds one canonical finding per group from a source anchor with the original findings kept in `Finding.Sources`, and protects curated findings carried forward by incremental reviews. Any aggregation failure falls back to the deterministic `dedupe.Findings` heuristic with a warning. See [ADR-0009](adr/0009-finding-aggregation-agent.md).
+
 ## Component diagram
 
 ```mermaid

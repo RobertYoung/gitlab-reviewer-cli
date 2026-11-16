@@ -79,8 +79,9 @@ func (b *Backend) Name() string { return "claude-cli" }
 
 // The backend serves both the review pipeline and MR conversations.
 var (
-	_ review.Reviewer = (*Backend)(nil)
-	_ review.Chatter  = (*Backend)(nil)
+	_ review.Reviewer   = (*Backend)(nil)
+	_ review.Chatter    = (*Backend)(nil)
+	_ review.Aggregator = (*Backend)(nil)
 )
 
 var versionRe = regexp.MustCompile(`(\d+)\.(\d+)\.(\d+)`)
@@ -259,6 +260,71 @@ func (b *Backend) Chat(ctx context.Context, req review.ChatRequest, onEvent func
 		SessionID: inv.final.SessionID,
 		CostUSD:   inv.final.TotalCostUSD,
 	}, nil
+}
+
+// Aggregate runs one aggregation call. The session gets no tools, no MCP
+// servers, and an empty scratch directory as its cwd, so finding text (which
+// is untrusted) cannot reach the repository, the network, or a shell.
+func (b *Backend) Aggregate(ctx context.Context, req review.AggregateRequest, onEvent func(review.Event)) (*review.AggregateReply, error) {
+	if onEvent == nil {
+		onEvent = func(review.Event) {}
+	}
+	dir, err := os.MkdirTemp("", "gitlab-reviewer-aggregate-")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+
+	inv, err := b.invoke(ctx, dir, b.buildAggregateArgs(req), review.BuildAggregatePrompt(req.Findings), onEvent, "aggregate")
+	if err != nil {
+		return nil, err
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	if inv.final == nil {
+		return nil, inv.noResult()
+	}
+	reply := &review.AggregateReply{CostUSD: inv.final.TotalCostUSD}
+	if inv.final.IsError {
+		return reply, fmt.Errorf("claude reported an error: %s%s", firstNonEmpty(inv.final.Result, inv.final.Error, inv.stderr), dumpSuffix(inv.dumpPath))
+	}
+	switch {
+	case len(inv.final.StructuredOutput) > 0 && string(inv.final.StructuredOutput) != "null":
+		reply.Output = inv.final.StructuredOutput
+	case extractFencedJSON(inv.final.Result) != "":
+		reply.Output = []byte(extractFencedJSON(inv.final.Result))
+	default:
+		reply.Output = []byte(strings.TrimSpace(inv.final.Result))
+	}
+	return reply, nil
+}
+
+// buildAggregateArgs assembles the aggregation invocation: every tool
+// denied (the structured output schema is the only way to answer), no MCP
+// configuration, and the backend's model and budget flags.
+func (b *Backend) buildAggregateArgs(req review.AggregateRequest) []string {
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--json-schema", review.AggregateSchema,
+		"--tools", "",
+		"--permission-mode", "dontAsk",
+		"--disallowedTools", "Bash,WebFetch,WebSearch,Read,Grep,Glob,Edit,Write,NotebookEdit,Task,Agent,SlashCommand,Skill",
+		"--strict-mcp-config",
+		"--append-system-prompt", review.AggregateSystemPrompt,
+	}
+	if b.Model != "" {
+		args = append(args, "--model", b.Model)
+	}
+	if req.MaxBudgetUSD > 0 {
+		args = append(args, "--max-budget-usd", strconv.FormatFloat(req.MaxBudgetUSD, 'f', -1, 64))
+	}
+	if b.Bare {
+		args = append(args, "--bare")
+	}
+	return args
 }
 
 // toolArgs returns the read-only tool grant shared by every session:

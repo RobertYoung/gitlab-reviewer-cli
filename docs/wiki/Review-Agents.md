@@ -74,13 +74,30 @@ agents cost roughly six times one combined pass. Large MRs are split into
 multiple chunks, multiplying further.
 
 - `review.max_budget_usd` is the **total** for the run, divided evenly
-  across the planned passes.
+  across the planned passes plus one slice for the aggregation phase (see below).
 - `review.timeout` (default `10m`) applies to **each** pass.
 - `review.agent_concurrency` (default 3) caps how many passes run at once.
 
 Trim the selection (e.g. `agents: [bug, security]`) if cost or latency
 matters more than coverage. A failed agent degrades to a warning while the
 others' findings survive; the run errors only when every pass fails.
+
+## Aggregating duplicate findings
+
+Independent agents often report the same defect in different words, sometimes on a nearby line or in a different category. After every pass finishes, the shared runner sends the complete set of findings to an **aggregation agent** that groups them by underlying defect, so the TUI, GUI and headless runs all curate and publish one finding per issue.
+
+- **Input.** Every finding goes in with a stable id, its agent, location, severity, category, title, body and suggestion. Findings carried forward by an incremental review are included so new duplicates of them are caught too. Manual comments are left out.
+- **Grouping.** The agent merges findings only when it is confident they describe the same defect. Distinct problems on the same line stay separate, and a group the agent marks as uncertain is split back into its members. A finding with no duplicate stays exactly as the reviewing agent wrote it.
+- **The merged finding.** Its location, category and suggestion come from one of the source findings (the anchor the agent picks), never from the model, and its severity is the highest any source reported. The title and body combine the sources' evidence. The original findings, the contributing agents and the agent's merge rationale stay attached for inspection: the GUI shows them under *Merged from N findings* on the finding, the TUI lists them in the detail pane, and they are stored with the review. When sources propose different fixes the merge note says so.
+- **Curation is preserved.** A finding carried forward from an earlier review (accepted, rejected, published, or edited by hand) is never rewritten: fresh duplicates are folded into it as sources and its state and wording stay put, so nothing is republished. When the agent thinks two already curated findings are duplicates, both stay as they are and a warning names them for you to resolve.
+- **Validation.** Every input id must land in exactly one group and every reference must exist. Missing, invented or doubly assigned ids reject the whole answer.
+- **Batching.** One call sees up to 150 findings. Larger sets are aggregated in batches (grouped by file), then the batches' results go through one more call so duplicates split across batches still meet. If more than 150 distinct findings remain after batching, the phase falls back as below.
+- **Budget and time.** With `review.max_budget_usd` set, the aggregation phase gets one slice of the total, alongside the passes, and never more than what the passes left unspent. It runs under `review.timeout` and its cost is added to the run's cost. Progress lines in the run log are prefixed `[aggregate]`.
+- **Fallback.** On a timeout, malformed or inconsistent output, a claude error, or insufficient budget, every source finding is kept and the deterministic deduplication runs instead (same file and line with at least 60% word overlap), with a warning on the review explaining why. Cancelling the run cancels aggregation too.
+
+The aggregation agent runs with no tools at all, no MCP servers, and an empty scratch directory as its working directory, so the finding text it reads (which comes from the merge request and is treated as untrusted) cannot reach the repository, the network or a shell. It never sees the GitLab token and cannot publish. It uses `review.model`.
+
+Set `review.aggregate: false` (or `--aggregate=false`) to skip the phase and use only the deterministic deduplication. Publishing still checks findings against comments already on the MR either way (see [Publishing](Publishing.md)).
 
 ## Bring your own agents
 
@@ -172,7 +189,7 @@ For the curious (details in
 the runner excludes `review.exclude` files, chunks the remaining diff to
 `review.max_diff_kb` per pass, and fans out one `claude` invocation per
 agent per chunk under the concurrency cap. Individual diffs too large to
-inline are written into the checkout as files for Claude to read. Results
-are merged without cross-agent deduplication — two agents can flag the
-same line, with the agent badge making provenance visible — and every
+inline are written into the checkout as files for Claude to read. Every
 finding is stamped with its agent by the tool, not the model.
+
+The results then go through [aggregation](#aggregating-duplicate-findings), which merges findings that report the same defect and keeps each contributing agent and its original evidence visible.

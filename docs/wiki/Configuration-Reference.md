@@ -89,10 +89,11 @@ unset is an **error**, not a silent fallback to the shared token.
 | `review.models` | `GITLAB_REVIEWER_REVIEW_MODELS` (comma-separated) | `--models` | curated per-provider list | suggestions offered by `gitlab-reviewer models` — see below |
 | `review.claude_path` | `GITLAB_REVIEWER_REVIEW_CLAUDE_PATH` | `--claude-path` | `claude` on `PATH` | |
 | `review.timeout` | `GITLAB_REVIEWER_REVIEW_TIMEOUT` | `--review-timeout` | `10m` | Go duration; **per review pass**, must be > 0 |
-| `review.max_budget_usd` | `GITLAB_REVIEWER_REVIEW_MAX_BUDGET_USD` | `--max-budget-usd` | unset | **total per run**, split evenly across passes |
+| `review.max_budget_usd` | `GITLAB_REVIEWER_REVIEW_MAX_BUDGET_USD` | `--max-budget-usd` | unset | **total per run**, split evenly across passes plus one slice for aggregation when `review.aggregate` is on |
 | `review.agents` | `GITLAB_REVIEWER_REVIEW_AGENTS` (comma-separated) | `--agents` | all built-ins | see [Review Agents](Review-Agents.md); unknown names fail the run |
 | `review.agent_models` | — (file only, map) | — | `{}` | model per agent (`security: opus`) — see [Review Agents](Review-Agents.md#per-agent-model) |
 | `review.agent_concurrency` | `GITLAB_REVIEWER_REVIEW_AGENT_CONCURRENCY` | `--agent-concurrency` | `3` | ≥ 1; how many passes run at once |
+| `review.aggregate` | `GITLAB_REVIEWER_REVIEW_AGGREGATE` | `--aggregate` | `true` | merge duplicate findings across agents and passes with the aggregation agent; `false` uses the deterministic same-line heuristic. See [Review Agents](Review-Agents.md#aggregating-duplicate-findings) |
 | `review.categories` | `GITLAB_REVIEWER_REVIEW_CATEGORIES` (comma-separated) | `--categories` | all six | **deprecated** alias — see below |
 | `review.instructions` | `GITLAB_REVIEWER_REVIEW_INSTRUCTIONS` | `--instructions` | `""` | appended to the review prompt |
 | `review.instructions_file` | `GITLAB_REVIEWER_REVIEW_INSTRUCTIONS_FILE` | `--instructions-file` | unset | contents appended too |
