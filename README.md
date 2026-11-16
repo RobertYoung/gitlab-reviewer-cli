@@ -165,6 +165,26 @@ gitlab-reviewer review submit mygroup/myapp!123
 
 See the [CLI reference](docs/wiki/CLI-Reference.md) for every command and its JSON output.
 
+## Claude Code plugin
+
+This repository is also a Claude Code plugin marketplace. Its `gitlab-reviewer` plugin adds a skill that teaches Claude to drive the CLI end to end: list and inspect MRs, run the review, triage the findings, publish the accepted ones, and approve.
+
+Inside Claude Code:
+
+```text
+/plugin marketplace add RobertYoung/gitlab-reviewer-cli
+/plugin install gitlab-reviewer@gitlab-reviewer-cli
+```
+
+Or from a shell:
+
+```sh
+claude plugin marketplace add RobertYoung/gitlab-reviewer-cli
+claude plugin install gitlab-reviewer@gitlab-reviewer-cli
+```
+
+On Claude Code 2.1.292 or later, `claude plugin install gitlab-reviewer --marketplace RobertYoung/gitlab-reviewer-cli` does both in one step. The plugin ships only the skill, not the binary: install `gitlab-reviewer` itself (see [Installation](#installation)) and make the `claude` CLI and a GitLab token available as usual. The skill keeps publishing, submitting, and approving behind the user's explicit say-so and runs `review` with the default `--publish none`.
+
 ## Configuration
 
 Every setting is available as a flag, an environment variable, and a key in

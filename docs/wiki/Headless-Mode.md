@@ -103,6 +103,26 @@ Triage only changes the stored record, exactly as in the TUI and GUI, and the re
 
 `mr approve` pins the approval to `--sha` (for example the `head_sha` from `mr show` or `review show` that the review covered) or, without it, to the MR's current head, so GitLab refuses the approval if new commits arrived. With `gate.approvals: block` it refuses to approve while the newest stored review still has blocking findings.
 
+### Claude Code plugin
+
+The repository doubles as a Claude Code plugin marketplace whose `gitlab-reviewer` plugin ships a skill describing this loop, so Claude can drive it for you.
+
+Inside Claude Code:
+
+```text
+/plugin marketplace add RobertYoung/gitlab-reviewer-cli
+/plugin install gitlab-reviewer@gitlab-reviewer-cli
+```
+
+Or from a shell:
+
+```sh
+claude plugin marketplace add RobertYoung/gitlab-reviewer-cli
+claude plugin install gitlab-reviewer@gitlab-reviewer-cli
+```
+
+On Claude Code 2.1.292 or later, `claude plugin install gitlab-reviewer --marketplace RobertYoung/gitlab-reviewer-cli` does both in one step. The plugin ships only the skill, not the binary: install `gitlab-reviewer` itself (see [Getting Started](Getting-Started.md)) and make the `claude` CLI and a GitLab token available as usual. The skill keeps publishing, submitting, and approving behind the user's explicit say-so and runs `review` with the default `--publish none`.
+
 ## Output and exit codes
 
 Progress (the same lines the TUI review screen shows) streams to

@@ -1,0 +1,15 @@
+{
+  "name": "gitlab-reviewer-cli",
+  "description": "Claude Code plugin for driving the gitlab-reviewer CLI to review GitLab merge requests.",
+  "owner": {
+    "name": "Robert Young",
+    "url": "https://github.com/RobertYoung"
+  },
+  "plugins": [
+    {
+      "name": "gitlab-reviewer",
+      "source": "./",
+      "description": "Teaches Claude to review GitLab merge requests with the gitlab-reviewer CLI: list and inspect MRs, run reviews, triage and publish findings, and approve."
+    }
+  ]
+}
