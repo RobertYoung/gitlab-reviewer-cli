@@ -1,0 +1,351 @@
+---
+import options from '../data/config-options.json';
+
+type Option = (typeof options)[number] & Partial<{ allowed: string[]; constraint: string; secret: boolean; deprecated: boolean; envFallback: string; envList: boolean; fileOnly: boolean; flagType: string }>;
+
+const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const inline = (s: string) => escape(s).replace(/`([^`]+)`/g, '<code>$1</code>');
+
+const sections = [...new Set(options.map((o) => o.section))];
+const bySection = sections.map((name) => ({ name, items: options.filter((o) => o.section === name) as Option[] }));
+const haystack = (o: Option) => [o.key, o.description, o.env, o.envFallback, o.flag && `--${o.flag}`, o.type, o.default, ...(o.allowed ?? [])].filter(Boolean).join(' ').toLowerCase();
+---
+
+<div class="cfg not-content">
+	<div class="cfg-bar" role="search">
+		<label class="cfg-search">
+			<span class="sr-only">Filter options</span>
+			<svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04a.75.75 0 1 1-1.06 1.06ZM11.5 7a4.5 4.5 0 1 0-9 0 4.5 4.5 0 0 0 9 0Z"></path></svg>
+			<input id="cfg-filter" type="search" placeholder="Filter by key, env var, flag or value" autocomplete="off" spellcheck="false" />
+		</label>
+		<output id="cfg-count" aria-live="polite">{options.length} options</output>
+	</div>
+	<div class="cfg-pills" role="group" aria-label="Section">
+		<button type="button" aria-pressed="true" data-section="">All</button>
+		{sections.map((s) => <button type="button" aria-pressed="false" data-section={s}>{s}</button>)}
+	</div>
+	<p id="cfg-empty" class="cfg-empty" hidden>No option matches that filter.</p>
+
+	{
+		bySection.map(({ name, items }) => (
+			<section class="cfg-section" data-section={name}>
+				<h2 id={name}>{name}</h2>
+				<ul>
+					{items.map((o) => (
+						<li class="cfg-opt" data-section={name} data-search={haystack(o)}>
+							<details id={o.key}>
+								<summary>
+									<span class="cfg-head">
+										<code class="cfg-key">{o.key}</code>
+										<span class="cfg-chips">
+											<span class="gr-chip">{o.type}</span>
+											{o.default && <span class="gr-chip cfg-default" title="Default">default: {o.default}</span>}
+											{o.allowed && <span class="gr-chip" title="Allowed values">one of: {o.allowed.join(" | ")}</span>}
+											{o.deprecated && <span class="gr-chip cfg-warn">deprecated</span>}
+											{o.secret && <span class="gr-chip cfg-warn">secret</span>}
+											{o.fileOnly && <span class="gr-chip">file only</span>}
+										</span>
+									</span>
+									<span class="cfg-desc" set:html={inline(o.description)} />
+								</summary>
+								<dl class="cfg-detail">
+									{o.allowed && (
+										<>
+											<dt>Allowed</dt>
+											<dd class="cfg-allowed">{o.allowed.map((v) => <code>{v}</code>)}</dd>
+										</>
+									)}
+									{o.constraint && (
+										<>
+											<dt>Constraint</dt>
+											<dd>{o.constraint}</dd>
+										</>
+									)}
+									<dt>Environment</dt>
+									<dd>
+										{o.env ? (
+											<>
+												<code>{o.env}</code>
+												{o.envList && ' (comma-separated)'}
+												{o.envFallback && (
+													<>
+														{', or '}
+														<code>{o.envFallback}</code>
+														{' when that is unset'}
+													</>
+												)}
+											</>
+										) : (
+											'none: set it in the settings file'
+										)}
+									</dd>
+									<dt>Flag</dt>
+									<dd>
+										{o.flag ? (
+											<>
+												<code>--{o.flag}</code>
+												{o.flagType && ` (${o.flagType})`}
+											</>
+										) : (
+											'none'
+										)}
+									</dd>
+									<dt>Link</dt>
+									<dd>
+										<a href={`#${o.key}`}>#{o.key}</a>
+									</dd>
+								</dl>
+							</details>
+						</li>
+					))}
+				</ul>
+			</section>
+		))
+	}
+</div>
+
+<script>
+	const input = document.querySelector<HTMLInputElement>('#cfg-filter')!;
+	const count = document.querySelector<HTMLOutputElement>('#cfg-count')!;
+	const empty = document.querySelector<HTMLElement>('#cfg-empty')!;
+	const pills = [...document.querySelectorAll<HTMLButtonElement>('.cfg-pills button')];
+	const rows = [...document.querySelectorAll<HTMLElement>('.cfg-opt')];
+	const sections = [...document.querySelectorAll<HTMLElement>('.cfg-section')];
+	let section = '';
+
+	function apply() {
+		const terms = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+		let shown = 0;
+		for (const row of rows) {
+			const match = (!section || row.dataset.section === section) && terms.every((t) => row.dataset.search!.includes(t));
+			row.hidden = !match;
+			if (match) shown++;
+		}
+		for (const s of sections) s.hidden = !s.querySelector('.cfg-opt:not([hidden])');
+		count.value = shown === rows.length ? `${rows.length} options` : `${shown} of ${rows.length} options`;
+		empty.hidden = shown > 0;
+	}
+
+	input.addEventListener('input', apply);
+	for (const pill of pills) {
+		pill.addEventListener('click', () => {
+			section = pill.dataset.section!;
+			for (const p of pills) p.setAttribute('aria-pressed', String(p === pill));
+			apply();
+		});
+	}
+
+	function openFromHash() {
+		const id = decodeURIComponent(location.hash.slice(1));
+		const target = id && document.getElementById(id);
+		if (target instanceof HTMLDetailsElement) {
+			target.open = true;
+			target.scrollIntoView();
+		}
+	}
+	window.addEventListener('hashchange', openFromHash);
+	openFromHash();
+</script>
+
+<style>
+	.cfg {
+		margin-top: 1.5rem;
+	}
+	.cfg-bar {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem;
+	}
+	.cfg-search {
+		flex: 1 1 18rem;
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0 0.75rem;
+		border: 1px solid var(--gr-border);
+		border-radius: 8px;
+		background: var(--gr-surface);
+		color: var(--gr-muted);
+	}
+	.cfg-search:focus-within {
+		border-color: var(--gr-primary-emph);
+		box-shadow: 0 0 0 3px var(--gr-primary-soft);
+	}
+	.cfg-search input {
+		flex: 1;
+		min-width: 0;
+		padding: 0.6rem 0;
+		border: 0;
+		background: none;
+		color: var(--gr-strong);
+		font: inherit;
+		font-size: var(--sl-text-sm);
+		outline: none;
+	}
+	.cfg-search input::placeholder {
+		color: var(--gr-muted);
+	}
+	#cfg-count {
+		color: var(--gr-muted);
+		font-size: var(--sl-text-sm);
+		font-variant-numeric: tabular-nums;
+	}
+	.cfg-pills {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+		margin-top: 0.75rem;
+	}
+	.cfg-pills button {
+		padding: 0.25rem 0.75rem;
+		border: 1px solid var(--gr-border);
+		border-radius: 999px;
+		background: var(--gr-bg);
+		color: var(--gr-text);
+		font: 500 var(--sl-text-xs) / 1.5 var(--gr-font);
+		cursor: pointer;
+	}
+	.cfg-pills button:hover {
+		border-color: var(--gr-muted);
+	}
+	.cfg-pills button[aria-pressed='true'] {
+		border-color: var(--gr-primary-emph);
+		background: var(--gr-primary-soft);
+		color: var(--gr-primary);
+	}
+	.cfg-empty {
+		margin-top: 1.5rem;
+		color: var(--gr-muted);
+	}
+	.cfg-section h2 {
+		margin: 2rem 0 0.5rem;
+		font-family: var(--gr-mono);
+		font-size: var(--sl-text-lg);
+		color: var(--gr-strong);
+		scroll-margin-top: calc(var(--sl-nav-height) + 1rem);
+	}
+	.cfg-section ul {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		border: 1px solid var(--gr-border);
+		border-radius: 8px;
+		overflow: hidden;
+	}
+	.cfg-opt + .cfg-opt {
+		border-top: 1px solid var(--gr-border);
+	}
+	.cfg-opt details {
+		scroll-margin-top: calc(var(--sl-nav-height) + 1rem);
+	}
+	.cfg-opt summary {
+		display: grid;
+		gap: 0.25rem;
+		padding: 0.75rem 1rem;
+		cursor: pointer;
+		list-style: none;
+	}
+	.cfg-opt summary::-webkit-details-marker {
+		display: none;
+	}
+	.cfg-opt summary:hover,
+	.cfg-opt details[open] summary {
+		background: var(--gr-surface);
+	}
+	.cfg-opt summary:focus-visible {
+		outline-offset: -2px;
+	}
+	.cfg-head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.375rem 0.75rem;
+	}
+	.cfg-key {
+		color: var(--gr-primary);
+		font: 600 var(--sl-text-sm) / 1.5 var(--gr-mono);
+		overflow-wrap: anywhere;
+	}
+	.cfg-key::before {
+		content: '';
+		display: inline-block;
+		width: 0.4em;
+		height: 0.4em;
+		margin: 0 0.5em 0.15em 0;
+		border-right: 1.5px solid var(--gr-muted);
+		border-bottom: 1.5px solid var(--gr-muted);
+		transform: rotate(-45deg);
+		transition: transform 0.15s;
+	}
+	details[open] .cfg-key::before {
+		transform: rotate(45deg);
+	}
+	.cfg-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+		min-width: 0;
+	}
+	.cfg-chips .gr-chip {
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.cfg-default {
+		max-width: 28rem;
+	}
+	.cfg-warn {
+		border-color: transparent;
+		background: var(--gr-warning-soft);
+		color: var(--gr-warning);
+	}
+	.cfg-desc {
+		color: var(--gr-text);
+		font-size: var(--sl-text-sm);
+		line-height: 1.6;
+	}
+	.cfg-desc :global(code),
+	.cfg-detail code {
+		padding: 0.1em 0.35em;
+		border-radius: 4px;
+		background: var(--gr-neutral);
+		color: var(--gr-strong);
+		font: 0.875em var(--gr-mono);
+		overflow-wrap: anywhere;
+	}
+	.cfg-detail {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 0.375rem 1rem;
+		margin: 0;
+		padding: 0.25rem 1rem 1rem 2rem;
+		background: var(--gr-surface);
+		font-size: var(--sl-text-sm);
+	}
+	.cfg-detail dt {
+		color: var(--gr-muted);
+	}
+	.cfg-detail dd {
+		margin: 0;
+		color: var(--gr-text);
+		min-width: 0;
+	}
+	.cfg-allowed {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.375rem;
+	}
+	.cfg-detail a {
+		color: var(--gr-primary);
+	}
+	@media (max-width: 40rem) {
+		.cfg-detail {
+			grid-template-columns: 1fr;
+			padding-left: 1rem;
+		}
+		.cfg-detail dd + dt {
+			margin-top: 0.375rem;
+		}
+	}
+</style>

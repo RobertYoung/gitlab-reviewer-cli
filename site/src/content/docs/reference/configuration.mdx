@@ -1,0 +1,98 @@
+---
+title: Configuration reference
+description: Every gitlab-reviewer setting with its type, default, allowed values, environment variable and flag, generated from the Go config code.
+tableOfContents:
+  maxHeadingLevel: 2
+---
+
+import ConfigReference from '../../../components/ConfigReference.astro';
+
+Every setting can be set three ways. When more than one is set, the first wins:
+
+1. **Flag** on the root command or any subcommand, such as `--review-timeout 20m`.
+2. **Environment variable**: `GITLAB_REVIEWER_` plus the key in upper case with dots as underscores, so `gitlab.base_url` is `GITLAB_REVIEWER_GITLAB_BASE_URL`. List settings take comma-separated values.
+3. **Settings file**: `${XDG_CONFIG_HOME:-~/.config}/gitlab-reviewer/config.yaml`, or the path given with `--config`.
+4. **Default**, shown on each option below.
+
+```sh
+gitlab-reviewer config show       # effective configuration, secrets redacted
+gitlab-reviewer config validate   # completeness and consistency checks
+```
+
+Some settings are **file only**: they have no environment variable or flag, usually because they are a trust decision (`review.mcp_servers`, `review.claude_plugins`, `review.allowed_domains`, `review.allowed_commands`) or structured (`gitlab.instances`, `review.agent_models`). `GITLAB_TOKEN`, `AWS_REGION` and `AWS_PROFILE` are honoured as fallbacks only when the prefixed variable is unset.
+
+## Options
+
+The option list is generated from the Go config code by `go generate ./...`, and a test fails the build if it drifts from the real flags, defaults and validation. Select an option for its environment variable and flag.
+
+<ConfigReference />
+
+## Multiple GitLab instances
+
+If you work across more than one GitLab (say a self-hosted instance and gitlab.com), define named instances instead of editing `gitlab.base_url` and `gitlab.token` by hand:
+
+```yaml
+gitlab:
+  instances:
+    - name: work
+      base_url: https://gitlab.example.com
+      token_env: WORK_GITLAB_TOKEN   # read the token from this env var
+    - name: staging
+      base_url: https://gitlab.staging.example.com
+      token: glpat-staging...        # or put the token in the file
+    - name: personal
+      base_url: https://gitlab.com
+      # token omitted: falls back to gitlab.token / GITLAB_REVIEWER_GITLAB_TOKEN
+  default_instance: work   # optional: skip the picker
+```
+
+| Field | Required | Meaning |
+|---|---|---|
+| `name` | yes | unique identifier, used by `--instance` and the pickers |
+| `base_url` | yes | valid URL of the instance |
+| `token` | no | token in the file |
+| `token_env` | no | *name* of an environment variable holding the token; consulted only when `token` is empty |
+
+One instance is selected at startup and its `base_url` and token replace the top-level `gitlab` settings. Selection order: the `--instance` flag, then `gitlab.default_instance`, then automatic when only one is configured, then an interactive picker. Non-interactive runs with several instances must name one, or they fail. In headless mode a merge request URL selects the instance whose host matches.
+
+Each instance takes its token from `token` in the file, then the environment variable named by `token_env`, then `gitlab.token` and its fallbacks. `token_env` keeps per-instance secrets out of the settings file, and the variable only has to be set where that instance is selected. Selecting an instance whose variable is unset is an **error**, not a silent fallback to the shared token.
+
+## Review notes
+
+- **`review.models`** feeds `gitlab-reviewer models`, shell completion of `--model`, and the per-agent model chooser in the pickers. When unset, a curated list for the selected provider is offered: aliases such as `opus`, `sonnet` and `haiku` plus full IDs for `anthropic`, and cross-region inference-profile IDs for `bedrock`. It is a list of suggestions, not validation: `review.model` accepts any model ID the claude CLI understands.
+- **`review.instructions`** and the contents of `review.instructions_file` are appended to the built-in review prompt. Use them for team conventions; [Recipes](/gitlab-reviewer-cli/recipes/) has examples.
+- **`review.bare`** runs claude with `--bare` for deterministic runs (no user hooks or CLAUDE.md), but `--bare` skips OAuth and keychain auth. Leave it off if you sign in with a Claude subscription rather than an API key.
+- **`review.use_agents`** lets the reviewer delegate to your Claude Code subagents. The review stays read-only either way, and subagents multiply token usage, so pair it with `review.max_budget_usd`. It is unrelated to `review.agents`, which selects the [review agents](/gitlab-reviewer-cli/review-agents/) that run.
+- **Cost model**: each selected agent is one `claude` invocation per diff chunk, so six agents cost roughly six times one combined pass. `review.max_budget_usd` is divided evenly across the planned passes, and `review.timeout` applies to each pass.
+- **`review.categories`** is a deprecated alias for `review.agents` from before reviews were agent-based. When `review.agents` is unset it is filled from `review.categories`, which is what makes all built-in agents the effective default. Use `review.agents`.
+- **`review.exclude`**: setting it **replaces** the default list, so re-include the defaults you still want.
+
+## Bedrock and provider environment
+
+With `review.provider: bedrock` the tool sets `CLAUDE_CODE_USE_BEDROCK=1` on the `claude` subprocess and passes through ambient AWS credentials: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_CONFIG_FILE`, `AWS_SHARED_CREDENTIALS_FILE`, `AWS_BEARER_TOKEN_BEDROCK` and `AWS_DEFAULT_REGION`. With the default `anthropic` provider, `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` pass through instead. Proxy, locale and CA variables pass through in both cases; anything else goes in `review.env`. See [Recipes: Bedrock](/gitlab-reviewer-cli/recipes/#reviewing-via-aws-bedrock).
+
+## Per-project overrides
+
+The `review`, `checkout`, `publish` and `gate` sections, and only those, can be overridden per project in the settings file, keyed by the full project path:
+
+```yaml
+review:
+  max_diff_kb: 256
+projects:
+  mygroup/myapp:
+    review:
+      instructions: "This service is latency-critical; flag every allocation in the hot path."
+      agents: [bug, security, performance]
+    publish:
+      mode: immediate
+```
+
+Per-project `review.mcp_servers` and `review.env` work too. `gitlab.*`, `ui.*` and `log.*` cannot be overridden per project.
+
+## Secrets
+
+Treat the GitLab token as a secret and pass it through `GITLAB_REVIEWER_GITLAB_TOKEN`, `GITLAB_TOKEN` or a per-instance `token_env` rather than a flag: flags are visible in `ps` and shell history. The token, including every per-instance token, is never logged and is redacted from error messages and `config show`, as are MCP remote-server `headers`. It is handed to git through an in-memory credential helper, so it never lands in `.git/config` or process arguments, and it is **never** passed to the `claude` subprocess: `GITLAB*` keys are stripped from `review.env` and rejected in MCP server definitions. See the [security model](/gitlab-reviewer-cli/security-model/).
+
+## Review artifacts
+
+Review artifacts are stored apart from the log, under `${XDG_STATE_HOME:-~/.local/state}/gitlab-reviewer/reviews/`: raw review transcripts (`.jsonl`), per-run progress logs (`.log`), and review results (`.json`, the findings with their curation states). Both frontends browse them from the past-reviews screen.

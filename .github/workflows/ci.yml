@@ -53,6 +53,37 @@ jobs:
       - name: Run tests
         run: go test -race -coverprofile=coverage.out ./...
 
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Harden the runner (audit all outbound calls)
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate docs reference data
+        run: go generate ./...
+
+      - name: Fail if generated files are stale
+        run: |
+          git diff --exit-code
+          untracked=$(git status --porcelain --untracked-files=all)
+          if [ -n "$untracked" ]; then
+            echo "go generate produced files that are not committed:"
+            echo "$untracked"
+            exit 1
+          fi
+
   build:
     runs-on: ubuntu-latest
     strategy:

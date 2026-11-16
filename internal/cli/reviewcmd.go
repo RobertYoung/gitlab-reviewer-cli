@@ -42,7 +42,7 @@ func newReviewCmd(st *state) *cobra.Command {
 			"result (reopenable later in the TUI or GUI), and optionally publishes\n" +
 			"the findings. Progress streams to stderr; the outcome is written to\n" +
 			"stdout as text or JSON. The merge request is named as project!iid\n" +
-			"(e.g. mygroup/myapp!123 — in GitLab CI that is\n" +
+			"(e.g. mygroup/myapp!123; in GitLab CI that is\n" +
 			"\"$CI_PROJECT_PATH!$CI_MERGE_REQUEST_IID\") or as its web URL, whose\n" +
 			"host also selects the matching gitlab.instances entry.\n\n" +
 			"By default nothing is posted to GitLab (--publish none): findings are\n" +
@@ -51,8 +51,8 @@ func newReviewCmd(st *state) *cobra.Command {
 			"publishes it in one action.\n\n" +
 			"When the MR already has a stored review, the run is incremental: only\n" +
 			"the changes pushed since the last reviewed commit go through the review\n" +
-			"passes, and the previous findings — including their accepted, rejected,\n" +
-			"and published states — carry forward (findings whose code changed are\n" +
+			"passes, and the previous findings, including their accepted, rejected,\n" +
+			"and published states, carry forward (findings whose code changed are\n" +
 			"dropped). It falls back to a full review after a rebase or when the\n" +
 			"last reviewed commit is unreachable. Pass --full to scan the entire\n" +
 			"diff again regardless.",

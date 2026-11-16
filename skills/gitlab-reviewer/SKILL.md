@@ -11,7 +11,7 @@ description: Drive the gitlab-reviewer CLI to review GitLab merge requests headl
 
 Check these before anything else and stop with a clear message if one is missing:
 
-- The `gitlab-reviewer` binary on `PATH` (`gitlab-reviewer version`). This plugin does not ship it. Install a prebuilt binary from https://github.com/RobertYoung/gitlab-reviewer-cli/releases or run `go install github.com/RobertYoung/gitlab-reviewer-cli/cmd/gitlab-reviewer@latest` (see the README's Installation section). Ask the user before installing anything.
+- The `gitlab-reviewer` binary on `PATH` (`gitlab-reviewer version`). This plugin does not ship it. Install a prebuilt binary from https://github.com/RobertYoung/gitlab-reviewer-cli/releases or run `go install github.com/RobertYoung/gitlab-reviewer-cli/cmd/gitlab-reviewer@latest` (see https://robertyoung.github.io/gitlab-reviewer-cli/getting-started/). Ask the user before installing anything.
 - The `claude` CLI 2.0 or newer and `git` on `PATH`. Only `gitlab-reviewer review <mr>` (the AI review itself) needs them.
 - A GitLab token with `api` scope in `GITLAB_REVIEWER_GITLAB_TOKEN` (or `GITLAB_TOKEN`). Never pass the token with `--gitlab-token`, never echo it, and never write it to a file.
 - The GitLab URL: `gitlab.base_url` in the settings file (`${XDG_CONFIG_HOME:-~/.config}/gitlab-reviewer/config.yaml`, or `--config <file>`), `GITLAB_REVIEWER_GITLAB_BASE_URL`, or `--gitlab-base-url`. With several `gitlab.instances` configured, pass `--instance <name>` or use the MR's web URL, whose host selects the instance.

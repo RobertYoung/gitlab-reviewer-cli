@@ -1,0 +1,597 @@
+[
+  {
+    "key": "gitlab.base_url",
+    "section": "gitlab",
+    "type": "URL",
+    "description": "Base URL of the GitLab instance. Replaced by the selected entry's `base_url` when `gitlab.instances` is set.",
+    "default": "https://gitlab.com",
+    "env": "GITLAB_REVIEWER_GITLAB_BASE_URL",
+    "flag": "gitlab-base-url",
+    "flagType": "string"
+  },
+  {
+    "key": "gitlab.token",
+    "section": "gitlab",
+    "type": "string",
+    "description": "Personal, project or group access token with the `api` scope. Required unless every instance supplies its own token. Prefer the environment variable: flags are visible in `ps` and shell history.",
+    "secret": true,
+    "default": "",
+    "env": "GITLAB_REVIEWER_GITLAB_TOKEN",
+    "envFallback": "GITLAB_TOKEN",
+    "flag": "gitlab-token",
+    "flagType": "string"
+  },
+  {
+    "key": "gitlab.projects",
+    "section": "gitlab",
+    "type": "list",
+    "description": "Full project paths to browse, for example `mygroup/myapp`. Empty, together with `gitlab.groups`, opens the TUI's group and project picker.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_GITLAB_PROJECTS",
+    "envList": true,
+    "flag": "project",
+    "flagType": "repeatable"
+  },
+  {
+    "key": "gitlab.groups",
+    "section": "gitlab",
+    "type": "list",
+    "description": "Group paths whose merge requests to browse.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_GITLAB_GROUPS",
+    "envList": true,
+    "flag": "group",
+    "flagType": "repeatable"
+  },
+  {
+    "key": "gitlab.per_page",
+    "section": "gitlab",
+    "type": "integer",
+    "constraint": "1 to 100",
+    "description": "GitLab API page size.",
+    "default": "50",
+    "env": "GITLAB_REVIEWER_GITLAB_PER_PAGE",
+    "flag": "per-page",
+    "flagType": "integer"
+  },
+  {
+    "key": "gitlab.instances",
+    "section": "gitlab",
+    "type": "list of objects",
+    "description": "Named GitLab instances to choose between, each with `name`, `base_url`, and optionally `token` or `token_env`. One is selected at startup and replaces `gitlab.base_url` and `gitlab.token`.",
+    "default": "",
+    "fileOnly": true
+  },
+  {
+    "key": "gitlab.default_instance",
+    "section": "gitlab",
+    "type": "string",
+    "description": "Instance to use without prompting. Must name a configured instance.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_GITLAB_DEFAULT_INSTANCE",
+    "flag": "instance",
+    "flagType": "string"
+  },
+  {
+    "key": "review.provider",
+    "section": "review",
+    "type": "enum",
+    "allowed": [
+      "anthropic",
+      "bedrock"
+    ],
+    "description": "Where the claude CLI sends review requests. `bedrock` sets `CLAUDE_CODE_USE_BEDROCK=1` on the subprocess and requires `bedrock.region`.",
+    "default": "anthropic",
+    "env": "GITLAB_REVIEWER_REVIEW_PROVIDER",
+    "flag": "provider",
+    "flagType": "string"
+  },
+  {
+    "key": "review.model",
+    "section": "review",
+    "type": "string",
+    "description": "Model passed to the claude CLI verbatim. Any model ID or alias the claude CLI understands.",
+    "default": "claude CLI default",
+    "env": "GITLAB_REVIEWER_REVIEW_MODEL",
+    "flag": "model",
+    "flagType": "string"
+  },
+  {
+    "key": "review.models",
+    "section": "review",
+    "type": "list",
+    "description": "Models offered by `gitlab-reviewer models`, `--model` completion and the per-agent model pickers. Suggestions, not validation.",
+    "default": "curated per-provider list",
+    "env": "GITLAB_REVIEWER_REVIEW_MODELS",
+    "envList": true,
+    "flag": "models",
+    "flagType": "comma-separated, repeatable"
+  },
+  {
+    "key": "review.claude_path",
+    "section": "review",
+    "type": "path",
+    "description": "Path to the claude binary, looked up on `PATH` by default.",
+    "default": "claude",
+    "env": "GITLAB_REVIEWER_REVIEW_CLAUDE_PATH",
+    "flag": "claude-path",
+    "flagType": "string"
+  },
+  {
+    "key": "review.timeout",
+    "section": "review",
+    "type": "duration",
+    "constraint": "per pass, > 0",
+    "description": "Maximum duration of one review pass, as a Go duration such as `10m` or `1h30m`.",
+    "default": "10m",
+    "env": "GITLAB_REVIEWER_REVIEW_TIMEOUT",
+    "flag": "review-timeout",
+    "flagType": "duration"
+  },
+  {
+    "key": "review.max_budget_usd",
+    "section": "review",
+    "type": "number",
+    "constraint": "total per run",
+    "description": "Spending cap for the whole run, split evenly across the planned passes plus one slice for aggregation when `review.aggregate` is on.",
+    "default": "unset",
+    "env": "GITLAB_REVIEWER_REVIEW_MAX_BUDGET_USD",
+    "flag": "max-budget-usd",
+    "flagType": "number"
+  },
+  {
+    "key": "review.agents",
+    "section": "review",
+    "type": "list",
+    "description": "Review agents to run: built-in names plus custom agents by name. Unknown names fail the run instead of silently reviewing less.",
+    "default": "all built-ins",
+    "env": "GITLAB_REVIEWER_REVIEW_AGENTS",
+    "envList": true,
+    "flag": "agents",
+    "flagType": "comma-separated, repeatable"
+  },
+  {
+    "key": "review.agent_models",
+    "section": "review",
+    "type": "map",
+    "description": "Model per agent, for example `security: opus`. A picker choice remembered for the project wins; the agent's own frontmatter `model` and `review.model` are the fallbacks.",
+    "default": "",
+    "fileOnly": true
+  },
+  {
+    "key": "review.agent_concurrency",
+    "section": "review",
+    "type": "integer",
+    "constraint": ">= 1",
+    "description": "How many agent passes run at once.",
+    "default": "3",
+    "env": "GITLAB_REVIEWER_REVIEW_AGENT_CONCURRENCY",
+    "flag": "agent-concurrency",
+    "flagType": "integer"
+  },
+  {
+    "key": "review.aggregate",
+    "section": "review",
+    "type": "boolean",
+    "description": "Merge duplicate findings across agents and passes with the aggregation agent. Off, or when aggregation fails, a deterministic same-line heuristic is used.",
+    "default": "true",
+    "env": "GITLAB_REVIEWER_REVIEW_AGGREGATE",
+    "flag": "aggregate",
+    "flagType": "boolean"
+  },
+  {
+    "key": "review.categories",
+    "section": "review",
+    "type": "list",
+    "allowed": [
+      "bug",
+      "security",
+      "performance",
+      "docs",
+      "style",
+      "design"
+    ],
+    "description": "Alias for `review.agents` from before reviews were agent-based. Fills `review.agents` when that is unset. Use `review.agents`.",
+    "deprecated": true,
+    "default": "bug, security, performance, docs, style, design",
+    "env": "GITLAB_REVIEWER_REVIEW_CATEGORIES",
+    "envList": true,
+    "flag": "categories",
+    "flagType": "comma-separated, repeatable"
+  },
+  {
+    "key": "review.instructions",
+    "section": "review",
+    "type": "string",
+    "description": "Extra instructions appended to the review prompt, for team conventions.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_REVIEW_INSTRUCTIONS",
+    "flag": "instructions",
+    "flagType": "string"
+  },
+  {
+    "key": "review.instructions_file",
+    "section": "review",
+    "type": "path",
+    "description": "File whose contents are appended to the review prompt too.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_REVIEW_INSTRUCTIONS_FILE",
+    "flag": "instructions-file",
+    "flagType": "string"
+  },
+  {
+    "key": "review.max_diff_kb",
+    "section": "review",
+    "type": "integer",
+    "constraint": ">= 1, KiB per pass",
+    "description": "Diff budget per pass. Larger merge requests are split into several passes.",
+    "default": "256",
+    "env": "GITLAB_REVIEWER_REVIEW_MAX_DIFF_KB",
+    "flag": "max-diff-kb",
+    "flagType": "integer"
+  },
+  {
+    "key": "review.exclude",
+    "section": "review",
+    "type": "list",
+    "description": "Globs of files removed from the review entirely. Setting it replaces the default list, so re-include the defaults you still want.",
+    "default": "**/go.sum, **/package-lock.json, **/yarn.lock, **/pnpm-lock.yaml, **/Cargo.lock, **/poetry.lock, **/uv.lock, **/Gemfile.lock, vendor/**, node_modules/**, **/*.pb.go, **/*_generated.go, **/*.min.js, **/*.min.css, **/*.svg, dist/**",
+    "env": "GITLAB_REVIEWER_REVIEW_EXCLUDE",
+    "envList": true,
+    "flag": "exclude",
+    "flagType": "repeatable"
+  },
+  {
+    "key": "review.bare",
+    "section": "review",
+    "type": "boolean",
+    "description": "Run claude with `--bare`, skipping user hooks and CLAUDE.md. Also skips OAuth and keychain auth, so leave it off with a Claude subscription login.",
+    "default": "false",
+    "env": "GITLAB_REVIEWER_REVIEW_BARE",
+    "flag": "bare",
+    "flagType": "boolean"
+  },
+  {
+    "key": "review.use_agents",
+    "section": "review",
+    "type": "boolean",
+    "description": "Let the reviewer delegate to Claude Code subagents (`.claude/agents` plus user-level ones). Unrelated to `review.agents`. Write and network tools stay denied for subagents too.",
+    "default": "false",
+    "env": "GITLAB_REVIEWER_REVIEW_USE_AGENTS",
+    "flag": "use-agents",
+    "flagType": "boolean"
+  },
+  {
+    "key": "review.claude_plugins",
+    "section": "review",
+    "type": "list",
+    "description": "Installed Claude Code plugins (`name` or `name@marketplace`) whose agents join the review agent catalog. An explicit allowlist: installing a plugin never adds reviewers on its own.",
+    "default": "",
+    "fileOnly": true
+  },
+  {
+    "key": "review.env",
+    "section": "review",
+    "type": "map",
+    "description": "Extra environment for the claude subprocess. Keys starting with `GITLAB` are stripped so the token never reaches the model.",
+    "default": "",
+    "flag": "review-env",
+    "flagType": "repeatable"
+  },
+  {
+    "key": "review.mcp_servers",
+    "section": "review",
+    "type": "map of objects",
+    "description": "MCP servers granted to the review session, keyed by server name, in Claude Code's `.mcp.json` shape. Off by default: a server with network access reopens the exfiltration channel the sandbox closes.",
+    "default": "",
+    "fileOnly": true
+  },
+  {
+    "key": "review.allowed_domains",
+    "section": "review",
+    "type": "list",
+    "description": "Grants `WebFetch` scoped to these domains only. WebFetch stays fully denied when empty. The GUI's per-run picker can narrow the list, never widen it.",
+    "default": "",
+    "fileOnly": true
+  },
+  {
+    "key": "review.allowed_commands",
+    "section": "review",
+    "type": "list",
+    "description": "Grants `Bash` scoped to these command patterns only, as Claude Code prefix rules such as `npm test:*`. Bash stays fully denied when empty.",
+    "default": "",
+    "fileOnly": true
+  },
+  {
+    "key": "bedrock.region",
+    "section": "bedrock",
+    "type": "string",
+    "description": "AWS region for Bedrock. Required when `review.provider` is `bedrock`.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_BEDROCK_REGION",
+    "envFallback": "AWS_REGION",
+    "flag": "aws-region",
+    "flagType": "string"
+  },
+  {
+    "key": "bedrock.profile",
+    "section": "bedrock",
+    "type": "string",
+    "description": "AWS profile for Bedrock.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_BEDROCK_PROFILE",
+    "envFallback": "AWS_PROFILE",
+    "flag": "aws-profile",
+    "flagType": "string"
+  },
+  {
+    "key": "checkout.mode",
+    "section": "checkout",
+    "type": "enum",
+    "allowed": [
+      "clone",
+      "path",
+      "root"
+    ],
+    "description": "Where the repository comes from: managed clones in the cache, one existing clone, or clones under a structured root. Reviews always run in a detached worktree at the MR head.",
+    "default": "clone",
+    "env": "GITLAB_REVIEWER_CHECKOUT_MODE",
+    "flag": "checkout-mode",
+    "flagType": "string"
+  },
+  {
+    "key": "checkout.path",
+    "section": "checkout",
+    "type": "path",
+    "description": "Existing local clone. Required in `path` mode.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_CHECKOUT_PATH",
+    "flag": "repo-path",
+    "flagType": "string"
+  },
+  {
+    "key": "checkout.root",
+    "section": "checkout",
+    "type": "path",
+    "description": "Structured git root such as `~/git`, holding clones at `<root>/<host>/<group>/<project>`. Required in `root` mode.",
+    "default": "",
+    "env": "GITLAB_REVIEWER_CHECKOUT_ROOT",
+    "flag": "git-root",
+    "flagType": "string"
+  },
+  {
+    "key": "checkout.transport",
+    "section": "checkout",
+    "type": "enum",
+    "allowed": [
+      "https",
+      "ssh"
+    ],
+    "description": "How clones and fetches talk to GitLab. `https` hands the token to git through an in-memory credential helper; `ssh` uses your own agent and keys.",
+    "default": "https",
+    "env": "GITLAB_REVIEWER_CHECKOUT_TRANSPORT",
+    "flag": "clone-transport",
+    "flagType": "string"
+  },
+  {
+    "key": "checkout.cache_dir",
+    "section": "checkout",
+    "type": "path",
+    "description": "Cache for managed clones and review worktrees. Honours `XDG_CACHE_HOME`.",
+    "default": "~/.cache/gitlab-reviewer",
+    "env": "GITLAB_REVIEWER_CHECKOUT_CACHE_DIR",
+    "flag": "cache-dir",
+    "flagType": "string"
+  },
+  {
+    "key": "checkout.cache_max_mb",
+    "section": "checkout",
+    "type": "integer",
+    "constraint": "MiB",
+    "description": "Clone cache budget. Least-recently-used clones are evicted above it.",
+    "default": "2048",
+    "env": "GITLAB_REVIEWER_CHECKOUT_CACHE_MAX_MB",
+    "flag": "cache-max-mb",
+    "flagType": "integer"
+  },
+  {
+    "key": "checkout.keep",
+    "section": "checkout",
+    "type": "boolean",
+    "description": "Keep review worktrees after the review, for debugging. `cache clean` removes them later.",
+    "default": "false",
+    "env": "GITLAB_REVIEWER_CHECKOUT_KEEP",
+    "flag": "keep-worktree",
+    "flagType": "boolean"
+  },
+  {
+    "key": "checkout.clone_missing",
+    "section": "checkout",
+    "type": "boolean",
+    "description": "In `root` mode, clone projects that are not cloned yet instead of failing.",
+    "default": "false",
+    "env": "GITLAB_REVIEWER_CHECKOUT_CLONE_MISSING"
+  },
+  {
+    "key": "checkout.local_overlay",
+    "section": "checkout",
+    "type": "list",
+    "description": "Globs of untracked files in your local clone copied into the review worktree (`path` and `root` modes). Files tracked at the MR head are never overridden.",
+    "default": "**/CLAUDE.md, **/CLAUDE.local.md, .claude/**",
+    "env": "GITLAB_REVIEWER_CHECKOUT_LOCAL_OVERLAY",
+    "envList": true,
+    "flag": "local-overlay",
+    "flagType": "repeatable"
+  },
+  {
+    "key": "publish.mode",
+    "section": "publish",
+    "type": "enum",
+    "allowed": [
+      "draft",
+      "immediate"
+    ],
+    "description": "`draft` collects comments into a GitLab draft review published in one action (GitLab 16 or later); `immediate` posts each as a live discussion.",
+    "default": "draft",
+    "env": "GITLAB_REVIEWER_PUBLISH_MODE",
+    "flag": "publish-mode",
+    "flagType": "string"
+  },
+  {
+    "key": "publish.auto_comment",
+    "section": "publish",
+    "type": "boolean",
+    "description": "Accept findings at or above `publish.auto_min_severity` automatically.",
+    "default": "false",
+    "env": "GITLAB_REVIEWER_PUBLISH_AUTO_COMMENT",
+    "flag": "auto-comment",
+    "flagType": "boolean"
+  },
+  {
+    "key": "publish.auto_min_severity",
+    "section": "publish",
+    "type": "severity",
+    "allowed": [
+      "info",
+      "minor",
+      "major",
+      "critical"
+    ],
+    "description": "Threshold for `publish.auto_comment`.",
+    "default": "major",
+    "env": "GITLAB_REVIEWER_PUBLISH_AUTO_MIN_SEVERITY",
+    "flag": "auto-min-severity",
+    "flagType": "string"
+  },
+  {
+    "key": "publish.min_severity",
+    "section": "publish",
+    "type": "severity",
+    "allowed": [
+      "info",
+      "minor",
+      "major",
+      "critical"
+    ],
+    "description": "Publish floor: findings below it are never posted from any frontend, and stay visible in triage marked below-threshold.",
+    "default": "info",
+    "env": "GITLAB_REVIEWER_PUBLISH_MIN_SEVERITY",
+    "flag": "publish-min-severity",
+    "flagType": "string"
+  },
+  {
+    "key": "publish.fallback_to_note",
+    "section": "publish",
+    "type": "boolean",
+    "description": "Post a general MR note with a file and line reference when an inline position cannot be resolved.",
+    "default": "true",
+    "env": "GITLAB_REVIEWER_PUBLISH_FALLBACK_TO_NOTE",
+    "flag": "fallback-to-note",
+    "flagType": "boolean"
+  },
+  {
+    "key": "publish.attribution",
+    "section": "publish",
+    "type": "boolean",
+    "description": "Append a footer marking published comments as AI-suggested.",
+    "default": "false",
+    "env": "GITLAB_REVIEWER_PUBLISH_ATTRIBUTION",
+    "flag": "attribution",
+    "flagType": "boolean"
+  },
+  {
+    "key": "publish.template",
+    "section": "publish",
+    "type": "Go template",
+    "description": "Comment body layout with fields `{{.severity}}`, `{{.category}}`, `{{.agent}}`, `{{.title}}`, `{{.body}}`, `{{.file}}`. Set `{{.body}}` for comments without a header.",
+    "default": "built-in layout",
+    "env": "GITLAB_REVIEWER_PUBLISH_TEMPLATE",
+    "flag": "publish-template",
+    "flagType": "string"
+  },
+  {
+    "key": "gate.min_severity",
+    "section": "gate",
+    "type": "severity",
+    "allowed": [
+      "info",
+      "minor",
+      "major",
+      "critical"
+    ],
+    "description": "Findings at or above this severity are blocking until rejected in triage. `review` exits 2 while any remain.",
+    "default": "unset (gate off)",
+    "env": "GITLAB_REVIEWER_GATE_MIN_SEVERITY",
+    "flag": "gate-min-severity",
+    "flagType": "string"
+  },
+  {
+    "key": "gate.approvals",
+    "section": "gate",
+    "type": "enum",
+    "allowed": [
+      "off",
+      "warn",
+      "block"
+    ],
+    "description": "What approving from the TUI, GUI or `mr approve` does while blocking findings remain. Only consulted when the gate is on.",
+    "default": "warn",
+    "env": "GITLAB_REVIEWER_GATE_APPROVALS",
+    "flag": "gate-approvals",
+    "flagType": "string"
+  },
+  {
+    "key": "ui.diff_view",
+    "section": "ui",
+    "type": "enum",
+    "allowed": [
+      "unified",
+      "split"
+    ],
+    "description": "Diff layout in both frontends. `v` in the TUI switches it for the session.",
+    "default": "unified",
+    "env": "GITLAB_REVIEWER_UI_DIFF_VIEW",
+    "flag": "diff-view",
+    "flagType": "string"
+  },
+  {
+    "key": "ui.file_explorer",
+    "section": "ui",
+    "type": "enum",
+    "allowed": [
+      "open",
+      "closed"
+    ],
+    "description": "Initial state of the changed-files explorer. `e` in the TUI toggles it.",
+    "default": "closed",
+    "env": "GITLAB_REVIEWER_UI_FILE_EXPLORER",
+    "flag": "file-explorer",
+    "flagType": "string"
+  },
+  {
+    "key": "log.level",
+    "section": "log",
+    "type": "enum",
+    "allowed": [
+      "debug",
+      "info",
+      "warn",
+      "error"
+    ],
+    "description": "Log level.",
+    "default": "info",
+    "env": "GITLAB_REVIEWER_LOG_LEVEL",
+    "flag": "log-level",
+    "flagType": "string"
+  },
+  {
+    "key": "log.file",
+    "section": "log",
+    "type": "path",
+    "description": "Log file, created with owner-only permissions. Honours `XDG_STATE_HOME`.",
+    "default": "~/.local/state/gitlab-reviewer/gitlab-reviewer.log",
+    "env": "GITLAB_REVIEWER_LOG_FILE",
+    "flag": "log-file",
+    "flagType": "string"
+  }
+]
