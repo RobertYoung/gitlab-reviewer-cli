@@ -12,7 +12,7 @@ func newModelsCmd(st *state) *cobra.Command {
 		Short: "List models to use with --model / review.model",
 		Long: "List the models offered for the AI review: review.models from the\n" +
 			"settings file when set, otherwise a curated list of common Claude\n" +
-			"models for the selected provider. The list is suggestions only —\n" +
+			"models for the selected provider. The list is suggestions only:\n" +
 			"--model accepts any model ID the claude CLI understands.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

@@ -33,7 +33,7 @@ func newGUICmd(st *state) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "gui",
 		Short: "Serve the browser-based GUI",
-		Long:  "gui starts a local web server on 127.0.0.1 and opens your browser on a\nsession-tokenised URL. It offers the same workflow as the TUI — browse MRs,\nread the diff, comment, run AI reviews, curate findings, publish — with\nHTML rendering: syntax-highlighted diffs, a persistent file explorer, and\ninline discussion threads.",
+		Long:  "gui starts a local web server on 127.0.0.1 and opens your browser on a\nsession-tokenised URL. It offers the same workflow as the TUI (browse MRs,\nread the diff, comment, run AI reviews, curate findings, publish) with\nHTML rendering: syntax-highlighted diffs, a persistent file explorer, and\ninline discussion threads.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := st.loaded.Config

@@ -1,5 +1,9 @@
 # gitlab-reviewer
 
+[![Docs](https://github.com/RobertYoung/gitlab-reviewer-cli/actions/workflows/docs.yml/badge.svg)](https://robertyoung.github.io/gitlab-reviewer-cli/) [![CI](https://github.com/RobertYoung/gitlab-reviewer-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/RobertYoung/gitlab-reviewer-cli/actions/workflows/ci.yml)
+
+**[Read the documentation](https://robertyoung.github.io/gitlab-reviewer-cli/)** for guides, the configuration reference and the CLI reference.
+
 A terminal UI that helps you review GitLab merge requests with Claude.
 
 `gitlab-reviewer` lists open MRs across your configured GitLab projects and
@@ -35,7 +39,7 @@ Prefer a browser? The same workflow is available as a local web app via
 
 Along the way you can approve the MR, leave manual comments, and open a
 multi-turn chat with Claude about the MR or a single diff line — all
-without leaving the TUI. The [TUI guide](docs/wiki/TUI-Guide.md) walks
+without leaving the TUI. The [TUI guide](https://robertyoung.github.io/gitlab-reviewer-cli/tui/) walks
 through every screen.
 
 ## Requirements
@@ -94,8 +98,8 @@ pick an MR (`enter`), inspect the diff, press `r` to run the review, then
 Every review is stored, so nothing is lost by navigating away or closing
 the terminal: press `L` on the MR detail screen to reopen past reviews with
 their curation state, and `l` to read a run's progress log. See
-[Getting started](docs/wiki/Getting-Started.md) for a guided first review
-and the [TUI guide](docs/wiki/TUI-Guide.md) for everything the TUI can do —
+[Getting started](https://robertyoung.github.io/gitlab-reviewer-cli/getting-started/) for a guided first review
+and the [TUI guide](https://robertyoung.github.io/gitlab-reviewer-cli/tui/) for everything the TUI can do:
 approving, manual comments, chatting with Claude about the change, filters,
 the file explorer, and the complete keymap.
 
@@ -129,7 +133,7 @@ the terminal can't match: syntax-highlighted diffs with soft wrapping, a
 persistent file-explorer tree, existing MR discussions shown inline, and
 click-to-comment on any diff line. The server binds to `127.0.0.1` only
 and every session is protected by a random token baked into the launch
-URL. See the [GUI guide](docs/wiki/GUI-Guide.md).
+URL. See the [GUI guide](https://robertyoung.github.io/gitlab-reviewer-cli/gui/).
 
 ## Headless / CI
 
@@ -150,7 +154,7 @@ the exit code is non-zero on failure. Publishing is off by default
 GUI to curate and publish with a human in the loop. Re-runs are
 incremental by default — only the changes pushed since the last reviewed
 commit are reviewed, and triaged findings carry forward (`--full`
-overrides). See [Headless mode](docs/wiki/Headless-Mode.md) for
+overrides). See [Headless mode](https://robertyoung.github.io/gitlab-reviewer-cli/headless/) for
 incremental re-review, publish semantics, exit codes, and a GitLab CI job
 example.
 
@@ -163,7 +167,7 @@ gitlab-reviewer review publish mygroup/myapp!123 --mode draft
 gitlab-reviewer review submit mygroup/myapp!123
 ```
 
-See the [CLI reference](docs/wiki/CLI-Reference.md) for every command and its JSON output.
+See the [CLI reference](https://robertyoung.github.io/gitlab-reviewer-cli/reference/cli/) for every command and its JSON output.
 
 ## Claude Code plugin
 
@@ -211,21 +215,21 @@ projects:
       use_agents: true
 ```
 
-The **[configuration reference](docs/wiki/Configuration-Reference.md)**
+The **[configuration reference](https://robertyoung.github.io/gitlab-reviewer-cli/reference/configuration/)**
 documents every key, environment variable, flag, and default, including
 multiple GitLab instances and per-project overrides. Deeper guides:
 
-- [Review agents](docs/wiki/Review-Agents.md) — the built-in reviewers,
+- [Review agents](https://robertyoung.github.io/gitlab-reviewer-cli/review-agents/): the built-in reviewers,
   per-scan selection, cost controls, and bringing your own agents as
   Markdown files
-- [Checkout modes](docs/wiki/Checkout-Modes.md) — managed clones vs your
+- [Checkout modes](https://robertyoung.github.io/gitlab-reviewer-cli/checkout-modes/): managed clones vs your
   local clone, cache management, and the local-overlay for uncommitted
   `CLAUDE.md`/`.claude/` files
-- [Publishing](docs/wiki/Publishing.md) — draft vs immediate, auto-publish
+- [Publishing](https://robertyoung.github.io/gitlab-reviewer-cli/publishing/): draft vs immediate, auto-publish
   thresholds, comment templates
-- [MCP servers](docs/wiki/MCP-Servers.md) — opt-in reference material for
+- [MCP servers](https://robertyoung.github.io/gitlab-reviewer-cli/mcp-servers/): opt-in reference material for
   the review session
-- [Recipes](docs/wiki/Recipes.md) — worked configurations for common setups
+- [Recipes](https://robertyoung.github.io/gitlab-reviewer-cli/recipes/): worked configurations for common setups
 
 ### Secrets
 
@@ -246,8 +250,8 @@ network tools are denied, so even a fully hijacked model can read local
 files but has no tool with which to transmit them. Any GitLab metadata a
 check needs is fetched by the tool itself over the API and injected as
 prompt text. The one deliberate, opt-in exception is
-[`review.mcp_servers`](docs/wiki/MCP-Servers.md). The full threat model is
-in [Security model](docs/wiki/Security-Model.md).
+[`review.mcp_servers`](https://robertyoung.github.io/gitlab-reviewer-cli/mcp-servers/). The full threat model is
+in [Security model](https://robertyoung.github.io/gitlab-reviewer-cli/security-model/).
 
 ## Using AWS Bedrock
 
@@ -263,7 +267,7 @@ bedrock:
 ```
 
 Ambient AWS credentials are passed through to the `claude` subprocess; see
-[Configuration reference — Bedrock](docs/wiki/Configuration-Reference.md#bedrock)
+[Configuration reference: Bedrock](https://robertyoung.github.io/gitlab-reviewer-cli/reference/configuration/#bedrock-and-provider-environment)
 for the details and `review.env` for extras like a corporate proxy.
 `gitlab-reviewer models` lists common model IDs for the selected provider
 (inference-profile IDs for Bedrock); set `review.models` to pin your
@@ -296,20 +300,20 @@ matter: `feat:`/`fix:` trigger releases.
 
 ## Documentation
 
-- **[Wiki](docs/wiki/Home.md)** — usage guides, worked examples, and the
+- **[Documentation site](https://robertyoung.github.io/gitlab-reviewer-cli/)**: usage guides, worked examples, and the
   full configuration reference:
-  [Getting started](docs/wiki/Getting-Started.md) ·
-  [TUI guide](docs/wiki/TUI-Guide.md) ·
-  [GUI guide](docs/wiki/GUI-Guide.md) ·
-  [Headless mode](docs/wiki/Headless-Mode.md) ·
-  [Configuration reference](docs/wiki/Configuration-Reference.md) ·
-  [Review agents](docs/wiki/Review-Agents.md) ·
-  [MCP servers](docs/wiki/MCP-Servers.md) ·
-  [Checkout modes](docs/wiki/Checkout-Modes.md) ·
-  [Publishing](docs/wiki/Publishing.md) ·
-  [Security model](docs/wiki/Security-Model.md) ·
-  [Recipes](docs/wiki/Recipes.md) ·
-  [Troubleshooting](docs/wiki/Troubleshooting.md)
+  [Getting started](https://robertyoung.github.io/gitlab-reviewer-cli/getting-started/) ·
+  [TUI guide](https://robertyoung.github.io/gitlab-reviewer-cli/tui/) ·
+  [GUI guide](https://robertyoung.github.io/gitlab-reviewer-cli/gui/) ·
+  [Headless mode](https://robertyoung.github.io/gitlab-reviewer-cli/headless/) ·
+  [Configuration reference](https://robertyoung.github.io/gitlab-reviewer-cli/reference/configuration/) ·
+  [Review agents](https://robertyoung.github.io/gitlab-reviewer-cli/review-agents/) ·
+  [MCP servers](https://robertyoung.github.io/gitlab-reviewer-cli/mcp-servers/) ·
+  [Checkout modes](https://robertyoung.github.io/gitlab-reviewer-cli/checkout-modes/) ·
+  [Publishing](https://robertyoung.github.io/gitlab-reviewer-cli/publishing/) ·
+  [Security model](https://robertyoung.github.io/gitlab-reviewer-cli/security-model/) ·
+  [Recipes](https://robertyoung.github.io/gitlab-reviewer-cli/recipes/) ·
+  [Troubleshooting](https://robertyoung.github.io/gitlab-reviewer-cli/troubleshooting/)
 - [Architecture](docs/architecture.md) — component and sequence diagrams
 - [Features by frontend](docs/features.md) — what the TUI and the browser
   GUI each support

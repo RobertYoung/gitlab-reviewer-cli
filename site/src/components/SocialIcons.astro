@@ -1,0 +1,40 @@
+---
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+
+const base = import.meta.env.BASE_URL;
+const path = Astro.url.pathname;
+const links = [
+	['Docs', 'getting-started/'],
+	['Configuration', 'reference/configuration/'],
+	['Agents', 'review-agents/'],
+	['CLI', 'reference/cli/'],
+];
+---
+
+<nav class="top-nav" aria-label="Sections">
+	{links.map(([label, href]) => <a href={base + href} aria-current={path === base + href ? 'page' : undefined}>{label}</a>)}
+</nav>
+<Default />
+
+<style>
+	.top-nav {
+		display: none;
+		gap: 1.25rem;
+		margin-inline-end: 0.75rem;
+	}
+	.top-nav a {
+		color: var(--gr-muted);
+		font-size: var(--sl-text-sm);
+		font-weight: 500;
+		text-decoration: none;
+	}
+	.top-nav a:hover,
+	.top-nav a[aria-current='page'] {
+		color: var(--gr-strong);
+	}
+	@media (min-width: 72rem) {
+		.top-nav {
+			display: flex;
+		}
+	}
+</style>

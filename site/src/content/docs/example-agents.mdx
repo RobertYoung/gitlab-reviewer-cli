@@ -1,0 +1,61 @@
+---
+title: Example agents
+description: "Ready-to-copy review agent definitions from examples/agents, where to put them, and how their model is chosen."
+---
+
+import { Code } from '@astrojs/starlight/components';
+import agents from '../../data/example-agents.json';
+
+These agents live in [`examples/agents/`](https://github.com/RobertYoung/gitlab-reviewer-cli/tree/main/examples/agents) in the repository. A test loads every one of them with the same loader the tool uses, so each definition on this page is known to parse. Copy one, then edit the prompt to match your codebase.
+
+## Where to put them
+
+An agent is a Markdown file whose name, without `.md`, is the agent's name unless the frontmatter sets `name`. Put it in one of four directories:
+
+| Scope | gitlab-reviewer directory | Claude Code directory | Who gets it |
+|---|---|---|---|
+| Personal | `~/.config/gitlab-reviewer/agents/` | `~/.claude/agents/` | your reviews of every repository |
+| Team | `.gitlab-reviewer/agents/` in the reviewed repo | `.claude/agents/` in the reviewed repo | everyone reviewing that repository, once committed |
+
+Repo agents beat personal ones, which beat agents from accepted [Claude Code plugins](/gitlab-reviewer-cli/review-agents/#claude-code-plugin-agents), which beat the built-ins. Within one scope, the gitlab-reviewer directory beats Claude Code's, so you can keep a review-specific variant next to a Claude Code agent of the same name. The definition format is compatible with Claude Code subagents: fields this tool does not use, such as `tools`, are ignored. See [How repo agents are discovered](/gitlab-reviewer-cli/review-agents/#how-repo-agents-are-discovered) for how each checkout mode finds team agents.
+
+```sh
+mkdir -p ~/.config/gitlab-reviewer/agents
+curl -fsSL -o ~/.config/gitlab-reviewer/agents/sql-migrations.md https://raw.githubusercontent.com/RobertYoung/gitlab-reviewer-cli/main/examples/agents/sql-migrations.md
+```
+
+Then pick the agent in the TUI or GUI agent picker, or select it for headless runs with `--agents sql-migrations` or `review.agents`.
+
+## How the model is chosen
+
+An agent runs with the first model set in this order:
+
+1. the model picked for that agent in the TUI or GUI picker, remembered per project;
+2. [`review.agent_models`](/gitlab-reviewer-cli/reference/configuration/#review.agent_models) for that agent;
+3. the agent's frontmatter `model`;
+4. [`review.model`](/gitlab-reviewer-cli/reference/configuration/#review.model);
+5. the `claude` CLI's own default.
+
+So a frontmatter `model` is the agent author's suggestion, and anyone running it can still override it.
+
+## Frontmatter
+
+| Field | Meaning |
+|---|---|
+| `name` | Agent name, matching `^[a-z0-9][a-z0-9_-]*$`. Defaults to the file name. |
+| `description` | One line shown in the pickers. |
+| `categories` | Finding categories the agent may use: `bug`, `security`, `performance`, `docs`, `style`, `design`. Defaults to all. |
+| `severity` | Optional severity hint for the agent's findings: `info`, `minor`, `major` or `critical`. |
+| `model` | Optional default model for this agent. |
+
+The body is the agent's prompt. It steers what the reviewer looks for, but cannot change the [read-only sandbox](/gitlab-reviewer-cli/security-model/) every review runs in.
+
+## The examples
+
+{agents.map((a) => (
+	<section>
+		<h3 id={a.name}>{a.name}</h3>
+		<p>{a.description}. Categories: {a.categories.join(', ')}{a.severity && `; severity hint: ${a.severity}`}{a.model && `; model: ${a.model}`}.</p>
+		<Code wrap code={a.source} lang="markdown" title={`examples/agents/${a.file}`} />
+	</section>
+))}
