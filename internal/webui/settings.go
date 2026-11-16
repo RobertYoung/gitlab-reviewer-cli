@@ -74,6 +74,7 @@ func settingsSchema() []settingSection {
 			{Key: "review.agents", Label: "Agents", Kind: kindList, Help: "Default agent selection, one per line. Blank uses all builtins."},
 			{Key: "review.agent_models", Label: "Agent models", Kind: kindMap, Help: "Model per agent, agent=model per line, e.g. security=opus. A per-project picker choice still wins."},
 			{Key: "review.agent_concurrency", Label: "Agent concurrency", Kind: kindInt, Help: "How many agent passes run at once (≥1)."},
+			{Key: "review.aggregate", Label: "Aggregate findings", Kind: kindBool, Help: "Merge duplicate findings across agents with an aggregation agent. Off uses the same-line text heuristic."},
 			{Key: "review.instructions", Label: "Instructions", Kind: kindText, Help: "Extra reviewer instructions (inline)."},
 			{Key: "review.instructions_file", Label: "Instructions file", Kind: kindText, Help: "Path to a file with extra reviewer instructions."},
 			{Key: "review.max_diff_kb", Label: "Max diff (KB)", Kind: kindInt, Help: "Largest diff sent to the model (≥1)."},

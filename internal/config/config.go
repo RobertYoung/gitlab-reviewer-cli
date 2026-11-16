@@ -84,6 +84,10 @@ type Review struct {
 	AgentModels map[string]string `koanf:"agent_models"`
 	// AgentConcurrency caps how many agent passes run at once.
 	AgentConcurrency int `koanf:"agent_concurrency"`
+	// Aggregate runs the aggregation agent after the review passes to merge
+	// findings that report the same defect. Off, or when aggregation fails,
+	// the deterministic same-line text-overlap heuristic is used instead.
+	Aggregate bool `koanf:"aggregate"`
 	// Categories is deprecated: builtin agents subsumed it. It is kept as
 	// an alias for agents (each category name is a builtin agent).
 	Categories       []string `koanf:"categories"`
@@ -229,6 +233,7 @@ func Default() Config {
 			// step falls back to categories, making the deprecated key a
 			// working alias without tracking which layer set it.
 			AgentConcurrency: 3,
+			Aggregate:        true,
 			AgentModels:      map[string]string{},
 			Categories:       slices.Clone(Categories),
 			MaxDiffKB:        256,

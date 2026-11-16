@@ -89,6 +89,7 @@
           <pre class="prose add">{{$f.Suggestion}}</pre>
         </div>
         {{end}}
+        {{template "sources" $f}}
         {{template "excerpt" .Excerpt}}
         <footer class="actions">
           {{template "findingactions" (triagerow $f $c)}}

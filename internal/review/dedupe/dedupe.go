@@ -1,9 +1,10 @@
 // Package dedupe collapses review findings that describe the same
-// underlying issue: near-duplicates reported by more than one agent in a
+// underlying issue: duplicates reported by more than one agent or pass in a
 // single run, and findings that substantially match a comment already
-// posted to the MR. Matching is heuristic (same file/line plus token-overlap
-// text similarity) rather than an LLM pass — cheap, deterministic, and good
-// enough to catch reworded restatements of the same finding.
+// posted to the MR. Aggregate groups findings through an aggregation agent
+// and validates its answer; Findings is the deterministic heuristic (same
+// file/line plus token-overlap text similarity) used when aggregation is
+// off or fails, and for matching against posted comments.
 package dedupe
 
 import (

@@ -123,6 +123,13 @@ type Finding struct {
 	// produced by the model: it publishes verbatim, without the body
 	// template or the attribution footer.
 	Manual bool `json:"manual,omitempty"`
+	// Sources are the original findings the aggregation phase consolidated
+	// into this one, kept so curation can inspect every contributing
+	// agent's evidence. Empty on findings that stand alone.
+	Sources []Finding `json:"sources,omitempty"`
+	// MergeNote is the aggregation agent's reason for merging Sources, plus
+	// any conflict a human should resolve before publishing.
+	MergeNote string `json:"merge_note,omitempty"`
 }
 
 // Blocking reports whether f counts against a severity gate at min: a model

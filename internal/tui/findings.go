@@ -395,6 +395,18 @@ func (s *findings) View() string {
 	if f.Suggestion != "" {
 		body += "\n\n" + subtleStyle.Render("suggested replacement:") + "\n" + addedStyle.Render("+"+f.Suggestion)
 	}
+	if len(f.Sources) > 0 {
+		body += "\n\n" + subtleStyle.Render(fmt.Sprintf("merged from %d findings (%s):", len(f.Sources), f.Agent))
+		if f.MergeNote != "" {
+			body += "\n" + subtleStyle.Render(wrap(f.MergeNote, s.width-2))
+		}
+		for _, src := range f.Sources {
+			body += fmt.Sprintf("\n· %s · %s  %s  %s\n%s", src.Severity, src.Agent, src.Title, subtleStyle.Render(findingLocation(src)), wrap(src.Body, s.width-2))
+			if src.Suggestion != "" {
+				body += "\n" + addedStyle.Render("+"+src.Suggestion)
+			}
+		}
+	}
 	if hunk := hunkExcerpt(s.diffs, f, 4); hunk != "" {
 		body += "\n\n" + hunk
 	}

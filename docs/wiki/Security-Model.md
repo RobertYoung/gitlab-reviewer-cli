@@ -53,6 +53,10 @@ as text, or computed directly:
 Checks that would need *live* GitLab writes or arbitrary web access are
 deliberately out of scope.
 
+### The aggregation agent
+
+After the review passes, an [aggregation agent](Review-Agents.md#aggregating-duplicate-findings) groups duplicate findings. Its only input is the findings themselves, which come from merge request content and are treated as untrusted data. It runs with every tool disabled (`--tools ""` plus an explicit deny list), no MCP servers even when the review session has some, no web or shell grants, and an empty scratch directory as its working directory instead of the checkout. It cannot publish: its answer is validated against the input ids and every location and suggestion on a merged finding comes from a source finding, not from the model.
+
 ### The MCP exception
 
 The one deliberate, opt-in relaxation is

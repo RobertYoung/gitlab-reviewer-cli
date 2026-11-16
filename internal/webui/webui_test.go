@@ -1751,3 +1751,35 @@ func TestAutoPublishDraftMode(t *testing.T) {
 		t.Fatalf("done event missing draftReady:\n%s", events)
 	}
 }
+
+// TestFindingsShowAggregatedSources: a finding the aggregation phase merged
+// lists its contributing agents, merge note, and each original finding.
+func TestFindingsShowAggregatedSources(t *testing.T) {
+	env := newTestEnv(t, &fakeReviewer{result: defaultResult()})
+	line := 3
+	rec := resultstore.Record{
+		IID: 5, Ref: "group/app!5", Started: time.Now(),
+		Findings: []review.Finding{{
+			ID: "f001", File: "a.go", Line: review.LineRef{NewLine: &line}, Severity: review.SeverityCritical, Category: "bug",
+			Agent: "bug, security", Title: "Expired tokens accepted", Body: "merged body",
+			MergeNote: "Both describe the missing expiry check.",
+			Sources: []review.Finding{
+				{File: "a.go", Line: review.LineRef{NewLine: &line}, Severity: review.SeverityMajor, Category: "bug", Agent: "bug", Title: "Expiry never checked", Body: "bug evidence", Suggestion: "if expired { return err }"},
+				{File: "a.go", Line: review.LineRef{NewLine: &line}, Severity: review.SeverityCritical, Category: "security", Agent: "security", Title: "Token replay", Body: "security evidence"},
+			},
+		}},
+	}
+	store := resultstore.NewStore(env.dir)
+	if err := store.Save(rec); err != nil {
+		t.Fatal(err)
+	}
+	code, body := env.get("/i/default/mr/findings?project=group%2Fapp&iid=5&record=" + url.QueryEscape(filepath.Base(store.Path(rec))))
+	if code != http.StatusOK {
+		t.Fatalf("findings page: %d\n%s", code, body)
+	}
+	for _, want := range []string{"Merged from 2 findings · bug, security", "Both describe the missing expiry check.", "Expiry never checked", "bug evidence", "Token replay", "security evidence", "if expired { return err }"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("findings page missing %q", want)
+		}
+	}
+}

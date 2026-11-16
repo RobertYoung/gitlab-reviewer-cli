@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","cwd":"/tmp","session_id":"sess-agg","tools":["StructuredOutput"],"model":"claude-fable-5","permissionMode":"dontAsk","claude_code_version":"2.1.198"}
+{"type":"assistant","message":{"model":"claude-fable-5","role":"assistant","content":[{"type":"tool_use","id":"t1","name":"StructuredOutput","input":{}}]},"session_id":"sess-agg"}
+{"type":"result","subtype":"success","is_error":false,"num_turns":1,"result":"","session_id":"sess-agg","total_cost_usd":0.03,"structured_output":{"groups":[{"members":["s1","s2"],"anchor":"s1","certain":true,"title":"t","body":"b","rationale":"r"}]}}

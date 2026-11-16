@@ -88,6 +88,20 @@
 </p>
 {{end}}
 
+{{define "sources"}}{{if .Sources}}
+<details class="sources">
+  <summary>Merged from {{len .Sources}} findings · {{.Agent}}</summary>
+  {{if .MergeNote}}<p class="merge-note">{{.MergeNote}}</p>{{end}}
+  {{range .Sources}}
+  <div class="source">
+    <div class="source-head">{{template "sevbadge" .}}<span class="stitle">{{ftitle .}}</span><span class="sloc">{{floc .}}</span></div>
+    <pre class="prose">{{.Body}}</pre>
+    {{if .Suggestion}}<pre class="prose add">{{.Suggestion}}</pre>{{end}}
+  </div>
+  {{end}}
+</details>
+{{end}}{{end}}
+
 {{define "sevbadge"}}{{if .Manual}}<span class="pill manual">manual</span>{{else}}<span class="pill sev sev-{{.Severity}}">{{.Severity}}</span>{{if .Category}} <span class="fcat">{{.Category}}{{if and .Agent (ne .Agent (printf "%s" .Category))}} · {{.Agent}}{{end}}</span>{{end}}{{end}}{{end}}
 
 {{define "statebadge"}}<span class="pill fstate state-{{fstate .}}">{{fstate .}}</span>{{end}}

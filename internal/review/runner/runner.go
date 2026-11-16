@@ -210,13 +210,21 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 		}
 	}
 	// The budget is a total for the run: split it evenly across the planned
-	// passes so worst-case spend stays at the configured amount. Unspent
-	// slices are not redistributed.
+	// passes, plus one slice for the aggregation phase when it is enabled,
+	// so worst-case spend stays at the configured amount. Unspent slices are
+	// not redistributed.
+	aggregator := r.aggregator()
+	var aggSlice float64
 	if total := r.Cfg.Review.MaxBudgetUSD; total > 0 {
-		per := total / float64(len(tasks))
+		n := len(tasks)
+		if aggregator != nil {
+			n++
+		}
+		per := total / float64(n)
 		for i := range tasks {
 			tasks[i].req.MaxBudgetUSD = per
 		}
+		aggSlice = per
 	}
 
 	emit(fmt.Sprintf("running %d agent(s) over %d review pass(es) with %s…", len(selected), len(reqs), r.Reviewer.Name()))
@@ -303,18 +311,22 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 				final.Findings[i].Line.OldLine = nil
 			}
 		}
-		// Prepend the carried findings (curation states intact); IDs are
-		// renumbered below once cross-agent duplicates have been dropped.
-		final.Findings = append(append([]review.Finding(nil), plan.carried...), final.Findings...)
+	}
+	var carried []review.Finding
+	if plan != nil {
+		carried = plan.carried
 	}
 	// Independent agents (or an agent plus carried-forward findings) can
-	// restate the same underlying issue; drop near-duplicates before
-	// publishing so running more agents doesn't clutter the MR with repeats.
-	var droppedDup []review.Finding
-	final.Findings, droppedDup = dedupe.Findings(final.Findings)
-	if len(droppedDup) > 0 {
-		warnings = append(warnings, fmt.Sprintf("dropped %d duplicate finding(s) reported by more than one agent", len(droppedDup)))
+	// restate the same underlying issue; consolidate them before curation so
+	// running more agents doesn't clutter the MR with repeats. IDs are
+	// renumbered below.
+	findings, consolidateWarnings, cost, err := r.consolidate(ctx, aggregator, carried, final.Findings, aggSlice, final.CostUSD, emit)
+	if err != nil {
+		return nil, err
 	}
+	final.Findings = findings
+	final.CostUSD += cost
+	warnings = append(warnings, consolidateWarnings...)
 	for i := range final.Findings {
 		final.Findings[i].ID = fmt.Sprintf("f%03d", i+1)
 	}
@@ -323,6 +335,81 @@ func (r Runner) execute(ctx context.Context, detail gitlabx.MRDetail, diffs []gi
 	// progress log.
 	final.Warnings = append(warnings, final.Warnings...)
 	return final, nil
+}
+
+// aggregator returns the backend's aggregation agent, or nil when
+// review.aggregate is off or the backend has none.
+func (r Runner) aggregator() review.Aggregator {
+	if !r.Cfg.Review.Aggregate {
+		return nil
+	}
+	agg, _ := r.Reviewer.(review.Aggregator)
+	return agg
+}
+
+// consolidate merges findings that report the same defect: through the
+// aggregation agent when there is one, falling back to the deterministic
+// dedupe heuristic when aggregation is off or fails. Only cancellation of
+// ctx is an error; a failed aggregation keeps every source finding.
+// slice is the aggregation's share of review.max_budget_usd (zero when
+// uncapped) and spent what the agent passes already cost.
+func (r Runner) consolidate(ctx context.Context, agg review.Aggregator, carried, fresh []review.Finding, slice, spent float64, emit func(string)) ([]review.Finding, []string, float64, error) {
+	all := append(append([]review.Finding(nil), carried...), fresh...)
+	var (
+		warnings []string
+		cost     float64
+	)
+	if agg != nil && len(all) > 1 {
+		out, err := r.aggregate(ctx, agg, carried, fresh, slice, spent, emit)
+		cost = out.CostUSD
+		if err == nil {
+			if merged := len(all) - len(out.Findings); merged > 0 {
+				warnings = append(warnings, fmt.Sprintf("aggregation merged %d duplicate finding(s) reported by more than one agent or pass", merged))
+			}
+			return out.Findings, append(warnings, out.Warnings...), cost, nil
+		}
+		if ctx.Err() != nil {
+			return nil, nil, cost, ctx.Err()
+		}
+		emit("[aggregate] failed: " + err.Error() + "; using deterministic deduplication")
+		warnings = append(warnings, "aggregation failed, used deterministic deduplication instead: "+err.Error())
+	}
+	kept, dropped := dedupe.Findings(all)
+	if len(dropped) > 0 {
+		warnings = append(warnings, fmt.Sprintf("dropped %d duplicate finding(s) reported by more than one agent", len(dropped)))
+	}
+	return kept, warnings, cost, nil
+}
+
+// aggregate runs the aggregation phase under review.timeout and what is
+// left of the run's budget.
+func (r Runner) aggregate(ctx context.Context, agg review.Aggregator, carried, fresh []review.Finding, slice, spent float64, emit func(string)) (dedupe.AggregateOutcome, error) {
+	var budget float64
+	if total := r.Cfg.Review.MaxBudgetUSD; total > 0 {
+		budget = min(slice, total-spent)
+		if budget <= 0 {
+			return dedupe.AggregateOutcome{}, dedupe.ErrAggregateBudget
+		}
+	}
+	if r.Cfg.Review.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, r.Cfg.Review.Timeout)
+		defer cancel()
+	}
+	n := len(carried) + len(fresh)
+	emit(fmt.Sprintf("[aggregate] consolidating %d finding(s)…", n))
+	out, err := dedupe.Aggregate(ctx, carried, fresh, dedupe.AggregateOptions{
+		Backend:   agg,
+		BudgetUSD: budget,
+		OnEvent:   func(e review.Event) { emit("[aggregate] " + e.Text) },
+	})
+	if errors.Is(err, context.DeadlineExceeded) && ctx.Err() != nil {
+		err = fmt.Errorf("timed out after %s", r.Cfg.Review.Timeout)
+	}
+	if err == nil {
+		emit(fmt.Sprintf("[aggregate] done: %d finding(s) from %d, $%.2f", len(out.Findings), n, out.CostUSD))
+	}
+	return out, err
 }
 
 // incrementalPlan is a planned delta review: the diffs to send through the
