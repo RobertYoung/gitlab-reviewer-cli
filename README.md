@@ -154,6 +154,17 @@ overrides). See [Headless mode](docs/wiki/Headless-Mode.md) for
 incremental re-review, publish semantics, exit codes, and a GitLab CI job
 example.
 
+The rest of the review loop is scriptable too, so an agent can review an MR on your behalf without the TUI or GUI: `mr list` and `mr show` find and inspect MRs, `review list` and `review show` read stored findings, `review accept`, `reject`, `accept-all`, and `edit` triage them, `review publish` posts only the accepted ones, `review submit` publishes a draft review, and `mr approve` approves (honouring `gate.approvals: block`). All take `--output json`:
+
+```sh
+gitlab-reviewer review show mygroup/myapp!123 --output json
+gitlab-reviewer review accept mygroup/myapp!123 f001 f003
+gitlab-reviewer review publish mygroup/myapp!123 --mode draft
+gitlab-reviewer review submit mygroup/myapp!123
+```
+
+See the [CLI reference](docs/wiki/CLI-Reference.md) for every command and its JSON output.
+
 ## Configuration
 
 Every setting is available as a flag, an environment variable, and a key in

@@ -6,13 +6,16 @@ package resultstore
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/RobertYoung/gitlab-reviewer-cli/internal/config"
 	"github.com/RobertYoung/gitlab-reviewer-cli/internal/review"
 )
 
@@ -107,15 +110,57 @@ func (s *Store) Latest(ref string) (*Record, error) {
 // Entry describes one stored record, with enough of its content for a
 // history list.
 type Entry struct {
-	Path      string
-	Ref       string
-	Title     string
-	Started   time.Time
-	LogPath   string
-	Findings  int
-	Accepted  int // accepted, published or fell back to a note
-	Pending   int // still awaiting triage
-	Published int // posted to GitLab, inline or as a fallback note
+	Path    string
+	Ref     string
+	Title   string
+	Started time.Time
+	LogPath string
+	Counts
+}
+
+// Counts tallies a record's findings by curation state.
+type Counts struct {
+	Findings  int `json:"findings"`
+	Accepted  int `json:"accepted"` // accepted, published or fell back to a note
+	Rejected  int `json:"rejected"`
+	Pending   int `json:"pending"`   // still awaiting triage
+	Published int `json:"published"` // posted to GitLab, inline or as a fallback note
+}
+
+func CountFindings(findings []review.Finding) Counts {
+	c := Counts{Findings: len(findings)}
+	for _, f := range findings {
+		switch f.State {
+		case review.StateAccepted:
+			c.Accepted++
+		case review.StatePublished, review.StateFellBack:
+			c.Accepted++
+			c.Published++
+		case review.StatePending:
+			c.Pending++
+		case review.StateRejected:
+			c.Rejected++
+		}
+	}
+	return c
+}
+
+// Stage names where a review stands: triage while findings are pending,
+// publish while accepted ones wait to be posted, then published (or clean
+// when nothing was found).
+func (c Counts) Stage() string {
+	switch {
+	case c.Findings == 0:
+		return "clean"
+	case c.Pending > 0:
+		return "triage"
+	case c.Accepted > c.Published:
+		return "publish"
+	case c.Published > 0:
+		return "published"
+	default:
+		return "triaged"
+	}
 }
 
 var nameRe = regexp.MustCompile(`^review-\d+-\d+\.json$`)
@@ -143,26 +188,14 @@ func (s *Store) List(ref string) ([]Entry, error) {
 		if err != nil || (ref != "" && rec.Ref != ref) {
 			continue
 		}
-		e := Entry{
-			Path:     path,
-			Ref:      rec.Ref,
-			Title:    rec.Title,
-			Started:  rec.Started,
-			LogPath:  rec.LogPath,
-			Findings: len(rec.Findings),
-		}
-		for _, f := range rec.Findings {
-			switch f.State {
-			case review.StateAccepted:
-				e.Accepted++
-			case review.StatePublished, review.StateFellBack:
-				e.Accepted++
-				e.Published++
-			case review.StatePending:
-				e.Pending++
-			}
-		}
-		out = append(out, e)
+		out = append(out, Entry{
+			Path:    path,
+			Ref:     rec.Ref,
+			Title:   rec.Title,
+			Started: rec.Started,
+			LogPath: rec.LogPath,
+			Counts:  CountFindings(rec.Findings),
+		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if !out[i].Started.Equal(out[j].Started) {
@@ -186,4 +219,113 @@ func (s *Store) LatestBlocking(ref string, min review.Severity) (int, error) {
 		return 0, err
 	}
 	return review.CountBlocking(rec.Findings, min), nil
+}
+
+// LatestByRef returns the newest stored entry per MR ref, from one scan of
+// the store.
+func (s *Store) LatestByRef() (map[string]Entry, error) {
+	entries, err := s.List("")
+	latest := map[string]Entry{}
+	for _, e := range entries {
+		if _, ok := latest[e.Ref]; !ok {
+			latest[e.Ref] = e
+		}
+	}
+	return latest, err
+}
+
+// SafeFile validates a user-supplied record or log reference: it must be a
+// bare review-*<ext> file name, resolved inside dir, so a reference can
+// never reach outside the reviews directory.
+func SafeFile(dir, name, ext string) (string, error) {
+	if name == "" || name != filepath.Base(name) || !strings.HasPrefix(name, "review-") || !strings.HasSuffix(name, ext) {
+		return "", fmt.Errorf("invalid file reference %q", name)
+	}
+	return filepath.Join(dir, name), nil
+}
+
+// Resolve maps a record name, as listed by List (the base name of an
+// entry's Path), to its path inside the store.
+func (s *Store) Resolve(name string) (string, error) {
+	if s == nil {
+		return "", errors.New("no result store")
+	}
+	return SafeFile(s.dir, name, ".json")
+}
+
+// Triage applies one curation action to the record's findings: accept or
+// reject the finding with id, accept-all (every pending finding becomes
+// accepted), or edit (replace the finding's body with the trimmed body).
+// It fails on an unknown action, an id that matches no finding, or an empty
+// edit body, leaving the record unchanged.
+func (r *Record) Triage(action, id, body string) error {
+	if action == "accept-all" {
+		for i := range r.Findings {
+			if r.Findings[i].State == review.StatePending {
+				r.Findings[i].State = review.StateAccepted
+			}
+		}
+		return nil
+	}
+	f := r.Finding(id)
+	if f == nil {
+		return fmt.Errorf("no finding with id %q in this review", id)
+	}
+	switch action {
+	case "accept":
+		f.State = review.StateAccepted
+	case "reject":
+		f.State = review.StateRejected
+	case "edit":
+		body = strings.TrimSpace(body)
+		if body == "" {
+			return errors.New("the edited body is empty")
+		}
+		f.Body = body
+	default:
+		return fmt.Errorf("unknown triage action %q", action)
+	}
+	return nil
+}
+
+// SetState records a publish outcome on every finding with id.
+func (r *Record) SetState(id string, state review.FindingState) {
+	for i := range r.Findings {
+		if r.Findings[i].ID == id {
+			r.Findings[i].State = state
+		}
+	}
+}
+
+func (r *Record) Finding(id string) *review.Finding {
+	for i := range r.Findings {
+		if r.Findings[i].ID == id {
+			return &r.Findings[i]
+		}
+	}
+	return nil
+}
+
+// ApprovalBlockedError reports an approval refused by a block-mode gate.
+type ApprovalBlockedError struct {
+	Blocking    int
+	MinSeverity string
+}
+
+func (e *ApprovalBlockedError) Error() string {
+	return fmt.Sprintf("approval blocked: %d finding(s) at or above %s in the last review (gate.approvals: block)", e.Blocking, e.MinSeverity)
+}
+
+// CheckApproval enforces a block-mode severity gate on approving ref: an
+// *ApprovalBlockedError when the MR's newest stored review still has
+// blocking findings, nil otherwise. Warn and off modes never block, and an
+// unreadable store does not either, matching the frontends' behaviour.
+func (s *Store) CheckApproval(gate config.Gate, ref string) error {
+	if !gate.Enabled() || gate.Approvals != "block" {
+		return nil
+	}
+	if n, err := s.LatestBlocking(ref, review.Severity(gate.MinSeverity)); err == nil && n > 0 {
+		return &ApprovalBlockedError{Blocking: n, MinSeverity: gate.MinSeverity}
+	}
+	return nil
 }

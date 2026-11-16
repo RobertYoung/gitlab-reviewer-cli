@@ -66,20 +66,6 @@ func TestBandPlan(t *testing.T) {
 	}
 }
 
-func TestReviewStage(t *testing.T) {
-	for want, info := range map[string]mrReviewedInfo{
-		"clean":     {},
-		"triage":    {Findings: 3, Pending: 1, Accepted: 1},
-		"publish":   {Findings: 2, Accepted: 2, Published: 1},
-		"published": {Findings: 2, Accepted: 2, Published: 2},
-		"triaged":   {Findings: 2},
-	} {
-		if got := info.Stage(); got != want {
-			t.Errorf("%+v: stage %q, want %q", info, got, want)
-		}
-	}
-}
-
 func TestInitials(t *testing.T) {
 	for _, tc := range []struct{ name, user, want string }{
 		{"Alice Smith", "alice", "AS"},

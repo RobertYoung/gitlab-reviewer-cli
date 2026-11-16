@@ -425,29 +425,9 @@ func (s *Server) handleFindingState(w http.ResponseWriter, r *http.Request, d *D
 		return
 	}
 	id, action := r.FormValue("id"), r.FormValue("action")
-	for i := range rec.Findings {
-		f := &rec.Findings[i]
-		switch action {
-		case "accept-all":
-			if f.State == review.StatePending {
-				f.State = review.StateAccepted
-			}
-		case "accept":
-			if f.ID == id {
-				f.State = review.StateAccepted
-			}
-		case "reject":
-			if f.ID == id {
-				f.State = review.StateRejected
-			}
-		case "edit":
-			if f.ID == id {
-				if body := strings.TrimSpace(r.FormValue("body")); body != "" {
-					f.Body = body
-				}
-			}
-		}
-	}
+	// The GUI has always treated a stale id or an empty edit as a no-op
+	// rather than an error page; the record is re-saved either way.
+	_ = rec.Triage(action, id, r.FormValue("body"))
 	if err := d.Results.Save(rec); err != nil {
 		s.renderError(w, http.StatusInternalServerError, err)
 		return
@@ -616,34 +596,20 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request, d *Deps) 
 	}
 
 	key := mrKey(inst, project, iid)
-	for _, f := range items {
-		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-		state, err := pub.PublishOne(ctx, f)
-		cancel()
-		res := publishResult{F: f, State: state}
-		if err != nil {
-			res.Err = err.Error()
-			content.Failed++
+	results := pub.PublishAll(r.Context(), items)
+	content.Inline, content.Notes, content.Failed = publisher.Tally(results)
+	for _, res := range results {
+		item := publishResult{F: res.Finding, State: res.State}
+		if res.Err != nil {
+			item.Err = res.Err.Error()
 		}
-		switch {
-		case state == review.StatePublished && f.File == "":
-			content.Notes++
-		case state == review.StatePublished:
-			content.Inline++
-		case state == review.StateFellBack:
-			content.Notes++
-		}
-		content.Results = append(content.Results, res)
+		content.Results = append(content.Results, item)
 		// Report the outcome where the item lives: the stored record, or
 		// the pending comment list.
 		if rec != nil {
-			for i := range rec.Findings {
-				if rec.Findings[i].ID == f.ID {
-					rec.Findings[i].State = state
-				}
-			}
+			rec.SetState(res.Finding.ID, res.State)
 		} else {
-			s.comments.setState(key, f.ID, state)
+			s.comments.setState(key, res.Finding.ID, res.State)
 		}
 	}
 	if rec != nil {
