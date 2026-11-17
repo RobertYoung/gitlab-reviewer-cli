@@ -137,7 +137,7 @@ func TestBuildUserPromptShape(t *testing.T) {
 		"these categories: bug, security",
 		"Focus on concurrency.",
 		"--- a/c.go", "+++ b/c.go",
-		"vendor/big.go", "excluded from review by configuration",
+		"vendor/big.go", "excluded from review by configuration", "Read them when a finding depends",
 		"huge.go: diff at .review-diffs/001-huge.go.diff",
 		"massive.sql", "could not provide",
 	} {

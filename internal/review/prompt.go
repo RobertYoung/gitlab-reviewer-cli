@@ -21,6 +21,7 @@ Reporting rules:
 - Only report findings you are confident about. Prefer a few high-value
   findings over many speculative ones. Do not pad: an empty findings list is
   a valid review.
+- Before reporting a finding that rests on how a called function or library behaves (what it returns, which errors it swallows, whether it retries or panics), Read its source in the checkout, including vendor/, or in the module cache. Do not infer the behaviour from the call site or the function's name.
 - Anchor every finding on a line that appears in the diff (a changed line
   where possible). Use repository-relative file paths exactly as they appear
   in the diff headers.
@@ -141,7 +142,7 @@ func BuildUserPrompt(req Request) string {
 	}
 
 	if len(req.Excluded) > 0 {
-		b.WriteString("\nThe following changed files are excluded from review by configuration\n(lockfiles, vendored or generated code). Ignore them unless other changes\ndepend on them:\n")
+		b.WriteString("\nThe following changed files are excluded from review by configuration (lockfiles, vendored or generated code). Do not review them, but they are in the checkout, so Read them when a finding depends on how their code behaves:\n")
 		for _, f := range req.Excluded {
 			fmt.Fprintf(&b, "- %s\n", f)
 		}
